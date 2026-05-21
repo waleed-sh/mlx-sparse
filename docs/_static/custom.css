@@ -1,0 +1,44 @@
+/* mlx-sparse documentation custom styles
+ *
+ * The secondary sidebar (page-TOC) is disabled in conf.py.
+ * These rules remove the PyData theme's default content max-width cap so
+ * the article fills the full space between the navigation sidebar and the
+ * right edge of the page.
+ */
+
+
+:root {
+    --pst-content-max-width: none;
+}
+
+.bd-article-container {
+    max-width: none;
+    width: 100%;
+}
+
+article.bd-article {
+    max-width: none;
+}
+
+.bd-page-width {
+    max-width: 1600px;
+}
+
+code.literal {
+    background-color: var(--pst-color-surface);
+    padding: 0.1em 0.3em;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+dl.field-list > dt {
+    font-weight: 600;
+}
+
+.admonition.note {
+    border-left: 4px solid var(--pst-color-info);
+}
+
+.admonition.warning {
+    border-left: 4px solid var(--pst-color-warning);
+}

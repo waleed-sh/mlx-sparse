@@ -1,0 +1,96 @@
+[build-system]
+requires = [
+    "setuptools>=80",
+    "setuptools-scm>=8",
+    "wheel",
+    "cmake>=3.27",
+    "nanobind>=2.0",
+    "mlx>=0.31",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlx-sparse"
+dynamic = ["version"]
+description = "Sparse array containers and primitives for MLX"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "mlx-sparse contributors" },
+]
+dependencies = [
+    "mlx>=0.31",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "black>=26.5.0",
+    "isort>=6",
+    "nanobind>=2.0",
+    "numpy>=1.26",
+    "pre-commit>=4",
+    "pytest>=8",
+    "pytest-cov>=6",
+    "scipy>=1.11",
+]
+bench = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+]
+docs = [
+    "sphinx>=8,<10",
+    "pydata-sphinx-theme>=0.16",
+    "myst-nb>=1.4",
+]
+
+[tool.setuptools_scm]
+# Version is read from the most recent git tag (e.g. v0.0.1b0 -> 0.0.1b0).
+# _version.py is generated at build/install time and must not be committed.
+version_file = "mlx_sparse/_version.py"
+# Strip the local +gABCDEF suffix so PyPI accepts the upload.
+local_scheme = "no-local-version"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mlx_sparse*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "cpu_only: forces CPU execution for CPU-specific regression coverage",
+    "gpu: requires an available GPU device",
+    "metal: requires an available Metal GPU device",
+    "native: requires the compiled mlx_sparse native extension",
+    "performance: deterministic microbenchmarks with lenient regression thresholds",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["mlx_sparse"]
+omit = [
+    "mlx_sparse/_version.py",
+]
+
+[tool.coverage.report]
+fail_under = 88
+show_missing = true
+skip_covered = true
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+
+[tool.setuptools.package-data]
+mlx_sparse = ["*.metallib"]
+
+[tool.sphinx]
+# python -m sphinx -b html docs/ docs/_build/html
+source_dir = "docs/"
+build_dir = "docs/_build"

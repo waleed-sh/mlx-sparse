@@ -1,0 +1,137 @@
+Installation
+============
+
+Installing from PyPI
+---------------------
+
+For users, the normal installation path is PyPI:
+
+.. code-block:: bash
+
+   python -m pip install mlx-sparse
+
+This installs ``mlx-sparse`` and its runtime dependency on MLX. On supported
+macOS/Apple Silicon machines, the wheel includes the native extension and Metal
+library needed for CPU and GPU sparse kernels.
+
+Installing from source (editable)
+----------------------------------
+
+For contributors, install directly from the repository root in editable mode.
+This compiles the C++ extension and Metal library in-place and installs the
+development tools.
+
+Requirements
+~~~~~~~~~~~~~~~
+
+.. list-table::
+   :widths: 25 75
+   :header-rows: 1
+
+   * - Requirement
+     - Notes
+   * - macOS 14+
+     - Sequoia (macOS 15) is tested in CI. The Metal GPU path requires a
+       device that supports Metal 3. CPU-only usage works on any supported
+       macOS.
+   * - Apple Silicon
+     - M1 or newer. Intel Macs are not tested and the Metal backend will not
+       activate.
+   * - Python ≥ 3.10
+     - Tested under Python 3.12 in CI.
+   * - MLX ≥ 0.31
+     - Installed automatically by ``pip install mlx-sparse``. Source builds use
+       ``python -m mlx --cmake-dir`` to locate the MLX package.
+   * - CMake ≥ 3.27
+     - Required only when building from source.
+   * - nanobind ≥ 2.0
+     - Python/C++ binding layer used by source builds.
+
+
+Local install
+~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   # 1. Clone the repository.
+   git clone https://github.com/ml-explore/mlx-sparse
+   cd mlx-sparse
+
+   # 2. (Optional) create and activate a virtual environment.
+   python -m venv .venv
+   source .venv/bin/activate
+
+   # 3. Install in editable mode with development extras.
+   python -m pip install -e ".[dev]"
+
+The ``dev`` extras include ``pytest``, ``numpy``, ``scipy``, ``black``,
+``isort``, and ``pre-commit``.
+
+For documentation builds, install the ``docs`` extras instead:
+
+.. code-block:: bash
+
+   python -m pip install -e ".[docs]"
+
+Verifying the installation
+---------------------------
+
+.. code-block:: python
+
+   import mlx.core as mx
+   import mlx_sparse as ms
+
+   # Check that the native extension compiled successfully.
+   print("Native extension available:", ms.is_available())
+
+   # Quick smoke test: identity_like passes a tensor through the extension.
+   x = mx.array([1.0, 2.0, 3.0])
+   y = ms.identity_like(x)
+   mx.eval(y)
+   print(y)  # [1.0, 2.0, 3.0]
+
+If ``ms.is_available()`` returns ``False``, the extension did not compile.
+For an editable source install, re-run ``python -m pip install -e .`` and check
+that CMake, nanobind, and MLX are all accessible in the same virtual
+environment. The fallback Python implementations in ``mlx_sparse._fallback``
+remain functional, but they are not graph-safe for large workloads.
+
+Running the test suite
+-----------------------
+
+.. code-block:: bash
+
+   python -m pytest tests --cov=mlx_sparse --cov-report=term-missing --cov-fail-under=88
+
+The test suite runs on whichever device MLX selects by default. To force a
+specific device:
+
+.. code-block:: bash
+
+   MLX_SPARSE_TEST_DEVICE=cpu pytest   # CPU only
+   MLX_SPARSE_TEST_DEVICE=gpu pytest   # GPU only (skips if unavailable)
+
+Tests marked ``native`` are skipped if the compiled extension is not present.
+Tests marked ``performance`` run small deterministic microbenchmarks with
+lenient regression thresholds; tune them with ``MLX_SPARSE_PERF_*``
+environment variables if you need to calibrate a slower CI host. To run only
+the performance regression checks:
+
+.. code-block:: bash
+
+   python -m pytest tests/test_performance_regression.py
+
+Building the documentation
+---------------------------
+
+.. code-block:: bash
+
+   python -m pip install -e ".[docs]"
+   python -m sphinx -b html docs/ docs/_build/html
+   open docs/_build/html/index.html
+
+.. note::
+
+   The Sphinx build imports ``mlx_sparse``, so the package must be installed
+   (or on ``sys.path``) before running Sphinx. With an editable install the
+   package is already importable.
