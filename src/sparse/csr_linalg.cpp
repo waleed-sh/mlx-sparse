@@ -56,8 +56,7 @@ public:
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSRCG &>(other);
     return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ &&
-           rtol_ == rhs.rtol_ && atol_ == rhs.atol_ &&
-           maxiter_ == rhs.maxiter_;
+           rtol_ == rhs.rtol_ && atol_ == rhs.atol_ && maxiter_ == rhs.maxiter_;
   }
 
 private:
@@ -84,8 +83,8 @@ public:
 
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSRLanczos &>(other);
-    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ &&
-           k_ == rhs.k_ && reorthogonalize_ == rhs.reorthogonalize_;
+    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ && k_ == rhs.k_ &&
+           reorthogonalize_ == rhs.reorthogonalize_;
   }
 
 private:
@@ -224,15 +223,15 @@ std::vector<double> solve_dense_system(std::vector<double> a,
     int pivot = col;
     double pivot_abs = std::abs(a[static_cast<size_t>(col) * n + col]);
     for (int row = col + 1; row < n; ++row) {
-      const double candidate =
-          std::abs(a[static_cast<size_t>(row) * n + col]);
+      const double candidate = std::abs(a[static_cast<size_t>(row) * n + col]);
       if (candidate > pivot_abs) {
         pivot_abs = candidate;
         pivot = row;
       }
     }
     if (pivot_abs <= std::numeric_limits<double>::epsilon()) {
-      throw std::runtime_error("small dense solve encountered a singular matrix.");
+      throw std::runtime_error(
+          "small dense solve encountered a singular matrix.");
     }
     if (pivot != col) {
       for (int j = col; j < n; ++j) {
@@ -259,11 +258,10 @@ std::vector<double> solve_dense_system(std::vector<double> a,
   for (int row = n - 1; row >= 0; --row) {
     double sum = b[static_cast<size_t>(row)];
     for (int col = row + 1; col < n; ++col) {
-      sum -= a[static_cast<size_t>(row) * n + col] *
-             x[static_cast<size_t>(col)];
+      sum -=
+          a[static_cast<size_t>(row) * n + col] * x[static_cast<size_t>(col)];
     }
-    x[static_cast<size_t>(row)] =
-        sum / a[static_cast<size_t>(row) * n + row];
+    x[static_cast<size_t>(row)] = sum / a[static_cast<size_t>(row) * n + row];
   }
   return x;
 }
@@ -337,9 +335,8 @@ jacobi_symmetric(std::vector<float> a, int n) {
     const float aqq = a[static_cast<size_t>(q) * n + q];
     const float apq = a[static_cast<size_t>(p) * n + q];
     const float tau = (aqq - app) / (2.0f * apq);
-    const float t =
-        (tau >= 0.0f ? 1.0f : -1.0f) /
-        (std::abs(tau) + std::sqrt(1.0f + tau * tau));
+    const float t = (tau >= 0.0f ? 1.0f : -1.0f) /
+                    (std::abs(tau) + std::sqrt(1.0f + tau * tau));
     const float c = 1.0f / std::sqrt(1.0f + t * t);
     const float s = t * c;
     for (int k = 0; k < n; ++k) {
@@ -378,7 +375,8 @@ std::vector<int> select_ritz_indices(const std::vector<float> &values, int k,
         return std::abs(values[static_cast<size_t>(lhs)]) <
                std::abs(values[static_cast<size_t>(rhs)]);
       }
-      return values[static_cast<size_t>(lhs)] < values[static_cast<size_t>(rhs)];
+      return values[static_cast<size_t>(lhs)] <
+             values[static_cast<size_t>(rhs)];
     });
   } else {
     std::sort(order.begin(), order.end(), [&](int lhs, int rhs) {
@@ -386,7 +384,8 @@ std::vector<int> select_ritz_indices(const std::vector<float> &values, int k,
         return std::abs(values[static_cast<size_t>(lhs)]) >
                std::abs(values[static_cast<size_t>(rhs)]);
       }
-      return values[static_cast<size_t>(lhs)] > values[static_cast<size_t>(rhs)];
+      return values[static_cast<size_t>(lhs)] >
+             values[static_cast<size_t>(rhs)];
     });
   }
   order.resize(static_cast<size_t>(k));
@@ -408,8 +407,7 @@ host_lanczos_operator(int n, int steps, Apply &&apply) {
   for (int j = 0; j < steps; ++j) {
     std::vector<float> q(static_cast<size_t>(n));
     for (int row = 0; row < n; ++row) {
-      q[static_cast<size_t>(row)] =
-          basis[static_cast<size_t>(row) * steps + j];
+      q[static_cast<size_t>(row)] = basis[static_cast<size_t>(row) * steps + j];
     }
     auto w = apply(q);
     if (j > 0) {
@@ -510,8 +508,7 @@ void csr_cg_cpu_impl(const mx::array &data, const mx::array &indices,
     std::vector<float> ap(static_cast<size_t>(n_rows));
     std::copy(x0_ptr, x0_ptr + n_rows, x_ptr);
 
-    csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, x_ptr, ap.data(),
-                   n_rows);
+    csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, x_ptr, ap.data(), n_rows);
     for (int i = 0; i < n_rows; ++i) {
       r[i] = b_ptr[i] - ap[i];
       p[i] = r[i];
@@ -574,9 +571,9 @@ void csr_cg_cpu_impl(const mx::array &data, const mx::array &indices,
 template <typename I>
 void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
                           const mx::array &indptr, const mx::array &v0,
-                          mx::array &alphas, mx::array &betas,
-                          mx::array &basis, mx::array &actual, int n_rows,
-                          int k, bool reorthogonalize, mx::Stream stream) {
+                          mx::array &alphas, mx::array &betas, mx::array &basis,
+                          mx::array &actual, int n_rows, int k,
+                          bool reorthogonalize, mx::Stream stream) {
   alphas.set_data(mx::allocator::malloc(alphas.nbytes()));
   betas.set_data(mx::allocator::malloc(betas.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
@@ -616,7 +613,8 @@ void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
 
     double v_norm2 = 0.0;
     for (int i = 0; i < n_rows; ++i) {
-      v_norm2 += static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
+      v_norm2 +=
+          static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
     }
     float v_norm = std::sqrt(std::max(v_norm2, 0.0));
     if (v_norm <= std::numeric_limits<float>::epsilon()) {
@@ -719,7 +717,8 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
 
     double v_norm2 = 0.0;
     for (int i = 0; i < n_rows; ++i) {
-      v_norm2 += static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
+      v_norm2 +=
+          static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
     }
     float v_norm = std::sqrt(std::max(v_norm2, 0.0));
     if (v_norm <= std::numeric_limits<float>::epsilon()) {
@@ -748,8 +747,7 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
           for (int row = 0; row < n_rows; ++row) {
             coeff += basis_ptr[static_cast<size_t>(row) * cols + col] * w[row];
           }
-          h_ptr[static_cast<size_t>(col) * k + j] +=
-              static_cast<float>(coeff);
+          h_ptr[static_cast<size_t>(col) * k + j] += static_cast<float>(coeff);
           for (int row = 0; row < n_rows; ++row) {
             w[row] -= static_cast<float>(coeff) *
                       basis_ptr[static_cast<size_t>(row) * cols + col];
@@ -779,8 +777,8 @@ void require_linalg_float32(const mx::array &array, const char *name) {
 
 void require_inner_product_dtype(const mx::array &array, const char *name) {
   if (array.dtype() != mx::float32 && array.dtype() != mx::complex64) {
-    throw std::invalid_argument(
-        std::string(name) + " requires dtype float32 or complex64.");
+    throw std::invalid_argument(std::string(name) +
+                                " requires dtype float32 or complex64.");
   }
 }
 
@@ -801,10 +799,9 @@ mx::complex64_t sparse_inner_product_value(mx::complex64_t lhs,
 template <typename I>
 void csr_triangular_solve_cpu_impl(const mx::array &data,
                                    const mx::array &indices,
-                                   const mx::array &indptr,
-                                   const mx::array &b, mx::array &x,
-                                   int n_rows, bool lower, bool unit_diagonal,
-                                   mx::Stream stream) {
+                                   const mx::array &indptr, const mx::array &b,
+                                   mx::array &x, int n_rows, bool lower,
+                                   bool unit_diagonal, mx::Stream stream) {
   x.set_data(mx::allocator::malloc(x.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -840,7 +837,8 @@ void csr_triangular_solve_cpu_impl(const mx::array &data,
         }
         if (!unit_diagonal &&
             std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
-          throw std::runtime_error("csr_triangular_solve encountered a zero diagonal.");
+          throw std::runtime_error(
+              "csr_triangular_solve encountered a zero diagonal.");
         }
         x_ptr[row] = unit_diagonal ? sum : sum / diag;
       }
@@ -858,7 +856,8 @@ void csr_triangular_solve_cpu_impl(const mx::array &data,
         }
         if (!unit_diagonal &&
             std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
-          throw std::runtime_error("csr_triangular_solve encountered a zero diagonal.");
+          throw std::runtime_error(
+              "csr_triangular_solve encountered a zero diagonal.");
         }
         x_ptr[row] = unit_diagonal ? sum : sum / diag;
       }
@@ -870,8 +869,8 @@ template <typename T, typename I>
 void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
                        const mx::array &lhs_indptr, const mx::array &rhs_data,
                        const mx::array &rhs_indices,
-                       const mx::array &rhs_indptr, mx::array &out,
-                       int n_rows, bool conjugate_lhs, mx::Stream stream) {
+                       const mx::array &rhs_indptr, mx::array &out, int n_rows,
+                       bool conjugate_lhs, mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -889,8 +888,8 @@ void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
                     rhs_data = mx::array::unsafe_weak_copy(rhs_data),
                     rhs_indices = mx::array::unsafe_weak_copy(rhs_indices),
                     rhs_indptr = mx::array::unsafe_weak_copy(rhs_indptr),
-                    out = mx::array::unsafe_weak_copy(out),
-                    n_rows, conjugate_lhs]() mutable {
+                    out = mx::array::unsafe_weak_copy(out), n_rows,
+                    conjugate_lhs]() mutable {
     const auto *lhs_data_ptr = lhs_data.data<T>();
     const auto *lhs_indices_ptr = lhs_indices.data<I>();
     const auto *lhs_indptr_ptr = lhs_indptr.data<I>();
@@ -908,7 +907,7 @@ void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
       while (lp < lend && rp < rend) {
         const I lc = lhs_indices_ptr[lp];
         const I rc = rhs_indices_ptr[rp];
-      if (lc == rc) {
+        if (lc == rc) {
           if constexpr (std::is_same_v<T, mx::complex64_t>) {
             const std::complex<float> lhs_value(lhs_data_ptr[lp]);
             const std::complex<float> rhs_value(rhs_data_ptr[rp]);
@@ -929,9 +928,8 @@ void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
       }
     }
     if constexpr (std::is_same_v<T, mx::complex64_t>) {
-      *out.data<T>() =
-          mx::complex64_t(static_cast<float>(acc.real()),
-                          static_cast<float>(acc.imag()));
+      *out.data<T>() = mx::complex64_t(static_cast<float>(acc.real()),
+                                       static_cast<float>(acc.imag()));
     } else {
       *out.data<T>() = static_cast<T>(acc);
     }
@@ -964,12 +962,12 @@ std::tuple<mx::array, mx::array, mx::array>
 make_csr_arrays_float32(const std::vector<float> &data,
                         const std::vector<I> &indices,
                         const std::vector<I> &indptr, mx::Dtype index_dtype) {
-  return {mx::array(data.begin(),
-                    mx::Shape{static_cast<int>(data.size())}, mx::float32),
+  return {mx::array(data.begin(), mx::Shape{static_cast<int>(data.size())},
+                    mx::float32),
           mx::array(indices.begin(),
                     mx::Shape{static_cast<int>(indices.size())}, index_dtype),
-          mx::array(indptr.begin(),
-                    mx::Shape{static_cast<int>(indptr.size())}, index_dtype)};
+          mx::array(indptr.begin(), mx::Shape{static_cast<int>(indptr.size())},
+                    index_dtype)};
 }
 
 template <typename I>
@@ -996,14 +994,14 @@ template <typename I>
 std::tuple<mx::array, mx::array, mx::array>
 csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
                   int n_rows, int n_cols, mx::Dtype index_dtype) {
-  auto input_rows =
-      read_csr_rows_float32<I>(std::move(data), std::move(indices),
-                               std::move(indptr), n_rows);
+  auto input_rows = read_csr_rows_float32<I>(
+      std::move(data), std::move(indices), std::move(indptr), n_rows);
   std::vector<std::map<int, float>> lower(static_cast<size_t>(n_rows));
   for (int row = 0; row < n_rows; ++row) {
     for (const auto &[col, value] : input_rows[static_cast<size_t>(row)]) {
       if (col < 0 || col >= n_cols) {
-        throw std::invalid_argument("csr_cholesky input contains an out-of-bounds column.");
+        throw std::invalid_argument(
+            "csr_cholesky input contains an out-of-bounds column.");
       }
       if (row >= col) {
         lower[static_cast<size_t>(row)][col] += value;
@@ -1031,8 +1029,7 @@ csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
       if (std::abs(diag[static_cast<size_t>(pivot_col)]) <= eps) {
         throw std::runtime_error("csr_cholesky encountered a zero pivot.");
       }
-      const float factor =
-          it->second / diag[static_cast<size_t>(pivot_col)];
+      const float factor = it->second / diag[static_cast<size_t>(pivot_col)];
       it->second = factor;
       for (const auto &[update_col, update_value] :
            columns[static_cast<size_t>(pivot_col)]) {
@@ -1045,7 +1042,8 @@ csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
     }
     const float diag_value = current[row];
     if (diag_value <= eps) {
-      throw std::runtime_error("csr_cholesky requires a positive-definite matrix.");
+      throw std::runtime_error(
+          "csr_cholesky requires a positive-definite matrix.");
     }
     diag[static_cast<size_t>(row)] = std::sqrt(diag_value);
     current[row] = diag[static_cast<size_t>(row)];
@@ -1061,8 +1059,7 @@ csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
         out_indices.push_back(static_cast<I>(col));
       }
     }
-    out_indptr[static_cast<size_t>(row) + 1] =
-        static_cast<I>(out_data.size());
+    out_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(out_data.size());
   }
   return make_csr_arrays_float32(out_data, out_indices, out_indptr,
                                  index_dtype);
@@ -1089,16 +1086,16 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
     float pivot_abs = 0.0f;
     for (int row = k; row < n_rows; ++row) {
       auto found = rows[static_cast<size_t>(row)].find(k);
-      const float value = found == rows[static_cast<size_t>(row)].end()
-                              ? 0.0f
-                              : found->second;
+      const float value =
+          found == rows[static_cast<size_t>(row)].end() ? 0.0f : found->second;
       if (std::abs(value) > pivot_abs) {
         pivot_abs = std::abs(value);
         pivot_row = row;
       }
     }
     if (pivot_abs <= eps) {
-      throw std::runtime_error("csr_lu encountered a structurally singular pivot.");
+      throw std::runtime_error(
+          "csr_lu encountered a structurally singular pivot.");
     }
     if (pivot_row != k) {
       std::swap(rows[static_cast<size_t>(pivot_row)],
@@ -1152,26 +1149,23 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
         l_indices.push_back(static_cast<I>(col));
       }
     }
-    l_indptr[static_cast<size_t>(row) + 1] =
-        static_cast<I>(l_data.size());
+    l_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(l_data.size());
     for (const auto &[col, value] : U[static_cast<size_t>(row)]) {
       if (col >= row && std::abs(value) > eps) {
         u_data.push_back(value);
         u_indices.push_back(static_cast<I>(col));
       }
     }
-    u_indptr[static_cast<size_t>(row) + 1] =
-        static_cast<I>(u_data.size());
+    u_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(u_data.size());
   }
 
-  auto permutation =
-      mx::array(perm.begin(), mx::Shape{static_cast<int>(perm.size())},
-                mx::int32);
+  auto permutation = mx::array(
+      perm.begin(), mx::Shape{static_cast<int>(perm.size())}, mx::int32);
   auto [l_data_array, l_indices_array, l_indptr_array] =
       make_csr_arrays_float32(l_data, l_indices, l_indptr, index_dtype);
   auto [u_data_array, u_indices_array, u_indptr_array] =
       make_csr_arrays_float32(u_data, u_indices, u_indptr, index_dtype);
-  return {permutation,   l_data_array,   l_indices_array, l_indptr_array,
+  return {permutation,  l_data_array,    l_indices_array, l_indptr_array,
           u_data_array, u_indices_array, u_indptr_array};
 }
 
@@ -1246,9 +1240,8 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
     for (int row = 0; row < n_rows; ++row) {
       double update = 0.0;
       for (int col = 0; col < used; ++col) {
-        update +=
-            basis_ptr[static_cast<size_t>(row) * (steps + 1) + col] *
-            y[static_cast<size_t>(col)];
+        update += basis_ptr[static_cast<size_t>(row) * (steps + 1) + col] *
+                  y[static_cast<size_t>(col)];
       }
       x[static_cast<size_t>(row)] += static_cast<float>(update);
     }
@@ -1268,8 +1261,8 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
 
 template <typename I>
 std::tuple<mx::array, mx::array, mx::array, mx::array>
-csr_minres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
-                mx::array x0, int n_rows, float rtol, float atol,
+csr_minres_impl(mx::array data, mx::array indices, mx::array indptr,
+                mx::array b, mx::array x0, int n_rows, float rtol, float atol,
                 int maxiter) {
   data.eval();
   indices.eval();
@@ -1306,9 +1299,8 @@ csr_minres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b
   auto stream = mx::default_stream(mx::default_device());
 
   // Lanczos tridiagonalisation via GPU kernel
-  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] =
-      csr_lanczos(data, indices, indptr, v0, n_rows, n_rows, steps, true,
-                  stream);
+  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] = csr_lanczos(
+      data, indices, indptr, v0, n_rows, n_rows, steps, true, stream);
   mx::eval(alphas_mx, betas_mx, basis_mx, actual_k_mx);
 
   const int used = static_cast<int>(actual_k_mx.item<int32_t>());
@@ -1363,10 +1355,10 @@ csr_eigsh_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
   auto v0 = mx::array(v0_data.begin(), mx::Shape{n_rows}, mx::float32);
   auto stream = mx::default_stream(mx::default_device());
 
-  // Lanczos tridiagonalisation via GPU kernel (falls back to CPU if no GPU device)
-  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] =
-      csr_lanczos(data, indices, indptr, v0, n_rows, n_rows, steps, true,
-                  stream);
+  // Lanczos tridiagonalisation via GPU kernel (falls back to CPU if no GPU
+  // device)
+  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] = csr_lanczos(
+      data, indices, indptr, v0, n_rows, n_rows, steps, true, stream);
   mx::eval(alphas_mx, betas_mx, basis_mx, actual_k_mx);
 
   const int used = static_cast<int>(actual_k_mx.item<int32_t>());
@@ -1399,8 +1391,7 @@ csr_eigsh_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
         acc += basis_ptr[static_cast<size_t>(row) * steps + j] *
                vectors_small[static_cast<size_t>(j) * used + eig_col];
       }
-      vectors[static_cast<size_t>(row) * k + out_col] =
-          static_cast<float>(acc);
+      vectors[static_cast<size_t>(row) * k + out_col] = static_cast<float>(acc);
     }
   }
   return {mx::array(values.begin(), mx::Shape{k}, mx::float32),
@@ -1421,12 +1412,13 @@ std::vector<float> qr_eigenvalues_real(std::vector<float> h, int n) {
       for (int prev = 0; prev < col; ++prev) {
         double coeff = 0.0;
         for (int row = 0; row < n; ++row) {
-          coeff += q[static_cast<size_t>(row) * n + prev] * v[static_cast<size_t>(row)];
+          coeff += q[static_cast<size_t>(row) * n + prev] *
+                   v[static_cast<size_t>(row)];
         }
         r[static_cast<size_t>(prev) * n + col] = static_cast<float>(coeff);
         for (int row = 0; row < n; ++row) {
-          v[static_cast<size_t>(row)] -=
-              static_cast<float>(coeff) * q[static_cast<size_t>(row) * n + prev];
+          v[static_cast<size_t>(row)] -= static_cast<float>(coeff) *
+                                         q[static_cast<size_t>(row) * n + prev];
         }
       }
       const float v_norm = norm_float(v);
@@ -1517,8 +1509,8 @@ csr_svds_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
   const auto *indices_ptr = indices.data<I>();
   const auto *indptr_ptr = indptr.data<I>();
   const int steps = std::min(n_cols, std::max(ncv, k + 1));
-  auto [tridiagonal, basis, used] = host_lanczos_operator(
-      n_cols, steps, [&](const std::vector<float> &x) {
+  auto [tridiagonal, basis, used] =
+      host_lanczos_operator(n_cols, steps, [&](const std::vector<float> &x) {
         auto ax = host_csr_spmv(data_ptr, indices_ptr, indptr_ptr, x, n_rows);
         return host_csr_spmv_transpose(data_ptr, indices_ptr, indptr_ptr, ax,
                                        n_rows, n_cols);
@@ -1569,14 +1561,14 @@ void CSRCG::eval_cpu(const std::vector<mx::array> &inputs,
 
   if (indices.dtype() == mx::int32) {
     csr_cg_cpu_impl<int32_t>(data, indices, indptr, b, x0, outputs[0],
-                             outputs[1], outputs[2], outputs[3], n_rows_,
-                             rtol_, atol_, maxiter_, stream());
+                             outputs[1], outputs[2], outputs[3], n_rows_, rtol_,
+                             atol_, maxiter_, stream());
     return;
   }
   if (indices.dtype() == mx::int64) {
     csr_cg_cpu_impl<int64_t>(data, indices, indptr, b, x0, outputs[0],
-                             outputs[1], outputs[2], outputs[3], n_rows_,
-                             rtol_, atol_, maxiter_, stream());
+                             outputs[1], outputs[2], outputs[3], n_rows_, rtol_,
+                             atol_, maxiter_, stream());
     return;
   }
   throw std::runtime_error("csr_cg requires int32 or int64 indices.");
@@ -1634,15 +1626,15 @@ void CSRTriangularSolve::eval_cpu(const std::vector<mx::array> &inputs,
   auto &b = inputs[3];
 
   if (indices.dtype() == mx::int32) {
-    csr_triangular_solve_cpu_impl<int32_t>(
-        data, indices, indptr, b, outputs[0], n_rows_, lower_, unit_diagonal_,
-        stream());
+    csr_triangular_solve_cpu_impl<int32_t>(data, indices, indptr, b, outputs[0],
+                                           n_rows_, lower_, unit_diagonal_,
+                                           stream());
     return;
   }
   if (indices.dtype() == mx::int64) {
-    csr_triangular_solve_cpu_impl<int64_t>(
-        data, indices, indptr, b, outputs[0], n_rows_, lower_, unit_diagonal_,
-        stream());
+    csr_triangular_solve_cpu_impl<int64_t>(data, indices, indptr, b, outputs[0],
+                                           n_rows_, lower_, unit_diagonal_,
+                                           stream());
     return;
   }
   throw std::runtime_error(
@@ -1682,8 +1674,8 @@ void CSRVdot::eval_cpu(const std::vector<mx::array> &inputs,
         outputs[0], n_rows_, conjugate_lhs_, stream());
     return;
   }
-  throw std::runtime_error(
-      "csr_vdot requires float32 or complex64 data with int32 or int64 indices.");
+  throw std::runtime_error("csr_vdot requires float32 or complex64 data with "
+                           "int32 or int64 indices.");
 }
 
 void CSRPermuteVector::eval_cpu(const std::vector<mx::array> &inputs,
@@ -1708,14 +1700,15 @@ void CSRCG::eval_gpu(const std::vector<mx::array> &inputs,
   info.set_data(mx::allocator::malloc(info.nbytes()));
   residual.set_data(mx::allocator::malloc(residual.nbytes()));
   iterations.set_data(mx::allocator::malloc(iterations.nbytes()));
-  mx::array work(mx::allocator::malloc(static_cast<size_t>(3 * n_rows_) *
-                                       sizeof(float)),
-                 mx::Shape{3 * n_rows_}, mx::float32);
+  mx::array work(
+      mx::allocator::malloc(static_cast<size_t>(3 * n_rows_) * sizeof(float)),
+      mx::Shape{3 * n_rows_}, mx::float32);
 
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name = sparse_kernel_name("csr_cg", data.dtype(), indices.dtype());
+  auto kernel_name =
+      sparse_kernel_name("csr_cg", data.dtype(), indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -1755,9 +1748,9 @@ void CSRLanczos::eval_gpu(const std::vector<mx::array> &inputs,
   betas.set_data(mx::allocator::malloc(betas.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
   actual.set_data(mx::allocator::malloc(actual.nbytes()));
-  mx::array work(mx::allocator::malloc(static_cast<size_t>(n_rows_) *
-                                       sizeof(float)),
-                 mx::Shape{n_rows_}, mx::float32);
+  mx::array work(
+      mx::allocator::malloc(static_cast<size_t>(n_rows_) * sizeof(float)),
+      mx::Shape{n_rows_}, mx::float32);
 
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
@@ -1800,9 +1793,9 @@ void CSRArnoldi::eval_gpu(const std::vector<mx::array> &inputs,
   h.set_data(mx::allocator::malloc(h.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
   actual.set_data(mx::allocator::malloc(actual.nbytes()));
-  mx::array work(mx::allocator::malloc(static_cast<size_t>(n_rows_) *
-                                       sizeof(float)),
-                 mx::Shape{n_rows_}, mx::float32);
+  mx::array work(
+      mx::allocator::malloc(static_cast<size_t>(n_rows_) * sizeof(float)),
+      mx::Shape{n_rows_}, mx::float32);
 
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
@@ -1877,9 +1870,8 @@ void CSRVdot::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name =
-      sparse_kernel_name(conjugate_lhs_ ? "csr_vdot" : "csr_dot",
-                         lhs_data.dtype(), lhs_indices.dtype());
+  auto kernel_name = sparse_kernel_name(conjugate_lhs_ ? "csr_vdot" : "csr_dot",
+                                        lhs_data.dtype(), lhs_indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -1921,8 +1913,7 @@ void CSRPermuteVector::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
 }
 #else
-void CSRCG::eval_gpu(const std::vector<mx::array> &,
-                     std::vector<mx::array> &) {
+void CSRCG::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
   throw std::runtime_error("csr_cg has no GPU implementation in this build.");
 }
 
@@ -1957,10 +1948,9 @@ void CSRPermuteVector::eval_gpu(const std::vector<mx::array> &,
 #endif
 
 std::tuple<mx::array, mx::array, mx::array, mx::array>
-csr_cg(const mx::array &data, const mx::array &indices,
-       const mx::array &indptr, const mx::array &b, const mx::array &x0,
-       int n_rows, int n_cols, float rtol, float atol, int maxiter,
-       mx::StreamOrDevice s) {
+csr_cg(const mx::array &data, const mx::array &indices, const mx::array &indptr,
+       const mx::array &b, const mx::array &x0, int n_rows, int n_cols,
+       float rtol, float atol, int maxiter, mx::StreamOrDevice s) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_cg requires a non-empty square matrix.");
   }
@@ -1975,13 +1965,13 @@ csr_cg(const mx::array &data, const mx::array &indices,
   require_linalg_float32(data, "csr_cg data");
   require_linalg_float32(b, "csr_cg b");
   require_linalg_float32(x0, "csr_cg x0");
-  require_same_index_dtype(indices, indptr, "csr_cg indices",
-                           "csr_cg indptr");
+  require_same_index_dtype(indices, indptr, "csr_cg indices", "csr_cg indptr");
   require_size(indptr, n_rows + 1, "csr_cg indptr");
   require_size(b, n_rows, "csr_cg b");
   require_size(x0, n_cols, "csr_cg x0");
   if (indices.size() != data.size()) {
-    throw std::invalid_argument("csr_cg data and indices must have equal length.");
+    throw std::invalid_argument(
+        "csr_cg data and indices must have equal length.");
   }
 
   auto stream = mx::to_stream(s);
@@ -2006,7 +1996,8 @@ csr_gmres(const mx::array &data, const mx::array &indices,
           int n_rows, int n_cols, float rtol, float atol, int restart,
           int maxiter) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
-    throw std::invalid_argument("csr_gmres requires a non-empty square matrix.");
+    throw std::invalid_argument(
+        "csr_gmres requires a non-empty square matrix.");
   }
   if (restart <= 0 || maxiter < 0) {
     throw std::invalid_argument(
@@ -2045,7 +2036,8 @@ csr_minres(const mx::array &data, const mx::array &indices,
            const mx::array &indptr, const mx::array &b, const mx::array &x0,
            int n_rows, int n_cols, float rtol, float atol, int maxiter) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
-    throw std::invalid_argument("csr_minres requires a non-empty square matrix.");
+    throw std::invalid_argument(
+        "csr_minres requires a non-empty square matrix.");
   }
   if (maxiter < 0) {
     throw std::invalid_argument("csr_minres maxiter must be non-negative.");
@@ -2068,12 +2060,12 @@ csr_minres(const mx::array &data, const mx::array &indices,
         "csr_minres data and indices must have equal length.");
   }
   if (indices.dtype() == mx::int32) {
-    return csr_minres_impl<int32_t>(data, indices, indptr, b, x0, n_rows,
-                                    rtol, atol, maxiter);
+    return csr_minres_impl<int32_t>(data, indices, indptr, b, x0, n_rows, rtol,
+                                    atol, maxiter);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_minres_impl<int64_t>(data, indices, indptr, b, x0, n_rows,
-                                    rtol, atol, maxiter);
+    return csr_minres_impl<int64_t>(data, indices, indptr, b, x0, n_rows, rtol,
+                                    atol, maxiter);
   }
   throw std::runtime_error("csr_minres requires int32 or int64 indices.");
 }
@@ -2159,12 +2151,14 @@ csr_arnoldi(const mx::array &data, const mx::array &indices,
   return {outputs[0], outputs[1], outputs[2]};
 }
 
-std::tuple<mx::array, mx::array>
-csr_eigsh(const mx::array &data, const mx::array &indices,
-          const mx::array &indptr, int n_rows, int n_cols, int k, int ncv,
-          const std::string &which) {
+std::tuple<mx::array, mx::array> csr_eigsh(const mx::array &data,
+                                           const mx::array &indices,
+                                           const mx::array &indptr, int n_rows,
+                                           int n_cols, int k, int ncv,
+                                           const std::string &which) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
-    throw std::invalid_argument("csr_eigsh requires a non-empty square matrix.");
+    throw std::invalid_argument(
+        "csr_eigsh requires a non-empty square matrix.");
   }
   if (k <= 0 || k >= n_rows) {
     throw std::invalid_argument("csr_eigsh k must satisfy 0 < k < n_rows.");
@@ -2192,10 +2186,11 @@ csr_eigsh(const mx::array &data, const mx::array &indices,
   throw std::runtime_error("csr_eigsh requires int32 or int64 indices.");
 }
 
-std::tuple<mx::array, mx::array>
-csr_eigs(const mx::array &data, const mx::array &indices,
-         const mx::array &indptr, int n_rows, int n_cols, int k, int ncv,
-         const std::string &which) {
+std::tuple<mx::array, mx::array> csr_eigs(const mx::array &data,
+                                          const mx::array &indices,
+                                          const mx::array &indptr, int n_rows,
+                                          int n_cols, int k, int ncv,
+                                          const std::string &which) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_eigs requires a non-empty square matrix.");
   }
@@ -2215,12 +2210,10 @@ csr_eigs(const mx::array &data, const mx::array &indices,
   }
   ncv = std::min(n_rows, std::max(ncv, k + 1));
   if (indices.dtype() == mx::int32) {
-    return csr_eigs_impl<int32_t>(data, indices, indptr, n_rows, k, ncv,
-                                  which);
+    return csr_eigs_impl<int32_t>(data, indices, indptr, n_rows, k, ncv, which);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_eigs_impl<int64_t>(data, indices, indptr, n_rows, k, ncv,
-                                  which);
+    return csr_eigs_impl<int64_t>(data, indices, indptr, n_rows, k, ncv, which);
   }
   throw std::runtime_error("csr_eigs requires int32 or int64 indices.");
 }
@@ -2233,8 +2226,7 @@ csr_svds(const mx::array &data, const mx::array &indices,
     throw std::invalid_argument("csr_svds requires a non-empty matrix.");
   }
   if (k <= 0 || k >= std::min(n_rows, n_cols)) {
-    throw std::invalid_argument(
-        "csr_svds k must satisfy 0 < k < min(shape).");
+    throw std::invalid_argument("csr_svds k must satisfy 0 < k < min(shape).");
   }
   require_rank(data, 1, "csr_svds data");
   require_rank(indices, 1, "csr_svds indices");
@@ -2249,12 +2241,12 @@ csr_svds(const mx::array &data, const mx::array &indices,
   }
   ncv = std::min(n_cols, std::max(ncv, k + 1));
   if (indices.dtype() == mx::int32) {
-    return csr_svds_impl<int32_t>(data, indices, indptr, n_rows, n_cols, k,
-                                  ncv, which);
+    return csr_svds_impl<int32_t>(data, indices, indptr, n_rows, n_cols, k, ncv,
+                                  which);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_svds_impl<int64_t>(data, indices, indptr, n_rows, n_cols, k,
-                                  ncv, which);
+    return csr_svds_impl<int64_t>(data, indices, indptr, n_rows, n_cols, k, ncv,
+                                  which);
   }
   throw std::runtime_error("csr_svds requires int32 or int64 indices.");
 }
@@ -2290,8 +2282,8 @@ csr_cholesky(const mx::array &data, const mx::array &indices,
 
 std::tuple<mx::array, mx::array, mx::array, mx::array, mx::array, mx::array,
            mx::array>
-csr_lu(const mx::array &data, const mx::array &indices,
-       const mx::array &indptr, int n_rows, int n_cols) {
+csr_lu(const mx::array &data, const mx::array &indices, const mx::array &indptr,
+       int n_rows, int n_cols) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_lu requires a non-empty square matrix.");
   }
@@ -2299,11 +2291,11 @@ csr_lu(const mx::array &data, const mx::array &indices,
   require_rank(indices, 1, "csr_lu indices");
   require_rank(indptr, 1, "csr_lu indptr");
   require_linalg_float32(data, "csr_lu data");
-  require_same_index_dtype(indices, indptr, "csr_lu indices",
-                           "csr_lu indptr");
+  require_same_index_dtype(indices, indptr, "csr_lu indices", "csr_lu indptr");
   require_size(indptr, n_rows + 1, "csr_lu indptr");
   if (indices.size() != data.size()) {
-    throw std::invalid_argument("csr_lu data and indices must have equal length.");
+    throw std::invalid_argument(
+        "csr_lu data and indices must have equal length.");
   }
   if (indices.dtype() == mx::int32) {
     return csr_lu_impl<int32_t>(data, indices, indptr, n_rows, n_cols,
@@ -2345,11 +2337,10 @@ mx::array csr_triangular_solve(const mx::array &data, const mx::array &indices,
   auto indptr_contig = mx::contiguous(indptr, false, stream);
   auto b_contig = mx::contiguous(b, false, stream);
 
-  return mx::array(
-      mx::Shape{n_rows}, mx::float32,
-      std::make_shared<CSRTriangularSolve>(stream, n_rows, n_cols, lower,
-                                           unit_diagonal),
-      {data_contig, indices_contig, indptr_contig, b_contig});
+  return mx::array(mx::Shape{n_rows}, mx::float32,
+                   std::make_shared<CSRTriangularSolve>(stream, n_rows, n_cols,
+                                                        lower, unit_diagonal),
+                   {data_contig, indices_contig, indptr_contig, b_contig});
 }
 
 mx::array csr_inner_product(const mx::array &lhs_data,
@@ -2357,9 +2348,8 @@ mx::array csr_inner_product(const mx::array &lhs_data,
                             const mx::array &lhs_indptr,
                             const mx::array &rhs_data,
                             const mx::array &rhs_indices,
-                            const mx::array &rhs_indptr, int n_rows,
-                            int n_cols, bool conjugate_lhs,
-                            mx::StreamOrDevice s) {
+                            const mx::array &rhs_indptr, int n_rows, int n_cols,
+                            bool conjugate_lhs, mx::StreamOrDevice s) {
   if (n_rows < 0 || n_cols < 0) {
     throw std::invalid_argument(
         "csr sparse inner product shape dimensions must be non-negative.");
@@ -2405,24 +2395,22 @@ mx::array csr_inner_product(const mx::array &lhs_data,
   return mx::array(
       mx::Shape{}, lhs_data.dtype(),
       std::make_shared<CSRVdot>(stream, n_rows, n_cols, conjugate_lhs),
-      {lhs_data_contig, lhs_indices_contig, lhs_indptr_contig,
-       rhs_data_contig, rhs_indices_contig, rhs_indptr_contig});
+      {lhs_data_contig, lhs_indices_contig, lhs_indptr_contig, rhs_data_contig,
+       rhs_indices_contig, rhs_indptr_contig});
 }
 
 mx::array csr_vdot(const mx::array &lhs_data, const mx::array &lhs_indices,
                    const mx::array &lhs_indptr, const mx::array &rhs_data,
-                   const mx::array &rhs_indices,
-                   const mx::array &rhs_indptr, int n_rows, int n_cols,
-                   mx::StreamOrDevice s) {
+                   const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                   int n_rows, int n_cols, mx::StreamOrDevice s) {
   return csr_inner_product(lhs_data, lhs_indices, lhs_indptr, rhs_data,
                            rhs_indices, rhs_indptr, n_rows, n_cols, true, s);
 }
 
 mx::array csr_dot(const mx::array &lhs_data, const mx::array &lhs_indices,
                   const mx::array &lhs_indptr, const mx::array &rhs_data,
-                  const mx::array &rhs_indices,
-                  const mx::array &rhs_indptr, int n_rows, int n_cols,
-                  mx::StreamOrDevice s) {
+                  const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                  int n_rows, int n_cols, mx::StreamOrDevice s) {
   return csr_inner_product(lhs_data, lhs_indices, lhs_indptr, rhs_data,
                            rhs_indices, rhs_indptr, n_rows, n_cols, false, s);
 }
@@ -2433,7 +2421,8 @@ mx::array csr_permute_vector(const mx::array &x, const mx::array &perm,
   require_rank(perm, 1, "csr_permute_vector perm");
   require_linalg_float32(x, "csr_permute_vector x");
   if (perm.dtype() != mx::int32) {
-    throw std::invalid_argument("csr_permute_vector perm must have dtype int32.");
+    throw std::invalid_argument(
+        "csr_permute_vector perm must have dtype int32.");
   }
   require_size(perm, static_cast<int>(x.size()), "csr_permute_vector perm");
 

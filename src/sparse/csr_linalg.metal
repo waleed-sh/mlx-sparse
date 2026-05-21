@@ -16,7 +16,8 @@
 
 constant uint k_linalg_threads = 256;
 
-inline float reduce_sum_256(float value, threadgroup float *scratch, uint lane) {
+inline float reduce_sum_256(float value, threadgroup float *scratch,
+                            uint lane) {
   scratch[lane] = value;
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint stride = k_linalg_threads / 2; stride > 0; stride >>= 1) {
@@ -70,15 +71,13 @@ inline float vector_dot_f32(device const float *lhs, device const float *rhs,
 template <typename I>
 [[kernel]] void csr_cg_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *b [[buffer(3)]], device const float *x0 [[buffer(4)]],
     device float *x [[buffer(5)]], device int *info [[buffer(6)]],
     device float *residual [[buffer(7)]], device int *iterations [[buffer(8)]],
     device float *work [[buffer(9)]], constant int &n_rows [[buffer(10)]],
-    constant int &n_cols [[buffer(11)]],
-    constant int &maxiter [[buffer(12)]], constant float &rtol [[buffer(13)]],
-    constant float &atol [[buffer(14)]],
+    constant int &n_cols [[buffer(11)]], constant int &maxiter [[buffer(12)]],
+    constant float &rtol [[buffer(13)]], constant float &atol [[buffer(14)]],
     uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   threadgroup float scratch[256];
@@ -186,13 +185,13 @@ template <typename I>
 template <typename I>
 [[kernel]] void csr_lanczos_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *v0 [[buffer(3)]], device float *alphas [[buffer(4)]],
     device float *betas [[buffer(5)]], device float *basis [[buffer(6)]],
     device int *actual [[buffer(7)]], device float *work [[buffer(8)]],
     constant int &n_rows [[buffer(9)]], constant int &n_cols [[buffer(10)]],
-    constant int &k [[buffer(11)]], constant int &reorthogonalize [[buffer(12)]],
+    constant int &k [[buffer(11)]],
+    constant int &reorthogonalize [[buffer(12)]],
     uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   threadgroup float scratch[256];
@@ -217,12 +216,12 @@ template <typename I>
        row += static_cast<int>(k_linalg_threads)) {
     norm_local += v0[row] * v0[row];
   }
-  const float norm0 = sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
+  const float norm0 =
+      sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
   for (int row = static_cast<int>(lane); row < n_rows;
        row += static_cast<int>(k_linalg_threads)) {
-    basis[row * k] = norm0 <= 1.1920928955078125e-7f
-                         ? (row == 0 ? 1.0f : 0.0f)
-                         : v0[row] / norm0;
+    basis[row * k] = norm0 <= 1.1920928955078125e-7f ? (row == 0 ? 1.0f : 0.0f)
+                                                     : v0[row] / norm0;
   }
   if (lane == 0) {
     beta_prev = 0.0f;
@@ -292,7 +291,8 @@ template <typename I>
          row += static_cast<int>(k_linalg_threads)) {
       beta_local += work[row] * work[row];
     }
-    const float beta = sqrt(max(reduce_sum_256(beta_local, scratch, lane), 0.0f));
+    const float beta =
+        sqrt(max(reduce_sum_256(beta_local, scratch, lane), 0.0f));
     if (lane == 0) {
       betas[j] = beta;
       shared_beta = beta;
@@ -321,8 +321,7 @@ template <typename I>
 template <typename I>
 [[kernel]] void csr_arnoldi_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *v0 [[buffer(3)]], device float *h [[buffer(4)]],
     device float *basis [[buffer(5)]], device int *actual [[buffer(6)]],
     device float *work [[buffer(7)]], constant int &n_rows [[buffer(8)]],
@@ -349,7 +348,8 @@ template <typename I>
        row += static_cast<int>(k_linalg_threads)) {
     norm_local += v0[row] * v0[row];
   }
-  const float norm0 = sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
+  const float norm0 =
+      sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
   for (int row = static_cast<int>(lane); row < n_rows;
        row += static_cast<int>(k_linalg_threads)) {
     basis[row * cols] = norm0 <= 1.1920928955078125e-7f
@@ -429,8 +429,7 @@ template <typename I>
 template <typename I>
 [[kernel]] void csr_triangular_solve_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *b [[buffer(3)]], device float *x [[buffer(4)]],
     constant int &n_rows [[buffer(5)]], constant int &n_cols [[buffer(6)]],
     constant int &lower [[buffer(7)]],
@@ -478,15 +477,16 @@ inline complex64_t sparse_conjugate(complex64_t value) {
 inline float sparse_conjugate(float value) { return value; }
 
 template <typename T, typename I, bool ConjugateLhs>
-[[kernel]] void csr_vdot_kernel(
-    device const T *lhs_data [[buffer(0)]],
-    device const I *lhs_indices [[buffer(1)]],
-    device const I *lhs_indptr [[buffer(2)]],
-    device const T *rhs_data [[buffer(3)]],
-    device const I *rhs_indices [[buffer(4)]],
-    device const I *rhs_indptr [[buffer(5)]], device T *out [[buffer(6)]],
-    constant int &n_rows [[buffer(7)]], constant int &n_cols [[buffer(8)]],
-    uint lane [[thread_index_in_threadgroup]]) {
+[[kernel]] void csr_vdot_kernel(device const T *lhs_data [[buffer(0)]],
+                                device const I *lhs_indices [[buffer(1)]],
+                                device const I *lhs_indptr [[buffer(2)]],
+                                device const T *rhs_data [[buffer(3)]],
+                                device const I *rhs_indices [[buffer(4)]],
+                                device const I *rhs_indptr [[buffer(5)]],
+                                device T *out [[buffer(6)]],
+                                constant int &n_rows [[buffer(7)]],
+                                constant int &n_cols [[buffer(8)]],
+                                uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   typedef typename sparse_accumulator<T>::type acc_t;
   threadgroup acc_t scratch[256];
@@ -501,7 +501,8 @@ template <typename T, typename I, bool ConjugateLhs>
       const I lc = lhs_indices[lp];
       const I rc = rhs_indices[rp];
       if (lc == rc) {
-        const T lhs = ConjugateLhs ? sparse_conjugate(lhs_data[lp]) : lhs_data[lp];
+        const T lhs =
+            ConjugateLhs ? sparse_conjugate(lhs_data[lp]) : lhs_data[lp];
         local += sparse_multiply<T>(lhs, rhs_data[rp]);
         ++lp;
         ++rp;
@@ -519,10 +520,11 @@ template <typename T, typename I, bool ConjugateLhs>
 }
 
 [[host_name("csr_permute_vector_float32")]] [[kernel]] void
-csr_permute_vector_float32_kernel(
-    device const float *x [[buffer(0)]], device const int *perm [[buffer(1)]],
-    device float *out [[buffer(2)]], constant int &size [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
+csr_permute_vector_float32_kernel(device const float *x [[buffer(0)]],
+                                  device const int *perm [[buffer(1)]],
+                                  device float *out [[buffer(2)]],
+                                  constant int &size [[buffer(3)]],
+                                  uint tid [[thread_position_in_grid]]) {
   if (static_cast<int>(tid) >= size) {
     return;
   }
@@ -573,16 +575,17 @@ csr_arnoldi_kernel<long>(device const float *, device const long *,
                          constant int &, uint);
 
 template [[host_name("csr_triangular_solve_float32_int32")]] [[kernel]] void
-csr_triangular_solve_kernel<int>(
-    device const float *, device const int *, device const int *,
-    device const float *, device float *, constant int &, constant int &,
-    constant int &, constant int &, uint);
+csr_triangular_solve_kernel<int>(device const float *, device const int *,
+                                 device const int *, device const float *,
+                                 device float *, constant int &, constant int &,
+                                 constant int &, constant int &, uint);
 
 template [[host_name("csr_triangular_solve_float32_int64")]] [[kernel]] void
-csr_triangular_solve_kernel<long>(
-    device const float *, device const long *, device const long *,
-    device const float *, device float *, constant int &, constant int &,
-    constant int &, constant int &, uint);
+csr_triangular_solve_kernel<long>(device const float *, device const long *,
+                                  device const long *, device const float *,
+                                  device float *, constant int &,
+                                  constant int &, constant int &,
+                                  constant int &, uint);
 
 #define INSTANTIATE_CSR_INNER(OP, NAME, T, I, CONJ)                            \
   template [[host_name(#OP "_" #NAME)]] [[kernel]] void                        \
