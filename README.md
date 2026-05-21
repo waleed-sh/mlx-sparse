@@ -1,5 +1,10 @@
 # mlx-sparse
 
+[![PyPI](https://img.shields.io/pypi/v/mlx-sparse)](https://pypi.org/project/mlx-sparse/)
+[![License](https://img.shields.io/pypi/l/mlx-sparse)](https://github.com/waleed-sh/mlx-sparse/blob/main/LICENSE)
+[![Documentation Status](https://readthedocs.org/projects/mlx-sparse/badge/?version=latest)](https://mlx-sparse.readthedocs.io/en/latest/?badge=latest)
+[![codecov](https://codecov.io/gh/waleed-sh/mlx-sparse/graph/badge.svg?token=EV2KVPZTP0)](https://codecov.io/gh/waleed-sh/mlx-sparse)
+
 > **Warning: beta release**
 > This is an early beta. APIs may change, bugs are expected, and some features
 > are still incomplete. Feedback and issue reports are very welcome!
