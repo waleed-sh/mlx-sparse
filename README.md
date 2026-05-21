@@ -52,6 +52,19 @@ x = mx.array(np.array([3.0, 10.0, 7.0], dtype=np.float32))
 y = a @ x
 dense = a.todense()
 at = a.T
+
+b = mx.array(np.array([1.0, 2.0], dtype=np.float32))
+spd = ms.csr_array(
+    (
+        mx.array([4.0, 1.0, 1.0, 3.0], dtype=mx.float32),
+        mx.array([0, 1, 0, 1], dtype=mx.int32),
+        mx.array([0, 2, 4], dtype=mx.int32),
+    ),
+    shape=(2, 2),
+    canonical=True,
+)
+solution, info = ms.linalg.cg(spd, b)
+factor = ms.linalg.sparse_cholesky(spd)
 ```
 
 The package build compiles `src/sparse/*.metal` into

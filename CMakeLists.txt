@@ -43,6 +43,7 @@ target_sources(
   PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/common.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_linalg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices.cpp
@@ -69,6 +70,7 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
     TITLE mlx_sparse
     SOURCES
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_linalg.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices.metal

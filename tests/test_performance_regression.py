@@ -19,11 +19,12 @@ import time
 
 import numpy as np
 import pytest
-from conftest import to_numpy
+from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
 import mlx_sparse._fallback as fallback
 import mlx_sparse._native as native
+from mlx_sparse import linalg
 
 
 def _bench_ms(mx, fn, *, warmup: int, iters: int) -> float:
@@ -137,3 +138,44 @@ def test_csr_matmul_native_performance_regression(mx, scipy_sparse):
     dense_ms = _bench_ms(mx, lambda: dense @ rhs, warmup=2, iters=4)
 
     assert native_ms <= max(100.0, 25.0 * dense_ms)
+
+
+@pytest.mark.performance
+def test_linalg_cg_native_performance_regression(mx, scipy_sparse):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    n = int(os.environ.get("MLX_SPARSE_PERF_LINALG_N", "512"))
+    diagonals = [
+        -np.ones(n - 1, dtype=np.float32),
+        4.0 * np.ones(n, dtype=np.float32),
+        -np.ones(n - 1, dtype=np.float32),
+    ]
+    scipy_csr = scipy_sparse.diags(diagonals, offsets=[-1, 0, 1], format="csr")
+    csr = ms.from_scipy(scipy_csr)
+    b_np = np.ones(n, dtype=np.float32)
+    b = mx.array(b_np)
+
+    x, info = linalg.cg(csr, b, rtol=1e-5, atol=0.0, maxiter=2 * n)
+    assert info == 0
+    residual = np.linalg.norm(scipy_csr @ to_numpy(x) - b_np)
+    assert residual <= 1e-3 * np.linalg.norm(b_np)
+
+    native_ms = _bench_ms(
+        mx,
+        lambda: native.csr_cg(
+            csr.data,
+            csr.indices,
+            csr.indptr,
+            b,
+            mx.zeros((n,), dtype=mx.float32),
+            csr.shape,
+            rtol=1e-5,
+            atol=0.0,
+            maxiter=2 * n,
+        )[0],
+        warmup=1,
+        iters=3,
+    )
+    absolute_ms = float(os.environ.get("MLX_SPARSE_PERF_CG_ABSOLUTE_MS", "250.0"))
+    assert native_ms <= absolute_ms

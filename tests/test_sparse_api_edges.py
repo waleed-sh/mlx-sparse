@@ -19,7 +19,7 @@ import sys
 
 import numpy as np
 import pytest
-from conftest import to_numpy
+from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
 from mlx_sparse import _ext_loader, _typing

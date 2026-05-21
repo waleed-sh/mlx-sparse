@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import numpy as np
-from conftest import to_numpy
+from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
 

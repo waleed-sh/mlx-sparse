@@ -125,3 +125,323 @@ def csr_sort_indices(
     if ext is None:
         return _fallback.sort_csr_indices(data, indices, indptr)
     return ext.csr_sort_indices(data, indices, indptr)
+
+
+def csr_cg(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_cg requires the native mlx_sparse extension.")
+    return ext.csr_cg(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def csr_lanczos(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    v0: mx.array,
+    shape: Shape2D,
+    *,
+    k: int,
+    reorthogonalize: bool,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_lanczos requires the native mlx_sparse extension.")
+    return ext.csr_lanczos(
+        data,
+        indices,
+        indptr,
+        v0,
+        shape[0],
+        shape[1],
+        int(k),
+        bool(reorthogonalize),
+    )
+
+
+def csr_gmres(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    restart: int,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_gmres requires the native mlx_sparse extension.")
+    return ext.csr_gmres(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(restart),
+        int(maxiter),
+    )
+
+
+def csr_minres(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_minres requires the native mlx_sparse extension.")
+    return ext.csr_minres(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def csr_arnoldi(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    v0: mx.array,
+    shape: Shape2D,
+    *,
+    k: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_arnoldi requires the native mlx_sparse extension.")
+    return ext.csr_arnoldi(
+        data,
+        indices,
+        indptr,
+        v0,
+        shape[0],
+        shape[1],
+        int(k),
+    )
+
+
+def csr_eigsh(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    k: int,
+    ncv: int,
+    which: str,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_eigsh requires the native mlx_sparse extension.")
+    return ext.csr_eigsh(
+        data,
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        int(k),
+        int(ncv),
+        str(which),
+    )
+
+
+def csr_eigs(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    k: int,
+    ncv: int,
+    which: str,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_eigs requires the native mlx_sparse extension.")
+    return ext.csr_eigs(
+        data,
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        int(k),
+        int(ncv),
+        str(which),
+    )
+
+
+def csr_svds(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    k: int,
+    ncv: int,
+    which: str,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_svds requires the native mlx_sparse extension.")
+    return ext.csr_svds(
+        data,
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        int(k),
+        int(ncv),
+        str(which),
+    )
+
+
+def csr_cholesky(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_cholesky requires the native mlx_sparse extension.")
+    return ext.csr_cholesky(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_lu(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_lu requires the native mlx_sparse extension.")
+    return ext.csr_lu(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_triangular_solve(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    shape: Shape2D,
+    *,
+    lower: bool,
+    unit_diagonal: bool,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_triangular_solve requires the native mlx_sparse extension."
+        )
+    return ext.csr_triangular_solve(
+        data,
+        indices,
+        indptr,
+        b,
+        shape[0],
+        shape[1],
+        bool(lower),
+        bool(unit_diagonal),
+    )
+
+
+def csr_vdot(
+    lhs_data: mx.array,
+    lhs_indices: mx.array,
+    lhs_indptr: mx.array,
+    rhs_data: mx.array,
+    rhs_indices: mx.array,
+    rhs_indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_vdot requires the native mlx_sparse extension.")
+    return ext.csr_vdot(
+        lhs_data,
+        lhs_indices,
+        lhs_indptr,
+        rhs_data,
+        rhs_indices,
+        rhs_indptr,
+        shape[0],
+        shape[1],
+    )
+
+
+def csr_dot(
+    lhs_data: mx.array,
+    lhs_indices: mx.array,
+    lhs_indptr: mx.array,
+    rhs_data: mx.array,
+    rhs_indices: mx.array,
+    rhs_indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_dot requires the native mlx_sparse extension.")
+    return ext.csr_dot(
+        lhs_data,
+        lhs_indices,
+        lhs_indptr,
+        rhs_data,
+        rhs_indices,
+        rhs_indptr,
+        shape[0],
+        shape[1],
+    )
+
+
+def csr_permute_vector(x: mx.array, perm: mx.array):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_permute_vector requires the native mlx_sparse extension."
+        )
+    return ext.csr_permute_vector(x, perm)

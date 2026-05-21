@@ -263,6 +263,118 @@ class CSRArray:
         """Hermitian (conjugate) transpose. Equivalent to ``conj().T``."""
         return self.conj().transpose()
 
+    def vdot(self, other) -> mx.array:
+        """Sparse Frobenius inner product with another sparse array.
+
+        Both operands are canonicalized CSR matrices and the matching-column
+        merge is executed by the native sparse kernel. Dense materialization is
+        never used.
+        """
+        rhs = other
+        if isinstance(rhs, CSRArray):
+            rhs_csr = rhs.canonicalize()
+        else:
+            from mlx_sparse._coo import COOArray
+
+            if not isinstance(rhs, COOArray):
+                raise TypeError(
+                    f"CSRArray.vdot expects CSRArray or COOArray, got {type(rhs).__name__}."
+                )
+            rhs_csr = rhs.tocsr(canonical=True)
+        if rhs_csr.shape != self.shape:
+            raise ValueError(
+                f"vdot shape mismatch: got {self.shape} and {rhs_csr.shape}."
+            )
+        lhs = self.canonicalize()
+        if lhs.data.dtype in {mx.float16, mx.bfloat16}:
+            lhs = CSRArray(
+                data=lhs.data.astype(mx.float32),
+                indices=lhs.indices,
+                indptr=lhs.indptr,
+                shape=lhs.shape,
+                sorted_indices=lhs.sorted_indices,
+                has_canonical_format=lhs.has_canonical_format,
+            )
+        if rhs_csr.data.dtype in {mx.float16, mx.bfloat16}:
+            rhs_csr = CSRArray(
+                data=rhs_csr.data.astype(mx.float32),
+                indices=rhs_csr.indices,
+                indptr=rhs_csr.indptr,
+                shape=rhs_csr.shape,
+                sorted_indices=rhs_csr.sorted_indices,
+                has_canonical_format=rhs_csr.has_canonical_format,
+            )
+        if lhs.data.dtype != rhs_csr.data.dtype:
+            raise TypeError(
+                "CSRArray.vdot operands must have the same dtype after low-precision promotion."
+            )
+        if lhs.data.dtype not in {mx.float32, mx.complex64}:
+            raise TypeError("CSRArray.vdot supports float32 and complex64 data.")
+        return _native.csr_vdot(
+            lhs.data,
+            lhs.indices,
+            lhs.indptr,
+            rhs_csr.data,
+            rhs_csr.indices,
+            rhs_csr.indptr,
+            lhs.shape,
+        )
+
+    def dot(self, other) -> mx.array:
+        """Sparse Frobenius dot product with another sparse array.
+
+        Unlike :meth:`vdot`, complex operands are not conjugated.
+        """
+        rhs = other
+        if isinstance(rhs, CSRArray):
+            rhs_csr = rhs.canonicalize()
+        else:
+            from mlx_sparse._coo import COOArray
+
+            if not isinstance(rhs, COOArray):
+                raise TypeError(
+                    f"CSRArray.dot expects CSRArray or COOArray, got {type(rhs).__name__}."
+                )
+            rhs_csr = rhs.tocsr(canonical=True)
+        if rhs_csr.shape != self.shape:
+            raise ValueError(
+                f"dot shape mismatch: got {self.shape} and {rhs_csr.shape}."
+            )
+        lhs = self.canonicalize()
+        if lhs.data.dtype in {mx.float16, mx.bfloat16}:
+            lhs = CSRArray(
+                data=lhs.data.astype(mx.float32),
+                indices=lhs.indices,
+                indptr=lhs.indptr,
+                shape=lhs.shape,
+                sorted_indices=lhs.sorted_indices,
+                has_canonical_format=lhs.has_canonical_format,
+            )
+        if rhs_csr.data.dtype in {mx.float16, mx.bfloat16}:
+            rhs_csr = CSRArray(
+                data=rhs_csr.data.astype(mx.float32),
+                indices=rhs_csr.indices,
+                indptr=rhs_csr.indptr,
+                shape=rhs_csr.shape,
+                sorted_indices=rhs_csr.sorted_indices,
+                has_canonical_format=rhs_csr.has_canonical_format,
+            )
+        if lhs.data.dtype != rhs_csr.data.dtype:
+            raise TypeError(
+                "CSRArray.dot operands must have the same dtype after low-precision promotion."
+            )
+        if lhs.data.dtype not in {mx.float32, mx.complex64}:
+            raise TypeError("CSRArray.dot supports float32 and complex64 data.")
+        return _native.csr_dot(
+            lhs.data,
+            lhs.indices,
+            lhs.indptr,
+            rhs_csr.data,
+            rhs_csr.indices,
+            rhs_csr.indptr,
+            lhs.shape,
+        )
+
     def __matmul__(self, rhs):
         """Matrix multiplication via the ``@`` operator.
 

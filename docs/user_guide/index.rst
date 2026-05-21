@@ -9,3 +9,4 @@ User guide
    dtype_policy
    autodiff
    device_execution
+   linalg

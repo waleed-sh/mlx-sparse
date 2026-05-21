@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import to_numpy
+from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
 import mlx_sparse._native as native

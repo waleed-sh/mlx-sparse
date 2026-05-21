@@ -157,6 +157,92 @@ Sparse-dense arithmetic
      - Not planned
      - Dynamic output size. May be added as a host-side utility.
 
+Sparse linear algebra
+---------------------
+
+.. list-table::
+   :widths: 35 15 15 35
+   :header-rows: 1
+
+   * - Feature
+     - Status
+     - Backend
+     - Notes
+   * - ``linalg.cg``
+     - Done
+     - CPU + GPU
+     - Full solver runs inside a single Metal kernel on GPU.
+   * - ``linalg.gmres``
+     - Done
+     - CPU + GPU
+     - Each restart's Arnoldi step dispatches the ``csr_arnoldi`` Metal
+       kernel, convergence bookkeeping and the small least-squares solve
+       run on CPU.
+   * - ``linalg.minres``
+     - Done
+     - CPU + GPU
+     - Lanczos tridiagonalisation dispatches the ``csr_lanczos`` Metal
+       kernel, the tridiagonal least-squares solve runs on CPU.
+   * - ``linalg.eigsh``
+     - Done
+     - CPU + GPU
+     - Lanczos step dispatches ``csr_lanczos`` Metal kernel, the small
+       Jacobi eigensolver runs on CPU.
+   * - ``linalg.eigs``
+     - Done
+     - CPU + GPU
+     - Arnoldi step dispatches ``csr_arnoldi`` Metal kernel, QR eigenvalues
+       run on CPU.
+   * - ``linalg.svds``
+     - Done
+     - CPU only
+     - Normal-operator Lanczos (two SpMVs per step) has no dedicated Metal
+       kernel and runs entirely on CPU.
+   * - ``linalg.sparse_cholesky``
+     - Done
+     - CPU only
+     - Symbolic fill-in factorisation is inherently sequential. Planned GPU
+       path via supernodal Cholesky is out of scope for v0.x.
+   * - ``linalg.sparse_lu`` / ``linalg.spsolve``
+     - Done
+     - CPU + GPU
+     - LU factorisation (partial pivoting) runs on CPU. Triangular
+       forward/back-substitution and permutation dispatch to Metal GPU via
+       ``csr_triangular_solve`` and ``csr_permute_vector`` kernels.
+   * - ``CSRArray.dot`` / ``CSRArray.vdot``
+     - Done
+     - CPU + GPU
+     - Native CSR row-merge reductions for ``float32`` and ``complex64``.
+
+Linalg GPU coverage notes
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The table above uses a simplified "CPU + GPU" label. The precise breakdown
+is:
+
+* **CG**: the entire conjugate-gradient iteration (SpMV, dot products,
+  vector updates) runs inside a single Metal threadgroup kernel.  The GPU
+  path is fully independent of the CPU.
+
+* **GMRES / MINRES / eigsh / eigs**: the expensive Krylov-subspace step
+  (Arnoldi or Lanczos, which accounts for most of the wall time at large
+  ``n``) runs on GPU via the ``csr_arnoldi`` or ``csr_lanczos`` Metal
+  kernels.  Post-processing (a small dense eigensolve or least-squares
+  solve of size ``≤ restart`` or ``≤ ncv``) runs on CPU.  An
+  ``mx.eval()`` synchronisation separates the two phases, at very small
+  ``n`` (≲ 1 000) the synchronisation overhead can exceed the GPU savings.
+
+* **Cholesky / LU factorisation**: row-by-row elimination with fill-in is
+  inherently sequential and runs on CPU.  The resulting triangular **solve**
+  (``SparseCholesky.solve``, ``SparseLU.solve``, ``spsolve``) dispatches
+  the ``csr_triangular_solve`` Metal kernel and the ``csr_permute_vector``
+  Metal kernel for the LU row-permutation step.
+
+* **svds**: uses a two-SpMV-per-step Lanczos (``A.T @ (A @ x)``).  The
+  existing ``csr_lanczos`` kernel performs a single SpMV per step, so svds
+  has no GPU path and runs entirely on CPU.  A dedicated two-matvec kernel
+  is planned.
+
 Automatic differentiation
 --------------------------
 
@@ -234,6 +320,27 @@ All fixed-shape kernels cover the full value and index dtype matrix.
    * - ``csr_sort_indices``
      - All value and index dtypes
      - Rank-based stable per-row sort
+   * - ``csr_cg``
+     - ``float32`` values, int32/int64 indices
+     - Full CG iteration for ``linalg.cg``
+   * - ``csr_lanczos``
+     - ``float32`` values, int32/int64 indices
+     - Krylov step for ``linalg.minres``, ``linalg.eigsh``, and the
+       primitive ``linalg.lanczos``
+   * - ``csr_arnoldi``
+     - ``float32`` values, int32/int64 indices
+     - Krylov step for ``linalg.gmres``, ``linalg.eigs``
+   * - ``csr_triangular_solve``
+     - ``float32`` values, int32/int64 indices
+     - Forward/back-substitution for ``SparseCholesky.solve``,
+       ``SparseLU.solve``, and ``linalg.spsolve``
+   * - ``csr_permute_vector``
+     - ``float32``, int32 permutation
+     - Row permutation step in ``SparseLU.solve`` / ``linalg.spsolve``
+   * - ``csr_dot`` / ``csr_vdot``
+     - ``float32``/``complex64`` values, int32/int64 indices
+     - Sparse Frobenius inner products with explicit complex conjugation
+       semantics
    * - ``csr_sum_duplicates``
      - Not implemented
      - Dynamic output size. Deferred.
@@ -244,6 +351,7 @@ Known limitations
 * GPU availability depends on the MLX and macOS Metal runtime.
 * Dynamic-output helpers (``canonicalize()``, dense/SciPy construction, and
   ``CSR @ CSR``) synchronize to host for structural assembly.
-* Sparse linear solvers, sparse eigensolvers, and general sparse tensors are
-  outside the current scope.
+* Sparse solver, factorization, and spectral kernels are real-valued.
+  ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
+  solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.
 * Full validation (``validate="full"``) may trigger host synchronization.

@@ -42,6 +42,7 @@ Typical usage::
     Ah = A.H  # Hermitian (conjugate) transpose
 """
 
+from mlx_sparse import linalg
 from mlx_sparse._construct import (
     asarray,
     diags,
@@ -104,6 +105,7 @@ __all__ = [
     "identity_like",
     "is_available",
     "issparse",
+    "linalg",
     "todense",
     "use_cpu",
     "use_device",

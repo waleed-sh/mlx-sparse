@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 
 import mlx_sparse as ms
+from mlx_sparse import linalg
 
 
 def _available_devices(mx):
@@ -89,3 +90,36 @@ def test_coo_conversion_matches_dense_on_available_devices():
             dtype=np.float32,
         )
         np.testing.assert_allclose(np.array(csr.todense()), expected)
+
+
+@pytest.mark.gpu
+def test_sparse_linalg_native_ops_match_on_available_devices():
+    mx = pytest.importorskip("mlx.core")
+    reference = None
+    for _, device in _available_devices(mx):
+        mx.set_default_device(device)
+        spd = ms.csr_array(
+            (
+                mx.array(np.array([4.0, -1.0, -1.0, 4.0], dtype=np.float32)),
+                mx.array(np.array([0, 1, 0, 1], dtype=np.int32)),
+                mx.array(np.array([0, 2, 4], dtype=np.int32)),
+            ),
+            shape=(2, 2),
+            validate="full",
+            canonical=True,
+        )
+        rhs = mx.array(np.array([1.0, 2.0], dtype=np.float32))
+        x, info = linalg.cg(spd, rhs, rtol=1e-6, maxiter=32)
+        result = {
+            "dot": np.array(spd.dot(spd)),
+            "vdot": np.array(spd.vdot(spd)),
+            "cg_info": info,
+            "cg": np.array(x),
+        }
+        if reference is None:
+            reference = result
+            continue
+        assert result["cg_info"] == reference["cg_info"] == 0
+        np.testing.assert_allclose(result["dot"], reference["dot"], rtol=1e-6)
+        np.testing.assert_allclose(result["vdot"], reference["vdot"], rtol=1e-6)
+        np.testing.assert_allclose(result["cg"], reference["cg"], rtol=1e-5, atol=1e-5)

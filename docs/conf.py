@@ -94,7 +94,7 @@ html_theme_options = {
     "navigation_depth": 3,
     "navbar_start": ["navbar-logo"],
     "navbar_end": ["navbar-icon-links"],
-    "primary_sidebar_end": [],
+    "primary_sidebar_end": ["page-toc"],
     "secondary_sidebar_items": [],
     "footer_start": ["copyright"],
     "footer_end": [],

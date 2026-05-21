@@ -7,6 +7,7 @@ API reference
    containers
    constructors
    operations
+   linalg
    device
 
 All public names are re-exported from ``mlx_sparse`` and listed in

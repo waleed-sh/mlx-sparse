@@ -1,11 +1,18 @@
 Jupyter notebooks
 =================
 
-The notebooks below can be downloaded and executed locally.  Pre-computed
+The notebooks below can be downloaded and executed locally. Pre-computed
 outputs are shown inline so you can read the results without running anything.
 
-All timing results are collected on an **Apple M5 Pro, 10-core GPU**,
+All timing results are collected on an **Apple M5, 10-core GPU**,
 macOS 26.0, MLX 0.31, mlx-sparse 0.0.1b0.
+
+Primitives
+----------
+
+These notebooks cover the core sparse containers and operations: construction,
+matrix-vector products, matrix-matrix products, autodiff, dtype/device handling,
+and integration with third-party libraries.
 
 .. toctree::
    :maxdepth: 1
@@ -22,3 +29,17 @@ macOS 26.0, MLX 0.31, mlx-sparse 0.0.1b0.
    10_benchmarks
    11_graph_algorithms
    12_neural_layers
+
+Sparse linear algebra
+---------------------
+
+These notebooks cover ``mlx_sparse.linalg``: iterative solvers, direct
+factorizations, spectral routines, and matrix-free linear operators.
+
+.. toctree::
+   :maxdepth: 1
+
+   13_linalg_solvers
+   14_linalg_factorizations
+   15_linalg_spectral
+   16_linalg_operators

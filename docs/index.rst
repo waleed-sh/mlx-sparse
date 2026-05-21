@@ -4,7 +4,7 @@ mlx-sparse
 **mlx-sparse** is a sparse matrix library for Apple Silicon, built as a native
 MLX extension. It provides COO and CSR sparse containers backed by
 ``mlx.core.array``, with C++ MLX primitives for sparse-dense products on both
-CPU and Metal GPU.
+CPU and Metal GPU. It also supports some linear algebra operations for sparse matrices.
 
 The design follows MLX's operation/primitive split. Python containers own the
 user API, C++ primitives own graph construction and backend evaluation, and
@@ -12,10 +12,6 @@ Metal kernels run through MLX's command encoder without a separate
 synchronization point. Sparse operations participate in MLX's lazy computation
 graph. ``mx.eval`` is called only when results are needed, and autodiff through
 sparse values and dense operands works with ``mx.grad`` on both CPU and GPU.
-
-.. note::
-
-   Some basic ``linalg`` functionality is coming soon in the next release!
 
 .. code-block:: python
 
@@ -52,6 +48,8 @@ Key characteristics
 * **Autodiff**: ``mx.grad`` / ``mx.vjp`` / ``mx.jvp`` work for sparse values
   and dense operands of CSR matvec and matmul on both CPU and GPU, including
   ``complex64``.
+* **Sparse linalg**: operations like ``eigsh``, ``eigs``, ``cholesky``, ``splu`` (sparse LU),
+  as well as SciPy like ``LinearOperator`` are available through ``mlx_sparse.linalg``.
 * **Value dtypes**: ``float32``, ``float16``, ``bfloat16``, and ``complex64``
   on CPU and Metal GPU.
 * **Index dtypes**: ``int32`` and ``int64``. Mixed dtypes are rejected at
@@ -89,3 +87,9 @@ Key characteristics
    supported
    performance
    api/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Project
+
+   changelog

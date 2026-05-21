@@ -70,7 +70,8 @@ def scipy_sparse():
     return pytest.importorskip("scipy.sparse")
 
 
-def to_numpy(array):
+@pytest.fixture
+def to_numpy():
     from mlx_sparse._host import to_numpy as host_to_numpy
 
-    return host_to_numpy(array)
+    return host_to_numpy
