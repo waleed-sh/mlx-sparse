@@ -16,17 +16,13 @@
 
 from __future__ import annotations
 
+import mlx.core as mx
 import numpy as np
 import pytest
 
-import mlx.core as mx
 import mlx_sparse as ms
 from mlx_sparse.linalg._interface import LinearOperator, aslinearoperator
 from mlx_sparse.linalg._utils import ensure_array
-
-# ---------------------------------------------------------------------------
-# ensure_array
-# ---------------------------------------------------------------------------
 
 
 class TestEnsureArray:
@@ -59,11 +55,6 @@ class TestEnsureArray:
         arr = np.array([1.0, 2.0], dtype=np.float32)
         result = ensure_array(arr)
         assert isinstance(result, mx.array)
-
-
-# ---------------------------------------------------------------------------
-# LinearOperator construction
-# ---------------------------------------------------------------------------
 
 
 def _make_identity_op(n: int) -> LinearOperator:
@@ -120,11 +111,6 @@ class TestLinearOperatorConstruction:
         assert op.dtype == mx.float32
 
 
-# ---------------------------------------------------------------------------
-# matvec
-# ---------------------------------------------------------------------------
-
-
 class TestLinearOperatorMatvec:
     def test_valid_matvec(self):
         op = _make_identity_op(3)
@@ -151,11 +137,6 @@ class TestLinearOperatorMatvec:
         x = mx.array([1.0, 2.0], dtype=mx.float32)  # length 2, expected 3
         with pytest.raises(ValueError, match="length"):
             op.matvec(x)
-
-
-# ---------------------------------------------------------------------------
-# matmat
-# ---------------------------------------------------------------------------
 
 
 class TestLinearOperatorMatmat:
@@ -202,11 +183,6 @@ class TestLinearOperatorMatmat:
         assert called == ["b"]
 
 
-# ---------------------------------------------------------------------------
-# rmatvec
-# ---------------------------------------------------------------------------
-
-
 class TestLinearOperatorRmatvec:
     def test_valid_rmatvec(self):
         op = _make_identity_op(3)
@@ -243,22 +219,12 @@ class TestLinearOperatorRmatvec:
         assert called == ["b"]
 
 
-# ---------------------------------------------------------------------------
-# __matmul__ error path
-# ---------------------------------------------------------------------------
-
-
 class TestLinearOperatorMatmul:
     def test_rank3_raises(self):
         op = _make_identity_op(3)
         x = mx.array([[[1.0, 2.0], [3.0, 4.0]]], dtype=mx.float32)
         with pytest.raises(ValueError, match="rank-1 or rank-2"):
             op @ x
-
-
-# ---------------------------------------------------------------------------
-# aslinearoperator
-# ---------------------------------------------------------------------------
 
 
 class TestAsLinearOperator:

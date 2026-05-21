@@ -19,12 +19,12 @@ import time
 
 import numpy as np
 import pytest
-from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
 import mlx_sparse._fallback as fallback
 import mlx_sparse._native as native
 from mlx_sparse import linalg
+from mlx_sparse._host import to_numpy
 
 
 def _bench_ms(mx, fn, *, warmup: int, iters: int) -> float:

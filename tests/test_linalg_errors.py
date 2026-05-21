@@ -18,17 +18,13 @@ that run actual solvers skip when the native extension is unavailable."""
 
 from __future__ import annotations
 
+import mlx.core as mx
 import numpy as np
 import pytest
 
-import mlx.core as mx
 import mlx_sparse as ms
 from mlx_sparse import linalg
 from mlx_sparse._ext_loader import extension_available
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _spd_2x2(mx_module):
@@ -69,11 +65,6 @@ def _float16_csr():
     )
 
 
-# ---------------------------------------------------------------------------
-# _iterative._as_csr
-# ---------------------------------------------------------------------------
-
-
 class TestIterativeAsCsr:
     def test_csr_passthrough(self):
         from mlx_sparse.linalg._iterative import _as_csr
@@ -94,11 +85,6 @@ class TestIterativeAsCsr:
 
         with pytest.raises(TypeError, match="sparse iterative solvers"):
             _as_csr(mx.array([[1.0, 0.0], [0.0, 1.0]], dtype=mx.float32))
-
-
-# ---------------------------------------------------------------------------
-# _iterative._float32_csr
-# ---------------------------------------------------------------------------
 
 
 class TestIterativeFloat32Csr:
@@ -147,11 +133,6 @@ class TestIterativeFloat32Csr:
             _float32_csr(csr)
 
 
-# ---------------------------------------------------------------------------
-# _iterative._float32_array
-# ---------------------------------------------------------------------------
-
-
 class TestIterativeFloat32Array:
     def test_float16_promotes(self):
         from mlx_sparse.linalg._iterative import _float32_array
@@ -173,11 +154,6 @@ class TestIterativeFloat32Array:
         x = mx.array(np.array([1.0 + 1.0j], dtype=np.complex64))
         with pytest.raises(TypeError, match="real float"):
             _float32_array(x)
-
-
-# ---------------------------------------------------------------------------
-# _iterative._guess
-# ---------------------------------------------------------------------------
 
 
 class TestIterativeGuess:
@@ -235,11 +211,6 @@ class TestIterativeGuess:
             _guess(csr, b, x0)
 
 
-# ---------------------------------------------------------------------------
-# _iterative._maxiter
-# ---------------------------------------------------------------------------
-
-
 class TestIterativeMaxiter:
     def test_none_returns_10n(self):
         from mlx_sparse.linalg._iterative import _maxiter
@@ -259,11 +230,6 @@ class TestIterativeMaxiter:
         csr = _spd_2x2(mx)
         with pytest.raises(ValueError, match="non-negative"):
             _maxiter(csr, -1)
-
-
-# ---------------------------------------------------------------------------
-# Public solver API — error paths that don't touch native kernels
-# ---------------------------------------------------------------------------
 
 
 class TestSolverAPIErrors:
@@ -335,11 +301,6 @@ class TestSolverAPIErrors:
         assert info == 0
 
 
-# ---------------------------------------------------------------------------
-# _eigen._as_csr and _float32_csr
-# ---------------------------------------------------------------------------
-
-
 class TestEigenAsCsr:
     def test_csr_passthrough(self):
         from mlx_sparse.linalg._eigen import _as_csr
@@ -393,11 +354,6 @@ class TestEigenFloat32Csr:
             _float32_csr(csr)
 
 
-# ---------------------------------------------------------------------------
-# _eigen._ncv
-# ---------------------------------------------------------------------------
-
-
 class TestNcv:
     def test_none_ncv(self):
         from mlx_sparse.linalg._eigen import _ncv
@@ -413,11 +369,6 @@ class TestNcv:
         from mlx_sparse.linalg._eigen import _ncv
 
         assert _ncv(4, 2, 100) == 4
-
-
-# ---------------------------------------------------------------------------
-# lanczos
-# ---------------------------------------------------------------------------
 
 
 class TestLanczos:
@@ -451,11 +402,6 @@ class TestLanczos:
         alphas, betas = linalg.lanczos(csr, k=1, return_basis=False)
         mx.eval(alphas, betas)
         assert np.array(alphas).shape[0] == 1
-
-
-# ---------------------------------------------------------------------------
-# eigsh error paths
-# ---------------------------------------------------------------------------
 
 
 class TestEigshErrors:
@@ -506,11 +452,6 @@ class TestEigshErrors:
         assert np.array(vals).shape[0] == 1
 
 
-# ---------------------------------------------------------------------------
-# eigs error paths
-# ---------------------------------------------------------------------------
-
-
 class TestEigsErrors:
     def test_non_square_raises(self):
         csr = ms.csr_array(
@@ -559,11 +500,6 @@ class TestEigsErrors:
         assert np.array(vals).shape[0] == 1
 
 
-# ---------------------------------------------------------------------------
-# svds error paths
-# ---------------------------------------------------------------------------
-
-
 class TestSvdsErrors:
     def test_k_zero_raises(self):
         csr = _spd_2x2(mx)
@@ -610,11 +546,6 @@ class TestSvdsErrors:
         mx.eval(vh, s)
         assert u is None
         assert np.array(vh).shape == (1, 2)
-
-
-# ---------------------------------------------------------------------------
-# _factorizations._as_csr and _float32_csr
-# ---------------------------------------------------------------------------
 
 
 class TestFactorizationsAsCsr:
@@ -670,11 +601,6 @@ class TestFactorizationsFloat32Csr:
             _float32_csr(csr)
 
 
-# ---------------------------------------------------------------------------
-# _factorizations._triangular_solve
-# ---------------------------------------------------------------------------
-
-
 class TestTriangularSolveErrors:
     def test_rank2_raises_not_implemented(self):
         from mlx_sparse.linalg._factorizations import _triangular_solve
@@ -695,11 +621,6 @@ class TestTriangularSolveErrors:
         b0d = mx.array(1.0)
         with pytest.raises(ValueError, match="rank-1 or rank-2"):
             _triangular_solve(csr, b0d, lower=True, unit_diagonal=False)
-
-
-# ---------------------------------------------------------------------------
-# SparseCholesky properties and callable interface
-# ---------------------------------------------------------------------------
 
 
 class TestSparseCholeskyExtended:
@@ -744,11 +665,6 @@ class TestSparseCholeskyExtended:
         A_dense = np.array([[4.0, 1.0], [1.0, 3.0]])
         expected = np.linalg.solve(A_dense, [1.0, 2.0])
         np.testing.assert_allclose(np.array(x), expected, rtol=1e-4)
-
-
-# ---------------------------------------------------------------------------
-# SparseLU properties and callable interface
-# ---------------------------------------------------------------------------
 
 
 class TestSparseLUExtended:
@@ -796,11 +712,6 @@ class TestSparseLUExtended:
         A_dense = np.array([[4.0, 1.0], [1.0, 3.0]])
         expected = np.linalg.solve(A_dense, [1.0, 2.0])
         np.testing.assert_allclose(np.array(x), expected, rtol=1e-4)
-
-
-# ---------------------------------------------------------------------------
-# _sparse_ops COO path and error
-# ---------------------------------------------------------------------------
 
 
 class TestSparseOpsExtended:

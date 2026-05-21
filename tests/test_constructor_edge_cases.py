@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
+from mlx_sparse._host import to_numpy
 
 
 def test_eye_handles_offsets_empty_outputs_and_invalid_dtypes(mx):

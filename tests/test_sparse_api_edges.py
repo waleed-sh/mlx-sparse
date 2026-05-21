@@ -19,10 +19,10 @@ import sys
 
 import numpy as np
 import pytest
-from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
 from mlx_sparse import _ext_loader, _typing
+from mlx_sparse._host import to_numpy
 
 
 def _complex_csr(mx):

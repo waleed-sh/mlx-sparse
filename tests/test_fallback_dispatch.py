@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
 import mlx_sparse._native as native
+from mlx_sparse._host import to_numpy
 
 
 def _sample_csr(mx, *, index_dtype=np.int32):

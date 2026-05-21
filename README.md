@@ -17,11 +17,10 @@ The supported format surface is COO and CSR for 2D sparse arrays. Current
 functionality includes construction, validation, COO to CSR, CSR to dense, CSR
 canonicalization, CSR matrix-vector multiply, CSR matrix-matrix multiply,
 batched dense RHS products, CSR sparse-sparse products, transpose, Hermitian
-transpose, and autodiff through sparse values and dense RHS operands, including
-`complex64`.
-
-> **NOTE:**
-> Some linalg functionality is coming soon!
+transpose, sparse linalg solvers (`cg`, `gmres`, `minres`), sparse spectral
+routines (`eigsh`, `eigs`, `svds`), sparse Cholesky/LU factors, sparse
+triangular solves, sparse `dot`/`vdot`, and autodiff through sparse values and
+dense RHS operands, including `complex64`.
 
 Supported value dtypes are `float32`, `float16`, `bfloat16`, and `complex64`.
 Supported index dtypes are `int32` and `int64` on CPU and GPU.

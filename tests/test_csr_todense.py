@@ -15,9 +15,9 @@
 from __future__ import annotations
 
 import numpy as np
-from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
+from mlx_sparse._host import to_numpy
 
 
 def test_csr_todense_sums_duplicate_entries(mx):

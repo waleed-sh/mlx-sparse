@@ -17,16 +17,12 @@ conjugate, H, vdot/dot with COO + error branches, and __repr__."""
 
 from __future__ import annotations
 
+import mlx.core as mx
 import numpy as np
 import pytest
 
-import mlx.core as mx
 import mlx_sparse as ms
 from mlx_sparse._ext_loader import extension_available
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _real_2x2(sorted_idx=True, canonical=True):
@@ -79,11 +75,6 @@ def _coo_2x2():
     )
 
 
-# ---------------------------------------------------------------------------
-# Properties: index_dtype, __repr__
-# ---------------------------------------------------------------------------
-
-
 class TestCSRArrayProperties:
     def test_index_dtype_int32(self):
         csr = _real_2x2()
@@ -113,11 +104,6 @@ class TestCSRArrayProperties:
         assert "float32" in r
 
 
-# ---------------------------------------------------------------------------
-# sort_indices
-# ---------------------------------------------------------------------------
-
-
 class TestSortIndices:
     def test_already_sorted_returns_self(self):
         csr = _real_2x2(sorted_idx=True)
@@ -143,11 +129,6 @@ class TestSortIndices:
         # After sorting row 0: indices should be [0, 1]
         idx = np.array(result.indices)
         assert idx[0] == 0 and idx[1] == 1
-
-
-# ---------------------------------------------------------------------------
-# conj / conjugate / H
-# ---------------------------------------------------------------------------
 
 
 class TestConjAndHermitian:
@@ -195,11 +176,6 @@ class TestConjAndHermitian:
         H = csr.H
         expected = np.conj(np.array(csr.todense())).T
         np.testing.assert_allclose(np.array(H.todense()), expected)
-
-
-# ---------------------------------------------------------------------------
-# vdot — error and branch paths
-# ---------------------------------------------------------------------------
 
 
 class TestVdotBranches:
@@ -280,11 +256,6 @@ class TestVdotBranches:
         )
         with pytest.raises(TypeError, match="float32 and complex64"):
             csr.vdot(csr)
-
-
-# ---------------------------------------------------------------------------
-# dot — error and branch paths
-# ---------------------------------------------------------------------------
 
 
 class TestDotBranches:
@@ -369,11 +340,6 @@ class TestDotBranches:
         # (unless values happen to cancel, which is unlikely for our fixture)
         _ = dot_val  # just verify it's finite
         assert np.isfinite(dot_val.real)
-
-
-# ---------------------------------------------------------------------------
-# __matmul__ with COO rhs
-# ---------------------------------------------------------------------------
 
 
 class TestCSRMatmulCOORhs:

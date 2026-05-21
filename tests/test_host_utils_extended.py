@@ -17,15 +17,11 @@ remaining _validation.py branches."""
 
 from __future__ import annotations
 
+import mlx.core as mx
 import numpy as np
 import pytest
 
-import mlx.core as mx
 import mlx_sparse as ms
-
-# ---------------------------------------------------------------------------
-# _host.to_numpy
-# ---------------------------------------------------------------------------
 
 
 class TestToNumpy:
@@ -54,11 +50,6 @@ class TestToNumpy:
         assert isinstance(result, np.ndarray)
 
 
-# ---------------------------------------------------------------------------
-# _host.to_mx
-# ---------------------------------------------------------------------------
-
-
 class TestToMx:
     def test_no_dtype(self):
         from mlx_sparse._host import to_mx
@@ -73,11 +64,6 @@ class TestToMx:
         arr = np.array([1.0, 2.0], dtype=np.float32)
         result = to_mx(arr, dtype=mx.float16)
         assert result.dtype == mx.float16
-
-
-# ---------------------------------------------------------------------------
-# _validation.validate_csr_values — branch coverage
-# ---------------------------------------------------------------------------
 
 
 class TestValidateCsrValues:
@@ -117,12 +103,6 @@ class TestValidateCsrValues:
         csr = ms.csr_array((data, indices, indptr), shape=(2, 2), validate="full")
         assert csr.nnz == 0
 
-
-# ---------------------------------------------------------------------------
-# _validation.validate_coo_values — branch coverage
-# ---------------------------------------------------------------------------
-
-
 class TestValidateCooValues:
     def test_out_of_bounds_row_raises(self):
         data = mx.array([1.0], dtype=mx.float32)
@@ -146,11 +126,6 @@ class TestValidateCooValues:
         assert coo.nnz == 0
 
 
-# ---------------------------------------------------------------------------
-# _validation.normalize_validation_mode — True/False aliases
-# ---------------------------------------------------------------------------
-
-
 class TestNormalizeValidationMode:
     def test_true_becomes_full(self):
         from mlx_sparse._validation import normalize_validation_mode
@@ -172,11 +147,6 @@ class TestNormalizeValidationMode:
 
         with pytest.raises(ValueError, match="validate must be"):
             normalize_validation_mode("invalid")
-
-
-# ---------------------------------------------------------------------------
-# _validation.validate_csr_matmul_inputs — dtype mismatch
-# ---------------------------------------------------------------------------
 
 
 class TestValidateCsrMatmulInputs:
@@ -212,11 +182,6 @@ class TestValidateCsrMatmulInputs:
             validate_csr_matmul_inputs(data, indices, indptr, rhs, (2, 2))
 
 
-# ---------------------------------------------------------------------------
-# csr_array shape-mismatch when passing existing CSRArray
-# ---------------------------------------------------------------------------
-
-
 class TestCsrArrayFromExisting:
     def test_shape_mismatch_raises(self):
         csr = ms.csr_array(
@@ -241,11 +206,6 @@ class TestCsrArrayFromExisting:
         )
         result = ms.csr_array(csr, shape=(2, 2))
         assert result is csr
-
-
-# ---------------------------------------------------------------------------
-# issparse
-# ---------------------------------------------------------------------------
 
 
 class TestIssparse:

@@ -15,9 +15,9 @@
 from __future__ import annotations
 
 import numpy as np
-from mlx_sparse._host import to_numpy
 
 import mlx_sparse as ms
+from mlx_sparse._host import to_numpy
 
 
 def _complex_energy(mx, y):
