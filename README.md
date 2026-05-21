@@ -22,6 +22,10 @@ Supported index dtypes are `int32` and `int64` on CPU and GPU.
 
 Install from PyPI:
 
+```bash
+python -m pip install mlx-sparse
+```
+
 ```python
 import mlx.core as mx
 import numpy as np
