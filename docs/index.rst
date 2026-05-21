@@ -13,6 +13,10 @@ synchronization point. Sparse operations participate in MLX's lazy computation
 graph. ``mx.eval`` is called only when results are needed, and autodiff through
 sparse values and dense operands works with ``mx.grad`` on both CPU and GPU.
 
+.. note::
+
+   Some basic ``linalg`` functionality is coming soon in the next release!
+
 .. code-block:: python
 
    import mlx.core as mx

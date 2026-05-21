@@ -20,6 +20,9 @@ batched dense RHS products, CSR sparse-sparse products, transpose, Hermitian
 transpose, and autodiff through sparse values and dense RHS operands, including
 `complex64`.
 
+> **NOTE:**
+> Some linalg functionality is coming soon!
+
 Supported value dtypes are `float32`, `float16`, `bfloat16`, and `complex64`.
 Supported index dtypes are `int32` and `int64` on CPU and GPU.
 
