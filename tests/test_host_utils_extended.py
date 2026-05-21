@@ -103,6 +103,7 @@ class TestValidateCsrValues:
         csr = ms.csr_array((data, indices, indptr), shape=(2, 2), validate="full")
         assert csr.nnz == 0
 
+
 class TestValidateCooValues:
     def test_out_of_bounds_row_raises(self):
         data = mx.array([1.0], dtype=mx.float32)
