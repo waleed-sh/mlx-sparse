@@ -37,8 +37,8 @@ def bench(fn, *, warmup: int, iters: int) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rows", type=int, default=4096*4)
-    parser.add_argument("--cols", type=int, default=4096*4)
+    parser.add_argument("--rows", type=int, default=4096 * 4)
+    parser.add_argument("--cols", type=int, default=4096 * 4)
     parser.add_argument("--rhs-cols", type=int, default=16)
     parser.add_argument("--density", type=float, default=0.0005)
     parser.add_argument("--complex", action="store_true")

@@ -5,7 +5,6 @@ import sys
 from mlx import extension
 from setuptools import setup
 
-
 if __name__ == "__main__":
     cmake_args = os.environ.get("CMAKE_ARGS", "")
     deployment_target = os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "14.0")
