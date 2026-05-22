@@ -116,6 +116,13 @@ def cg(
     native CSR engine.  CG converges in at most ``n`` steps in exact
     arithmetic and typically far fewer for well-conditioned problems.
 
+    GPU note:
+        When GPU execution is selected, the native CG iteration runs in a
+        Metal kernel.  Sparse matrix-vector products, vector updates, dot
+        products, and residual checks stay on the GPU.  Python argument
+        validation and conversion of the returned ``info`` flag to a Python
+        integer happen on the host.
+
     Args:
         A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
             :class:`~mlx_sparse.COOArray` that is symmetric positive-definite.
@@ -211,6 +218,13 @@ def gmres(
     one sparse matrix-vector product per step, then minimises the residual
     over that Krylov subspace.  Memory scales as ``O(restart * n)``.
 
+    GPU note:
+        When GPU execution is selected, Arnoldi basis construction uses the
+        native Arnoldi kernel.  The restart loop, residual setup, small
+        least-squares solve, solution update, and convergence bookkeeping run
+        on the CPU.  The host also copies the Arnoldi basis and Hessenberg
+        coefficients back before updating the solution.
+
     Args:
         A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
             :class:`~mlx_sparse.COOArray`.  A CSR-backed
@@ -285,6 +299,13 @@ def minres(
     residual at every step using a Lanczos-based recurrence and requires only
     a constant number of vectors in memory, making it more memory-efficient
     than GMRES for large symmetric indefinite problems.
+
+    GPU note:
+        When GPU execution is selected, Lanczos basis construction uses the
+        native Lanczos kernel.  Residual setup, the small least-squares solve,
+        solution update, and final residual check run on the CPU.  The host
+        also copies the Lanczos coefficients and basis back before forming
+        the solution.
 
     Args:
         A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or

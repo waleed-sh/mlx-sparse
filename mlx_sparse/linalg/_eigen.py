@@ -70,6 +70,12 @@ def lanczos(
     :func:`eigsh` which calls Lanczos internally and returns the final
     eigenpairs directly.
 
+    GPU note:
+        When GPU execution is selected, the Lanczos recurrence runs in a
+        Metal kernel. Sparse matrix-vector products, orthogonalisation,
+        tridiagonal coefficients, and basis writes stay on the GPU.  Python
+        argument validation and returned array handling happen on the host.
+
     Args:
         A: Symmetric sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray`
             or :class:`~mlx_sparse.COOArray`.  Float16 and bfloat16 inputs
@@ -131,6 +137,12 @@ def eigsh(
     of the real symmetric (Hermitian) sparse matrix ``A`` that match the
     criterion specified by ``which``.  Each Lanczos step dispatches a sparse
     matrix-vector product to the GPU via the native Metal kernel.
+
+    GPU note:
+        When GPU execution is selected, Lanczos tridiagonalisation uses the
+        native Lanczos kernel. The small tridiagonal eigensolve, Ritz pair
+        selection, and eigenvector back transformation run on the CPU after
+        the basis and coefficients are copied back to host memory.
 
     Args:
         A: Real symmetric sparse matrix.  Must be a
@@ -212,6 +224,12 @@ def eigs(
     it uses the symmetric Lanczos recurrence instead of the full Arnoldi
     factorization.
 
+    GPU note:
+        When GPU execution is selected, Arnoldi factorisation uses the native
+        Arnoldi kernel. The small Hessenberg eigensolve, Ritz value
+        selection, and output vector assembly run on the CPU after the basis
+        and Hessenberg matrix are copied back to host memory.
+
     Args:
         A: Sparse square matrix.  Must be a :class:`~mlx_sparse.CSRArray`
             or :class:`~mlx_sparse.COOArray`.  Float16 and bfloat16 inputs
@@ -283,6 +301,12 @@ def svds(
     ``A.T @ A`` to find the ``k`` singular triplets (left singular vectors,
     singular values, and right singular vectors) of the sparse matrix ``A``
     that match the criterion specified by ``which``.
+
+    GPU note:
+        ``svds`` currently runs on the CPU.  It forms products with ``A`` and
+        ``A.T``, runs the Lanczos process, solves the small eigenproblem, and
+        assembles singular vectors on host data.  Choosing GPU execution does
+        not move this solver to Metal yet.
 
     Args:
         A: Sparse matrix of shape ``(m, n)``.  Must be a

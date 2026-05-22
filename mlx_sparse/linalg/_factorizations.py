@@ -74,8 +74,13 @@ class SparseCholesky:
     """Sparse Cholesky factorization ``A = L @ L.T``.
 
     The factor ``L`` is stored as a :class:`mlx_sparse.CSRArray`. Numeric
-    factorization is performed by the native sparse left-looking routine and the solves
-    use sparse triangular CSR kernels.
+    factorization is performed by the native sparse left-looking routine and
+    the solves use sparse triangular CSR kernels.
+
+    GPU note:
+        The numeric factorization that creates ``L`` runs on the CPU.  Calls
+        to :meth:`solve` use native triangular-solve kernels, which run on the
+        GPU when GPU execution is selected.
     """
 
     L: CSRArray
@@ -90,6 +95,11 @@ class SparseCholesky:
         Performs two sparse triangular solves: a forward solve with ``L``
         followed by a backward solve with ``L.T``.  Both steps use native
         CSR triangular-solve kernels.
+
+        GPU note:
+            When GPU execution is selected, both triangular solves dispatch
+            native GPU kernels.  The Python method call and shape checks run
+            on the host.
 
         Args:
             b: Right-hand side vector of shape ``(n,)``.
@@ -115,6 +125,12 @@ class SparseLU:
 
     ``L`` and ``U`` are CSR sparse factors. ``perm`` stores the row permutation
     applied before factorization.
+
+    GPU note:
+        The numeric LU factorization that creates ``perm``, ``L``, and ``U``
+        runs on the CPU.  Calls to :meth:`solve` use native permutation and
+        triangular-solve kernels, which run on the GPU when GPU execution is
+        selected.
     """
 
     perm: mx.array
@@ -131,6 +147,11 @@ class SparseLU:
         Applies the row permutation ``P``, then performs a forward solve with
         the unit lower-triangular factor ``L`` and a backward solve with the
         upper-triangular factor ``U``.  All steps use native CSR kernels.
+
+        GPU note:
+            When GPU execution is selected, the row permutation and both
+            triangular solves dispatch native GPU kernels.  The Python method
+            call and shape checks run on the host.
 
         Args:
             b: Right-hand side vector of shape ``(n,)``.
@@ -163,9 +184,10 @@ def sparse_cholesky(A, *, upper: bool = False) -> SparseCholesky:
     object whose :meth:`~SparseCholesky.solve` method applies both triangular
     solves in sequence.
 
-    The factorization step runs on CPU using the native sparse routine.  The
-    resulting ``SparseCholesky.solve`` dispatches triangular-solve kernels to
-    the GPU when :func:`~mlx_sparse.use_gpu` has been called.
+    GPU note:
+        The factorization step runs on the CPU using the native sparse
+        routine.  The resulting ``SparseCholesky.solve`` dispatches
+        triangular-solve kernels to the GPU when GPU execution is selected.
 
     Args:
         A: The matrix to factorize.  Must be a :class:`~mlx_sparse.CSRArray`
@@ -228,6 +250,10 @@ def cholesky(A, *, upper: bool = False) -> SparseCholesky:
     Provided for compatibility with SciPy-style naming.  All arguments and
     return values are identical to :func:`sparse_cholesky`.
 
+    GPU note:
+        The factorization step runs on the CPU.  The returned factor uses GPU
+        triangular-solve kernels when GPU execution is selected.
+
     Args:
         A: SPD matrix in :class:`~mlx_sparse.CSRArray` or
             :class:`~mlx_sparse.COOArray` format.
@@ -248,9 +274,10 @@ def sparse_lu(A) -> SparseLU:
     upper-triangular factor ``U`` are returned as a :class:`SparseLU` object
     whose :meth:`~SparseLU.solve` method applies the full solve sequence.
 
-    The factorization step runs on CPU using the native sparse routine.  The
-    resulting ``SparseLU.solve`` dispatches permutation and triangular-solve
-    kernels to the GPU when :func:`~mlx_sparse.use_gpu` has been called.
+    GPU note:
+        The factorization step runs on the CPU using the native sparse
+        routine.  The resulting ``SparseLU.solve`` dispatches permutation and
+        triangular-solve kernels to the GPU when GPU execution is selected.
 
     Args:
         A: The matrix to factorize.  Must be a :class:`~mlx_sparse.CSRArray`
@@ -319,6 +346,11 @@ def splu(A) -> SparseLU:
     Provided for compatibility with SciPy-style naming.  All arguments and
     return values are identical to :func:`sparse_lu`.
 
+    GPU note:
+        The factorization step runs on the CPU. The returned factor uses GPU
+        permutation and triangular-solve kernels when GPU execution is
+        selected.
+
     Args:
         A: Matrix to factorize in :class:`~mlx_sparse.CSRArray` or
             :class:`~mlx_sparse.COOArray` format.
@@ -339,6 +371,11 @@ def spsolve(A, b) -> mx.array:
     For repeated solves with the same ``A`` but different right-hand sides,
     call :func:`sparse_lu` once and reuse the resulting :class:`SparseLU`
     object to avoid re-factorizing.
+
+    GPU note:
+        ``spsolve`` factorizes ``A`` on the CPU.  The subsequent row
+        permutation and triangular solves use GPU kernels when GPU execution
+        is selected.
 
     Args:
         A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
