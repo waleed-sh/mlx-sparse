@@ -56,6 +56,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmat/csr_matmat.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul/csr_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_transpose/csr_matmul_transpose.cpp
@@ -113,7 +114,7 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
 
   add_dependencies(mlx_sparse_native mlx_sparse_metallib)
 else()
-  message(STATUS "Skipping mlx_sparse.metallib build. Metal compiler is unavailable.")
+  message(STATUS "Skipping mlx_sparse.metallib build; Metal compiler is unavailable.")
 endif()
 
 nanobind_add_module(

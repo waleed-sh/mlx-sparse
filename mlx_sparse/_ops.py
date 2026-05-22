@@ -19,7 +19,6 @@ from operator import mul
 
 import mlx.core as mx
 
-import mlx_sparse._fallback as _fallback
 import mlx_sparse._native as _native
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import (
@@ -123,16 +122,15 @@ def csr_matmat(a: CSRArray, rhs: CSRArray) -> CSRArray:
 
     Computes ``C = A @ B`` where both ``A`` and ``B`` are
     :class:`~mlx_sparse.CSRArray` instances. The output sparsity pattern is
-    not known at graph-build time, so this operation performs a structural
-    assembly pass on the host (calling ``mx.eval`` on the input arrays
-    internally) and returns a new :class:`~mlx_sparse.CSRArray` with canonical
-    format.
+    not known at graph-build time, so this operation performs a native C++
+    structural assembly pass on the host (calling ``mx.eval`` on the input
+    arrays internally) and returns a new :class:`~mlx_sparse.CSRArray` with
+    canonical format.
 
     Because the output size is data-dependent, this operation is not
-    representable as a fixed-shape MLX primitive. It is implemented in the
-    fallback Python layer and is suitable for one-shot matrix products and
-    matrix-power computations, but is not appropriate inside a JIT-compiled
-    function.
+    representable as a fixed-shape MLX primitive. It is suitable for one-shot
+    matrix products and matrix-power computations, but is not appropriate
+    inside a JIT-compiled function.
 
     Args:
         a: Left-hand sparse matrix, shape ``(m, k)``.
@@ -161,7 +159,12 @@ def csr_matmat(a: CSRArray, rhs: CSRArray) -> CSRArray:
         raise TypeError(f"csr_matmat expects CSRArray lhs, got {type(a).__name__}.")
     if not isinstance(rhs, CSRArray):
         raise TypeError(f"csr_matmat expects CSRArray rhs, got {type(rhs).__name__}.")
-    data, indices, indptr = _fallback.csr_matmat(a, rhs)
+    if a.data.dtype != rhs.data.dtype:
+        raise TypeError(
+            "CSR sparse-sparse matmul requires matching value dtypes, "
+            f"got {a.data.dtype} and {rhs.data.dtype}."
+        )
+    data, indices, indptr = _native.csr_matmat(a, rhs)
     return CSRArray(
         data=data,
         indices=indices,

@@ -104,6 +104,24 @@ def csr_matmul_transpose(
     return ext.csr_matmul_transpose(data, indices, indptr, rhs, shape[0], shape[1])
 
 
+def csr_matmat(lhs, rhs):
+    ext = extension()
+    if ext is None:
+        return _fallback.csr_matmat(lhs, rhs)
+    return ext.csr_matmat(
+        lhs.data,
+        lhs.indices,
+        lhs.indptr,
+        rhs.data,
+        rhs.indices,
+        rhs.indptr,
+        lhs.shape[0],
+        lhs.shape[1],
+        rhs.shape[0],
+        rhs.shape[1],
+    )
+
+
 def csr_transpose(
     data: mx.array,
     indices: mx.array,

@@ -18,6 +18,7 @@
 
 #include "linalg/linalg.h"
 #include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/csr_matmat/csr_matmat.h"
 #include "sparse/csr_matmul/csr_matmul.h"
 #include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
 #include "sparse/csr_matvec/csr_matvec.h"
@@ -125,6 +126,24 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
       "Multiply the transpose of CSR buffers by a dense matrix.");
+
+  m.def(
+      "csr_matmat",
+      [](const mlx_sparse::mx::array &lhs_data,
+         const mlx_sparse::mx::array &lhs_indices,
+         const mlx_sparse::mx::array &lhs_indptr,
+         const mlx_sparse::mx::array &rhs_data,
+         const mlx_sparse::mx::array &rhs_indices,
+         const mlx_sparse::mx::array &rhs_indptr, int lhs_n_rows,
+         int lhs_n_cols, int rhs_n_rows, int rhs_n_cols) {
+        return mlx_sparse::csr_matmat(
+            lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices,
+            rhs_indptr, lhs_n_rows, lhs_n_cols, rhs_n_rows, rhs_n_cols);
+      },
+      "lhs_data"_a, "lhs_indices"_a, "lhs_indptr"_a, "rhs_data"_a,
+      "rhs_indices"_a, "rhs_indptr"_a, "lhs_n_rows"_a, "lhs_n_cols"_a,
+      "rhs_n_rows"_a, "rhs_n_cols"_a,
+      "Multiply two CSR matrices into a canonical CSR representation.");
 
   m.def(
       "csr_cg",
