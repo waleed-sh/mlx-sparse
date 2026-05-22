@@ -27,12 +27,44 @@ def _as_csr(A) -> CSRArray:
 
 
 def vdot(a, b):
-    """Sparse Frobenius inner product from native CSR merge kernels."""
+    """Compute the Frobenius inner product of two sparse matrices.
 
+    Returns ``sum(conj(a) * b)`` over all stored non-zero pairs, using the
+    native CSR sorted-merge kernel for efficient sparse-sparse element-wise
+    accumulation.  Equivalent to ``dot(conj(a), b)`` for real matrices.
+
+    Args:
+        a: First sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
+            :class:`~mlx_sparse.COOArray`.
+        b: Second sparse matrix with the same shape as ``a``.  Must be a
+            :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`.
+
+    Returns:
+        A scalar ``mlx.core.array`` equal to ``sum(conj(a) * b)``.
+
+    Raises:
+        TypeError: If ``a`` or ``b`` is not a supported sparse type.
+    """
     return _as_csr(a).vdot(_as_csr(b))
 
 
 def dot(a, b):
-    """Sparse Frobenius dot product from native CSR merge kernels."""
+    """Compute the Frobenius dot product of two sparse matrices.
 
+    Returns ``sum(a * b)`` over all stored non-zero pairs (no conjugation),
+    using the native CSR sorted-merge kernel for efficient sparse-sparse
+    element-wise accumulation.
+
+    Args:
+        a: First sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
+            :class:`~mlx_sparse.COOArray`.
+        b: Second sparse matrix with the same shape as ``a``.  Must be a
+            :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`.
+
+    Returns:
+        A scalar ``mlx.core.array`` equal to ``sum(a * b)``.
+
+    Raises:
+        TypeError: If ``a`` or ``b`` is not a supported sparse type.
+    """
     return _as_csr(a).dot(_as_csr(b))

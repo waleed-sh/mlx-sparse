@@ -69,6 +69,17 @@ class LinearOperator:
         return 2
 
     def matvec(self, x) -> mx.array:
+        """Apply the operator to a vector: compute ``A @ x``.
+
+        Args:
+            x: Input vector of shape ``(n,)``.
+
+        Returns:
+            Output vector of shape ``(m,)`` as an ``mlx.core.array``.
+
+        Raises:
+            ValueError: If ``x`` is not rank-1 or has the wrong length.
+        """
         x = ensure_array(x)
         if x.ndim != 1:
             raise ValueError(f"matvec expects rank-1 input, got shape={x.shape}.")
@@ -79,6 +90,20 @@ class LinearOperator:
         return self.matvec_fn(x)
 
     def matmat(self, X) -> mx.array:
+        """Apply the operator to a matrix: compute ``A @ X``.
+
+        Args:
+            X: Input matrix of shape ``(n, k)``.
+
+        Returns:
+            Output matrix of shape ``(m, k)`` as an ``mlx.core.array``.
+
+        Raises:
+            NotImplementedError: If no ``matmat_fn`` was provided at
+                construction time.
+            ValueError: If ``X`` is not rank-2 or has the wrong leading
+                dimension.
+        """
         X = ensure_array(X)
         if X.ndim != 2:
             raise ValueError(f"matmat expects rank-2 input, got shape={X.shape}.")
@@ -92,6 +117,19 @@ class LinearOperator:
         return self.matmat_fn(X)
 
     def rmatvec(self, x) -> mx.array:
+        """Apply the adjoint operator to a vector: compute ``A.H @ x``.
+
+        Args:
+            x: Input vector of shape ``(m,)``.
+
+        Returns:
+            Output vector of shape ``(n,)`` as an ``mlx.core.array``.
+
+        Raises:
+            NotImplementedError: If no ``rmatvec_fn`` was provided at
+                construction time.
+            ValueError: If ``x`` is not rank-1 or has the wrong length.
+        """
         x = ensure_array(x)
         if x.ndim != 1:
             raise ValueError(f"rmatvec expects rank-1 input, got shape={x.shape}.")
@@ -117,7 +155,7 @@ class LinearOperator:
     def T(self) -> "LinearOperator":
         """Transpose operator.  ``(op.T) @ x`` computes ``A.T @ x``.
 
-        For real operators ``A.T == A.H``, for complex operators the formula
+        For real operators ``A.T == A.H``. For complex operators the formula
         ``A.T @ x = conj(A.H @ conj(x))`` is used so no extra kernel is
         needed.  Requires :attr:`rmatvec_fn` to be defined.
         """
@@ -178,7 +216,30 @@ def _sparse_operator(array: CSRArray | COOArray) -> LinearOperator:
 
 
 def aslinearoperator(A) -> LinearOperator:
-    """Return a sparse object or explicit callable as a :class:`LinearOperator`."""
+    """Wrap a sparse matrix or callable as a :class:`LinearOperator`.
+
+    Accepts several input forms and returns a :class:`LinearOperator` that
+    exposes :meth:`~LinearOperator.matvec`, :meth:`~LinearOperator.matmat`,
+    and :meth:`~LinearOperator.rmatvec` via the native sparse kernels where
+    possible.
+
+    Args:
+        A: The object to wrap.  Accepted types:
+
+            * :class:`LinearOperator`: returned unchanged.
+            * :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`:
+              wrapped with native CSR matvec/matmat/rmatvec kernels.
+            * SciPy sparse matrix (``scipy.sparse``): converted to CSR via
+              :func:`~mlx_sparse.from_scipy` then wrapped.
+            * ``(shape, matvec)`` or ``(shape, matvec, matmat)`` tuple: the
+              callables are stored directly with no conversion.
+
+    Returns:
+        A :class:`LinearOperator` instance.
+
+    Raises:
+        TypeError: If ``A`` is not one of the accepted types.
+    """
 
     if isinstance(A, LinearOperator):
         return A

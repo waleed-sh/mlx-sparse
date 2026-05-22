@@ -108,7 +108,65 @@ def cg(
     M=None,
     callback=None,
 ):
-    """Native sparse conjugate gradients for real SPD CSR/COO matrices."""
+    """Solve a sparse SPD linear system with the conjugate gradient method.
+
+    Conjugate gradients (CG) is an iterative Krylov solver for symmetric
+    positive-definite (SPD) systems ``A @ x = b``.  Each iteration requires
+    one sparse matrix-vector product dispatched to a Metal kernel via the
+    native CSR engine.  CG converges in at most ``n`` steps in exact
+    arithmetic and typically far fewer for well-conditioned problems.
+
+    Args:
+        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
+            :class:`~mlx_sparse.COOArray` that is symmetric positive-definite.
+            A CSR-backed :class:`LinearOperator` is also accepted.
+        b: Right-hand side vector of shape ``(n,)``.  Must be a rank-1
+            ``mlx.core.array`` or anything convertible to one.
+        x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector
+            when ``None``.
+        rtol: Relative tolerance.  The solver stops when
+            ``||r_k|| <= max(atol, rtol * ||b||)``.  Defaults to ``1e-5``.
+        atol: Absolute tolerance floor.  Useful when ``b`` is near zero.
+            Defaults to ``0.0``.
+        maxiter: Maximum number of iterations.  Defaults to ``10 * n`` when
+            ``None``.
+        M: Not supported.  Pass ``None`` (the default).
+        callback: Not supported.  Pass ``None`` (the default).
+
+    Returns:
+        A tuple ``(x, info)`` where ``x`` is the approximate solution array
+        of shape ``(n,)`` and ``info`` is an integer convergence flag.
+        ``info == 0`` means the solver converged to the requested tolerance.
+        ``info > 0`` is the iteration count at which the solver stopped without
+        converging.
+
+    Raises:
+        NotImplementedError: If ``M`` or ``callback`` is not ``None``.
+        TypeError: If ``A`` is a dense ``mlx.core.array`` or an unsupported
+            type.
+        ValueError: If ``b`` is not rank-1 or its length does not match
+            ``A.shape[0]``.
+
+    Example:
+        Build a 2-D Poisson Laplacian and solve it with CG::
+
+            import mlx.core as mx
+            import numpy as np
+            import scipy.sparse
+            import mlx_sparse as ms
+            from mlx_sparse import linalg
+
+            n = 16
+            L = scipy.sparse.diags([-1, 4, -1], [-1, 0, 1],
+                                   shape=(n, n), format='csr').astype(np.float32)
+            A = ms.csr_array(
+                (mx.array(L.data), mx.array(L.indices), mx.array(L.indptr)),
+                shape=L.shape, canonical=True,
+            )
+            b = mx.ones((n,), dtype=mx.float32)
+            x, info = linalg.cg(A, b, rtol=1e-6)
+            print(info)  # 0 means converged
+    """
 
     if M is not None or callback is not None:
         raise NotImplementedError("native sparse cg does not use Python callbacks.")
@@ -142,7 +200,47 @@ def gmres(
     callback=None,
     callback_type: str = "x",
 ):
-    """Native sparse restarted GMRES for real CSR/COO matrices."""
+    """Solve a sparse linear system with restarted GMRES.
+
+    Generalised Minimum RESidual (GMRES) is an iterative Krylov solver for
+    any non-singular square system ``A @ x = b``.  Unlike CG it does not
+    require ``A`` to be symmetric or positive-definite, making it the default
+    choice for non-symmetric PDEs and general sparse systems.
+
+    Each restart cycle builds an Arnoldi basis of dimension ``restart`` using
+    one sparse matrix-vector product per step, then minimises the residual
+    over that Krylov subspace.  Memory scales as ``O(restart * n)``.
+
+    Args:
+        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
+            :class:`~mlx_sparse.COOArray`.  A CSR-backed
+            :class:`LinearOperator` is also accepted.  Need not be symmetric.
+        b: Right-hand side vector of shape ``(n,)``.
+        x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector.
+        rtol: Relative tolerance for the residual stopping criterion.
+            Defaults to ``1e-5``.
+        atol: Absolute tolerance floor.  Defaults to ``0.0``.
+        restart: Size of the Krylov subspace built before each restart.
+            Larger values accelerate convergence at the cost of more memory.
+            Defaults to ``min(20, n)``.
+        maxiter: Maximum total number of matrix-vector products across all
+            restart cycles.  Defaults to ``10 * n``.
+        M: Not supported.  Pass ``None`` (the default).
+        callback: Not supported.  Pass ``None`` (the default).
+        callback_type: Accepted for API compatibility but ignored.
+
+    Returns:
+        A tuple ``(x, info)`` where ``x`` is the approximate solution of
+        shape ``(n,)`` and ``info`` is an integer convergence flag.
+        ``info == 0`` means the solver converged.  ``info > 0`` is the
+        iteration count at termination without convergence.
+
+    Raises:
+        NotImplementedError: If ``M`` or ``callback`` is not ``None``.
+        TypeError: If ``A`` is a dense array or an unsupported type.
+        ValueError: If ``b`` is not rank-1, its length does not match
+            ``A.shape[0]``, or ``restart`` is not positive.
+    """
 
     if M is not None or callback is not None:
         raise NotImplementedError("native sparse gmres does not use Python callbacks.")
@@ -179,7 +277,44 @@ def minres(
     maxiter: int | None = None,
     callback=None,
 ):
-    """Native sparse MINRES for real symmetric/Hermitian CSR/COO matrices."""
+    """Solve a sparse symmetric linear system with MINRES.
+
+    MINimum RESidual (MINRES) is an iterative Krylov solver for symmetric
+    systems ``A @ x = b`` where ``A`` may be symmetric indefinite (having
+    both positive and negative eigenvalues).  It minimises the 2-norm of the
+    residual at every step using a Lanczos-based recurrence and requires only
+    a constant number of vectors in memory, making it more memory-efficient
+    than GMRES for large symmetric indefinite problems.
+
+    Args:
+        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
+            :class:`~mlx_sparse.COOArray` that is real and symmetric.
+        b: Right-hand side vector of shape ``(n,)``.
+        x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector.
+        rtol: Relative tolerance for the residual stopping criterion.
+            Defaults to ``1e-5``.
+        atol: Absolute tolerance floor.  Defaults to ``0.0``.
+        maxiter: Maximum number of iterations.  Defaults to ``10 * n``.
+        callback: Not supported.  Pass ``None`` (the default).
+
+    Returns:
+        A tuple ``(x, info)`` where ``x`` is the approximate solution of
+        shape ``(n,)`` and ``info`` is an integer convergence flag.
+        ``info == 0`` means the solver converged to the requested tolerance.
+        ``info > 0`` is the iteration count at which the solver stopped
+        without converging.
+
+    Raises:
+        NotImplementedError: If ``callback`` is not ``None``.
+        TypeError: If ``A`` is a dense array or an unsupported type.
+        ValueError: If ``b`` is not rank-1 or its length does not match
+            ``A.shape[0]``.
+
+    Note:
+        MINRES requires ``A`` to be symmetric but not positive-definite.  For
+        SPD systems :func:`cg` is typically faster.  For non-symmetric systems
+        use :func:`gmres`.
+    """
 
     if callback is not None:
         raise NotImplementedError("native sparse minres does not use Python callbacks.")
