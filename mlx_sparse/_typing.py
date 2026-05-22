@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, TypeAlias
+from typing import Callable, Literal, Protocol, TypeAlias
 
 import mlx.core as mx
 
@@ -23,6 +23,9 @@ ValidationMode: TypeAlias = bool | Literal["metadata", "full"]
 
 INDEX_DTYPES = (mx.int32, mx.int64)
 VALUE_DTYPES = (mx.float32, mx.float16, mx.bfloat16, mx.complex64)
+
+Matvec = Callable[[mx.array], mx.array]
+Matmat = Callable[[mx.array], mx.array]
 
 
 class SparseArray(Protocol):

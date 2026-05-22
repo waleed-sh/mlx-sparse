@@ -14,8 +14,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import mlx.core as mx
 
 from mlx_sparse._coo import COOArray
@@ -23,8 +21,7 @@ from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import normalize_shape
 from mlx_sparse.linalg._utils import ensure_array
 
-Matvec = Callable[[mx.array], mx.array]
-Matmat = Callable[[mx.array], mx.array]
+from .._typing import Matmat, Matvec
 
 
 class LinearOperator:
