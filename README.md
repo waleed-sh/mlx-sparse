@@ -24,7 +24,7 @@ dense RHS operands, including `complex64`.
 
 > **Warning:**
 > A lot of the linalg functionality is new and is currently being tested.
-> We welcome any and all feedback!
+> We welcome any and all feedback! Not all solvers are GPU supported ([see here](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg.html#gpu-coverage)).
 
 
 Supported value dtypes are `float32`, `float16`, `bfloat16`, and `complex64`.
