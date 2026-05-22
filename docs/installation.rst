@@ -10,9 +10,9 @@ For users, the normal installation path is PyPI:
 
    python -m pip install mlx-sparse
 
-This installs ``mlx-sparse`` and its runtime dependency on MLX. On supported
-macOS/Apple Silicon machines, the wheel includes the native extension and Metal
-library needed for CPU and GPU sparse kernels.
+This installs ``mlx-sparse`` and its runtime dependencies on MLX and NumPy. On
+supported macOS/Apple Silicon machines, the wheel includes the native extension
+and Metal library needed for CPU and GPU sparse kernels.
 
 Installing from source (editable)
 ----------------------------------
@@ -42,6 +42,9 @@ Requirements
    * - MLX ≥ 0.31
      - Installed automatically by ``pip install mlx-sparse``. Source builds use
        ``python -m mlx --cmake-dir`` to locate the MLX package.
+   * - NumPy ≥ 1.26
+     - Used for host-side conversions, constructors, validation, and fallback
+       sparse kernels.
    * - CMake ≥ 3.27
      - Required only when building from source.
    * - nanobind ≥ 2.0
@@ -64,7 +67,7 @@ Local install
    # 3. Install in editable mode with development extras.
    python -m pip install -e ".[dev]"
 
-The ``dev`` extras include ``pytest``, ``numpy``, ``scipy``, ``black``,
+The ``dev`` extras include ``pytest``, ``scipy``, ``black``,
 ``isort``, and ``pre-commit``.
 
 For documentation builds, install the ``docs`` extras instead:

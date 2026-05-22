@@ -22,6 +22,7 @@ authors = [
 ]
 dependencies = [
     "mlx>=0.31",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,7 @@ docs = [
     "sphinx>=8,<10",
     "pydata-sphinx-theme>=0.16",
     "myst-nb>=1.4",
+    "numpy>=1.26",
 ]
 
 [tool.setuptools_scm]
