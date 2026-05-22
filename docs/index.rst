@@ -6,6 +6,12 @@ MLX extension. It provides COO and CSR sparse containers backed by
 ``mlx.core.array``, with C++ MLX primitives for sparse-dense products on both
 CPU and Metal GPU. It also supports some linear algebra operations for sparse matrices.
 
+.. note::
+
+   GPU support in this version is Apple Silicon Metal only. CUDA is not
+   currently supported. Also, not all linalg operations are supported on Metal, see :ref:`gpu-supported-linalg`.
+
+
 The design follows MLX's operation/primitive split. Python containers own the
 user API, C++ primitives own graph construction and backend evaluation, and
 Metal kernels run through MLX's command encoder without a separate

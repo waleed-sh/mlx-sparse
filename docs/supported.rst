@@ -157,6 +157,8 @@ Sparse-dense arithmetic
      - Not planned
      - Dynamic output size. May be added as a host-side utility.
 
+.. _gpu-supported-linalg:
+
 Sparse linear algebra
 ---------------------
 

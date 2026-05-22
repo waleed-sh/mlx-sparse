@@ -8,6 +8,13 @@
 > **Warning: beta release**
 > This is an early beta. APIs may change, bugs are expected, and some features
 > are still incomplete. Feedback and issue reports are very welcome!
+> 
+> A lot of the linalg functionality is new and is currently being tested.
+> We welcome any and all feedback! Not all solvers are GPU supported ([see here](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg.html#gpu-coverage)).
+
+> **Platform note**
+> GPU support in this version is Apple Silicon Metal only. CUDA is not
+> currently supported.
 
 `mlx-sparse` is an attempt at an MLX-native sparse array package. The public API is Python,
 while performance-critical operations are implemented as MLX primitives in C++
@@ -21,10 +28,6 @@ transpose. ``mlx-sparse`` also supports sparse linalg solvers (`cg`, `gmres`, `m
 routines (`eigsh`, `eigs`, `svds`), sparse Cholesky/LU factors, sparse
 triangular solves, sparse `dot`/`vdot`, and autodiff through sparse values and
 dense RHS operands, including `complex64`. 
-
-> **Warning:**
-> A lot of the linalg functionality is new and is currently being tested.
-> We welcome any and all feedback! Not all solvers are GPU supported ([see here](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg.html#gpu-coverage)).
 
 
 Supported value dtypes are `float32`, `float16`, `bfloat16`, and `complex64`.
