@@ -7,7 +7,12 @@ The linalg namespace contains sparse-native solvers and factorizations. Public
 functions accept ``CSRArray`` and ``COOArray`` inputs, dense arrays are not
 silently converted because dense linear algebra belongs in ``mlx.linalg``.
 
-**GPU coverage summary**: call ``ms.use_gpu()`` to enable Metal dispatch:
+.. warning::
+
+   Some solvers are not fully supported on GPU, and either have a CPU only version or require CPU
+   operations in the solve process. Please see the below
+
+**GPU coverage summary**: call ``ms.use_gpu()`` to enable Metal dispatch. Current solver GPU support:
 
 * **Full GPU**: :func:`cg`, :func:`dot`, :func:`vdot`,
   :meth:`SparseCholesky.solve`, :meth:`SparseLU.solve`, :func:`spsolve`
