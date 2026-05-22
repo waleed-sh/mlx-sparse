@@ -16,14 +16,16 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 
-#include "sparse/coo_tocsr.h"
-#include "sparse/csr_linalg.h"
-#include "sparse/csr_matmul.h"
-#include "sparse/csr_matvec.h"
-#include "sparse/csr_sort_indices.h"
-#include "sparse/csr_todense.h"
-#include "sparse/csr_transpose.h"
-#include "sparse/identity_like.h"
+#include "linalg/linalg.h"
+#include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/csr_matmul/csr_matmul.h"
+#include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
+#include "sparse/csr_matvec/csr_matvec.h"
+#include "sparse/csr_matvec_transpose/csr_matvec_transpose.h"
+#include "sparse/csr_sort_indices/csr_sort_indices.h"
+#include "sparse/csr_todense/csr_todense.h"
+#include "sparse/csr_transpose/csr_transpose.h"
+#include "sparse/identity_like/identity_like.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;

@@ -41,15 +41,31 @@ add_library(mlx_sparse_native)
 target_sources(
   mlx_sparse_native
   PUBLIC
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/common.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_linalg.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/identity_like.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/src/common/common.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/arnoldi/arnoldi.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cg/cg.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cholesky/cholesky.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/eigs/eigs.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/eigsh/eigsh.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/gmres/gmres.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/inner_product/inner_product.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/lanczos/lanczos.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/lu/lu.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/minres/minres.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/permute_vector/permute_vector.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul/csr_matmul.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_transpose/csr_matmul_transpose.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec/csr_matvec.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_transpose/csr_matvec_transpose.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/identity_like/identity_like.cpp)
 
 target_include_directories(
   mlx_sparse_native
@@ -69,15 +85,25 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
     TARGET mlx_sparse_metallib
     TITLE mlx_sparse
     SOURCES
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr.metal
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_linalg.metal
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul.metal
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec.metal
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices.metal
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense.metal
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/arnoldi/arnoldi.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cg/cg.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/inner_product/inner_product.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/lanczos/lanczos.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/permute_vector/permute_vector.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul/csr_matmul.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_transpose/csr_matmul_transpose.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec/csr_matvec.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_transpose/csr_matvec_transpose.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.metal
     DEPS
-      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/metal_common.h
+      ${CMAKE_CURRENT_LIST_DIR}/src/common/metal_common.h
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/common/metal_common.h
     INCLUDE_DIRS
       ${PROJECT_SOURCE_DIR}
       ${CMAKE_CURRENT_LIST_DIR}/src
@@ -87,7 +113,7 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
 
   add_dependencies(mlx_sparse_native mlx_sparse_metallib)
 else()
-  message(STATUS "Skipping mlx_sparse.metallib build; Metal compiler is unavailable.")
+  message(STATUS "Skipping mlx_sparse.metallib build. Metal compiler is unavailable.")
 endif()
 
 nanobind_add_module(
