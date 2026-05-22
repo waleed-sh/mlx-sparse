@@ -203,3 +203,8 @@ def aslinearoperator(A) -> LinearOperator:
         "aslinearoperator accepts LinearOperator, CSRArray, COOArray, SciPy "
         "sparse matrices, or (shape, matvec[, matmat]) tuples."
     )
+
+
+def as_linear_operator(A) -> LinearOperator:
+    """Alias for :func:`mlx_sparse.linalg.aslinearoperator`."""
+    return aslinearoperator(A)
