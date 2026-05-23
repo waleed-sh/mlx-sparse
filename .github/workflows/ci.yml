@@ -32,7 +32,8 @@ jobs:
 
       - name: C++ format
         run: |
-          xcrun clang-format --dry-run --Werror src/bindings.cpp src/sparse/*.cpp src/sparse/*.h src/sparse/*.metal
+          find src -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.metal' \) -print0 \
+            | xargs -0 xcrun clang-format --dry-run --Werror
 
       - name: Tests
         run: python -m pytest -q --cov=mlx_sparse --cov-report=term-missing --cov-fail-under=88 --cov-branch --cov-append --cov-report=xml
