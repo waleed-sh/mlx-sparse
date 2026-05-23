@@ -139,6 +139,50 @@ class CSRArray:
         """
         return _native.csr_todense(self.data, self.indices, self.indptr, self.shape)
 
+    def row_sums(self) -> mx.array:
+        """Return the sum of stored values in each CSR row."""
+        return _native.csr_row_sums(self.data, self.indices, self.indptr, self.shape)
+
+    def col_sums(self) -> mx.array:
+        """Return the sum of stored values in each CSR column."""
+        return _native.csr_col_sums(self.data, self.indices, self.indptr, self.shape)
+
+    def column_sums(self) -> mx.array:
+        """Alias for :meth:`col_sums`."""
+        return self.col_sums()
+
+    def row_norms(self) -> mx.array:
+        """Return the L2 norm of each CSR row as ``float32``."""
+        array = self if self.has_canonical_format else self.canonicalize()
+        return _native.csr_row_norms(
+            array.data,
+            array.indices,
+            array.indptr,
+            array.shape,
+        )
+
+    def diagonal(self) -> mx.array:
+        """Return the summed main diagonal."""
+        return _native.csr_diagonal(self.data, self.indices, self.indptr, self.shape)
+
+    def trace(self) -> mx.array:
+        """Return the summed main diagonal as a scalar."""
+        return _native.csr_trace(self.data, self.indices, self.indptr, self.shape)
+
+    def sum(self, axis=None) -> mx.array:
+        """Sum sparse values over all entries, rows, or columns.
+
+        ``axis=None`` returns a scalar, ``axis=1`` returns row sums, and
+        ``axis=0`` returns column sums.
+        """
+        if axis is None:
+            return mx.sum(self.row_sums())
+        if axis in (1, -1):
+            return self.row_sums()
+        if axis in (0, -2):
+            return self.col_sums()
+        raise ValueError(f"CSRArray.sum axis must be None, 0, or 1; got {axis!r}.")
+
     def sort_indices(self) -> "CSRArray":
         """Return a new CSRArray with column indices sorted within each row.
 

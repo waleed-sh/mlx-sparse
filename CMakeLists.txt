@@ -58,6 +58,8 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matmul/csr_batched_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matvec/csr_batched_matvec.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_col_sums/csr_col_sums.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_diagonal/csr_diagonal.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmat/csr_matmat.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul/csr_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.cpp
@@ -65,9 +67,12 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec/csr_matvec.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_transpose/csr_matvec_transpose.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_row_norms/csr_row_norms.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_row_sums/csr_row_sums.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sum_duplicates/csr_sum_duplicates.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_trace/csr_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/fromdense/fromdense.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/identity_like/identity_like.cpp)
@@ -99,6 +104,8 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matmul/csr_batched_matmul.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matvec/csr_batched_matvec.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_col_sums/csr_col_sums.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_diagonal/csr_diagonal.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmat/csr_matmat.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul/csr_matmul.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.metal
@@ -106,9 +113,12 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec/csr_matvec.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_transpose/csr_matvec_transpose.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_row_norms/csr_row_norms.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_row_sums/csr_row_sums.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sum_duplicates/csr_sum_duplicates.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_trace/csr_trace.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/fromdense/fromdense.metal
     DEPS

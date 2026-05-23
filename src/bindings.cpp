@@ -20,14 +20,19 @@
 #include "sparse/coo_tocsr/coo_tocsr.h"
 #include "sparse/csr_batched_matmul/csr_batched_matmul.h"
 #include "sparse/csr_batched_matvec/csr_batched_matvec.h"
+#include "sparse/csr_col_sums/csr_col_sums.h"
+#include "sparse/csr_diagonal/csr_diagonal.h"
 #include "sparse/csr_matmat/csr_matmat.h"
 #include "sparse/csr_matmul/csr_matmul.h"
 #include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
 #include "sparse/csr_matvec/csr_matvec.h"
 #include "sparse/csr_matvec_transpose/csr_matvec_transpose.h"
+#include "sparse/csr_row_norms/csr_row_norms.h"
+#include "sparse/csr_row_sums/csr_row_sums.h"
 #include "sparse/csr_sort_indices/csr_sort_indices.h"
 #include "sparse/csr_sum_duplicates/csr_sum_duplicates.h"
 #include "sparse/csr_todense/csr_todense.h"
+#include "sparse/csr_trace/csr_trace.h"
 #include "sparse/csr_transpose/csr_transpose.h"
 #include "sparse/fromdense/fromdense.h"
 #include "sparse/identity_like/identity_like.h"
@@ -102,6 +107,56 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
       "Transpose CSR buffers into a new row-sorted CSR representation.");
+
+  m.def(
+      "csr_row_sums",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_row_sums(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Reduce each CSR row to the sum of its stored values.");
+
+  m.def(
+      "csr_col_sums",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_col_sums(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Reduce each CSR column to the sum of its stored values.");
+
+  m.def(
+      "csr_row_norms",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_row_norms(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the L2 norm of each CSR row.");
+
+  m.def(
+      "csr_diagonal",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_diagonal(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Extract the summed diagonal of CSR buffers.");
+
+  m.def(
+      "csr_trace",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_trace(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the trace of CSR buffers.");
 
   m.def(
       "csr_matvec",

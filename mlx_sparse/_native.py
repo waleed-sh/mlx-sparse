@@ -172,6 +172,66 @@ def csr_transpose(
     return ext.csr_transpose(data, indices, indptr, shape[0], shape[1])
 
 
+def csr_row_sums(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csr_row_sums(data, indices, indptr, shape)
+    return ext.csr_row_sums(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_col_sums(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csr_col_sums(data, indices, indptr, shape)
+    return ext.csr_col_sums(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_row_norms(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csr_row_norms(data, indices, indptr, shape)
+    return ext.csr_row_norms(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_diagonal(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csr_diagonal(data, indices, indptr, shape)
+    return ext.csr_diagonal(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_trace(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csr_trace(data, indices, indptr, shape)
+    return ext.csr_trace(data, indices, indptr, shape[0], shape[1])
+
+
 def csr_sort_indices(
     data: mx.array,
     indices: mx.array,

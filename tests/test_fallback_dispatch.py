@@ -76,6 +76,26 @@ def test_native_wrappers_fall_back_to_python_kernels(monkeypatch, mx):
         to_numpy(native.csr_matmul_transpose(data, indices, indptr, row_rhs, shape)),
         dense.T @ to_numpy(row_rhs),
     )
+    np.testing.assert_allclose(
+        to_numpy(native.csr_row_sums(data, indices, indptr, shape)),
+        dense.sum(axis=1),
+    )
+    np.testing.assert_allclose(
+        to_numpy(native.csr_col_sums(data, indices, indptr, shape)),
+        dense.sum(axis=0),
+    )
+    np.testing.assert_allclose(
+        to_numpy(native.csr_row_norms(data, indices, indptr, shape)),
+        np.linalg.norm(dense, axis=1),
+    )
+    np.testing.assert_allclose(
+        to_numpy(native.csr_diagonal(data, indices, indptr, shape)),
+        np.diag(dense),
+    )
+    np.testing.assert_allclose(
+        to_numpy(native.csr_trace(data, indices, indptr, shape)),
+        np.trace(dense),
+    )
 
     dup_data = mx.array(np.array([1.0, 2.0, -1.0], dtype=np.float32))
     dup_indices = mx.array(np.array([0, 0, 2], dtype=np.int32))

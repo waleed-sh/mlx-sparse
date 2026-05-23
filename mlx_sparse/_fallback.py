@@ -60,6 +60,108 @@ def csr_todense(
     return to_mx(dense, dtype=data.dtype)
 
 
+def _reduction_accum_dtype(data: mx.array, data_np: np.ndarray):
+    if data.dtype in {mx.float16, mx.bfloat16}:
+        return np.float32
+    return data_np.dtype
+
+
+def csr_row_sums(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    del indices
+    data_np = to_numpy(data)
+    indptr_np = to_numpy(indptr)
+    accum_dtype = _reduction_accum_dtype(data, data_np)
+    out = np.zeros(shape[0], dtype=accum_dtype)
+    for row in range(shape[0]):
+        start = int(indptr_np[row])
+        end = int(indptr_np[row + 1])
+        out[row] = data_np[start:end].sum(dtype=accum_dtype)
+    return to_mx(out, dtype=data.dtype)
+
+
+def csr_col_sums(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    accum_dtype = _reduction_accum_dtype(data, data_np)
+    out = np.zeros(shape[1], dtype=accum_dtype)
+    for row in range(shape[0]):
+        start = int(indptr_np[row])
+        end = int(indptr_np[row + 1])
+        np.add.at(out, indices_np[start:end], data_np[start:end])
+    return to_mx(out, dtype=data.dtype)
+
+
+def csr_row_norms(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    del indices
+    data_np = to_numpy(data)
+    indptr_np = to_numpy(indptr)
+    out = np.zeros(shape[0], dtype=np.float32)
+    for row in range(shape[0]):
+        start = int(indptr_np[row])
+        end = int(indptr_np[row + 1])
+        values = data_np[start:end]
+        out[row] = np.sqrt(np.sum(np.abs(values) ** 2, dtype=np.float64))
+    return to_mx(out, dtype=mx.float32)
+
+
+def csr_diagonal(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    diag_size = min(shape)
+    accum_dtype = _reduction_accum_dtype(data, data_np)
+    out = np.zeros(diag_size, dtype=accum_dtype)
+    for row in range(diag_size):
+        start = int(indptr_np[row])
+        end = int(indptr_np[row + 1])
+        mask = indices_np[start:end] == row
+        if mask.any():
+            out[row] = data_np[start:end][mask].sum(dtype=accum_dtype)
+    return to_mx(out, dtype=data.dtype)
+
+
+def csr_trace(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    diag_size = min(shape)
+    accum_dtype = _reduction_accum_dtype(data, data_np)
+    total = np.zeros((), dtype=accum_dtype)
+    for row in range(diag_size):
+        start = int(indptr_np[row])
+        end = int(indptr_np[row + 1])
+        mask = indices_np[start:end] == row
+        if mask.any():
+            total[...] = total + data_np[start:end][mask].sum(dtype=accum_dtype)
+    return to_mx(total, dtype=data.dtype)
+
+
 def csr_matvec(
     data: mx.array,
     indices: mx.array,

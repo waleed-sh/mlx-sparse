@@ -25,6 +25,7 @@ from mlx_sparse._validation import (
     ensure_mx_array,
     validate_csr_matmul_inputs,
     validate_csr_matvec_inputs,
+    validate_csr_metadata,
 )
 
 
@@ -74,6 +75,50 @@ def todense(array) -> mx.array:
     if hasattr(array, "todense"):
         return array.todense()
     raise TypeError(f"todense expects an mlx-sparse array, got {type(array).__name__}.")
+
+
+def _ensure_csr_array(name: str, a) -> CSRArray:
+    if not isinstance(a, CSRArray):
+        raise TypeError(f"{name} expects CSRArray, got {type(a).__name__}.")
+    validate_csr_metadata(a.data, a.indices, a.indptr, a.shape)
+    return a
+
+
+def csr_row_sums(a: CSRArray) -> mx.array:
+    """Reduce each row of a CSR matrix to the sum of its stored values."""
+    a = _ensure_csr_array("csr_row_sums", a)
+    return _native.csr_row_sums(a.data, a.indices, a.indptr, a.shape)
+
+
+def csr_col_sums(a: CSRArray) -> mx.array:
+    """Reduce each column of a CSR matrix to the sum of its stored values."""
+    a = _ensure_csr_array("csr_col_sums", a)
+    return _native.csr_col_sums(a.data, a.indices, a.indptr, a.shape)
+
+
+def csr_column_sums(a: CSRArray) -> mx.array:
+    """Alias for :func:`csr_col_sums`."""
+    return csr_col_sums(a)
+
+
+def csr_row_norms(a: CSRArray) -> mx.array:
+    """Compute the L2 norm of each CSR row."""
+    a = _ensure_csr_array("csr_row_norms", a)
+    if not a.has_canonical_format:
+        a = a.canonicalize()
+    return _native.csr_row_norms(a.data, a.indices, a.indptr, a.shape)
+
+
+def csr_diagonal(a: CSRArray) -> mx.array:
+    """Extract the summed diagonal of a CSR matrix."""
+    a = _ensure_csr_array("csr_diagonal", a)
+    return _native.csr_diagonal(a.data, a.indices, a.indptr, a.shape)
+
+
+def csr_trace(a: CSRArray) -> mx.array:
+    """Compute the trace of a CSR matrix."""
+    a = _ensure_csr_array("csr_trace", a)
+    return _native.csr_trace(a.data, a.indices, a.indptr, a.shape)
 
 
 def csr_matvec(a: CSRArray, x) -> mx.array:
