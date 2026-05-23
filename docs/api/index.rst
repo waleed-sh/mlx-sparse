@@ -7,6 +7,7 @@ API reference
    containers
    constructors
    operations
+   configuration
    linalg
    device
 

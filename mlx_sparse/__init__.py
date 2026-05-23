@@ -43,6 +43,12 @@ Typical usage::
 """
 
 from mlx_sparse import linalg
+from mlx_sparse._config import (
+    config,
+    config_context,
+    get_config,
+    set_config,
+)
 from mlx_sparse._construct import (
     asarray,
     diags,
@@ -92,6 +98,8 @@ __all__ = [
     "CSRArray",
     "asarray",
     "coo_array",
+    "config",
+    "config_context",
     "csr_array",
     "csr_matmat",
     "csr_matmul",
@@ -106,6 +114,8 @@ __all__ = [
     "is_available",
     "issparse",
     "linalg",
+    "get_config",
+    "set_config",
     "todense",
     "use_cpu",
     "use_device",
