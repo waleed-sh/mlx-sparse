@@ -63,16 +63,16 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
     float pivot_abs = 0.0f;
     for (int row = k; row < n_rows; ++row) {
       auto found = rows[static_cast<size_t>(row)].find(k);
-      const float value = found == rows[static_cast<size_t>(row)].end()
-                              ? 0.0f
-                              : found->second;
+      const float value =
+          found == rows[static_cast<size_t>(row)].end() ? 0.0f : found->second;
       if (std::abs(value) > pivot_abs) {
         pivot_abs = std::abs(value);
         pivot_row = row;
       }
     }
     if (pivot_abs <= eps) {
-      throw std::runtime_error("csr_lu encountered a structurally singular pivot.");
+      throw std::runtime_error(
+          "csr_lu encountered a structurally singular pivot.");
     }
     if (pivot_row != k) {
       std::swap(rows[static_cast<size_t>(pivot_row)],
@@ -126,26 +126,23 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
         l_indices.push_back(static_cast<I>(col));
       }
     }
-    l_indptr[static_cast<size_t>(row) + 1] =
-        static_cast<I>(l_data.size());
+    l_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(l_data.size());
     for (const auto &[col, value] : U[static_cast<size_t>(row)]) {
       if (col >= row && std::abs(value) > eps) {
         u_data.push_back(value);
         u_indices.push_back(static_cast<I>(col));
       }
     }
-    u_indptr[static_cast<size_t>(row) + 1] =
-        static_cast<I>(u_data.size());
+    u_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(u_data.size());
   }
 
-  auto permutation =
-      mx::array(perm.begin(), mx::Shape{static_cast<int>(perm.size())},
-                mx::int32);
+  auto permutation = mx::array(
+      perm.begin(), mx::Shape{static_cast<int>(perm.size())}, mx::int32);
   auto [l_data_array, l_indices_array, l_indptr_array] =
       make_csr_arrays_float32(l_data, l_indices, l_indptr, index_dtype);
   auto [u_data_array, u_indices_array, u_indptr_array] =
       make_csr_arrays_float32(u_data, u_indices, u_indptr, index_dtype);
-  return {permutation,   l_data_array,   l_indices_array, l_indptr_array,
+  return {permutation,  l_data_array,    l_indices_array, l_indptr_array,
           u_data_array, u_indices_array, u_indptr_array};
 }
 
@@ -153,8 +150,8 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
 
 std::tuple<mx::array, mx::array, mx::array, mx::array, mx::array, mx::array,
            mx::array>
-csr_lu(const mx::array &data, const mx::array &indices,
-       const mx::array &indptr, int n_rows, int n_cols) {
+csr_lu(const mx::array &data, const mx::array &indices, const mx::array &indptr,
+       int n_rows, int n_cols) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_lu requires a non-empty square matrix.");
   }
@@ -162,11 +159,11 @@ csr_lu(const mx::array &data, const mx::array &indices,
   require_rank(indices, 1, "csr_lu indices");
   require_rank(indptr, 1, "csr_lu indptr");
   require_linalg_float32(data, "csr_lu data");
-  require_same_index_dtype(indices, indptr, "csr_lu indices",
-                           "csr_lu indptr");
+  require_same_index_dtype(indices, indptr, "csr_lu indices", "csr_lu indptr");
   require_size(indptr, n_rows + 1, "csr_lu indptr");
   if (indices.size() != data.size()) {
-    throw std::invalid_argument("csr_lu data and indices must have equal length.");
+    throw std::invalid_argument(
+        "csr_lu data and indices must have equal length.");
   }
   if (indices.dtype() == mx::int32) {
     return csr_lu_impl<int32_t>(data, indices, indptr, n_rows, n_cols,

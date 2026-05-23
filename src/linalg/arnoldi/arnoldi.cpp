@@ -105,7 +105,8 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
 
     double v_norm2 = 0.0;
     for (int i = 0; i < n_rows; ++i) {
-      v_norm2 += static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
+      v_norm2 +=
+          static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
     }
     float v_norm = std::sqrt(std::max(v_norm2, 0.0));
     if (v_norm <= std::numeric_limits<float>::epsilon()) {
@@ -134,8 +135,7 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
           for (int row = 0; row < n_rows; ++row) {
             coeff += basis_ptr[static_cast<size_t>(row) * cols + col] * w[row];
           }
-          h_ptr[static_cast<size_t>(col) * k + j] +=
-              static_cast<float>(coeff);
+          h_ptr[static_cast<size_t>(col) * k + j] += static_cast<float>(coeff);
           for (int row = 0; row < n_rows; ++row) {
             w[row] -= static_cast<float>(coeff) *
                       basis_ptr[static_cast<size_t>(row) * cols + col];
@@ -194,9 +194,9 @@ void CSRArnoldi::eval_gpu(const std::vector<mx::array> &inputs,
   h.set_data(mx::allocator::malloc(h.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
   actual.set_data(mx::allocator::malloc(actual.nbytes()));
-  mx::array work(mx::allocator::malloc(static_cast<size_t>(n_rows_) *
-                                       sizeof(float)),
-                 mx::Shape{n_rows_}, mx::float32);
+  mx::array work(
+      mx::allocator::malloc(static_cast<size_t>(n_rows_) * sizeof(float)),
+      mx::Shape{n_rows_}, mx::float32);
 
   auto &s = stream();
   auto &device = mx::metal::device(s.device);

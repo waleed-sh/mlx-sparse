@@ -15,15 +15,16 @@
 #include "linalg/common/metal_common.h"
 
 template <typename T, typename I, bool ConjugateLhs>
-[[kernel]] void csr_vdot_kernel(
-    device const T *lhs_data [[buffer(0)]],
-    device const I *lhs_indices [[buffer(1)]],
-    device const I *lhs_indptr [[buffer(2)]],
-    device const T *rhs_data [[buffer(3)]],
-    device const I *rhs_indices [[buffer(4)]],
-    device const I *rhs_indptr [[buffer(5)]], device T *out [[buffer(6)]],
-    constant int &n_rows [[buffer(7)]], constant int &n_cols [[buffer(8)]],
-    uint lane [[thread_index_in_threadgroup]]) {
+[[kernel]] void csr_vdot_kernel(device const T *lhs_data [[buffer(0)]],
+                                device const I *lhs_indices [[buffer(1)]],
+                                device const I *lhs_indptr [[buffer(2)]],
+                                device const T *rhs_data [[buffer(3)]],
+                                device const I *rhs_indices [[buffer(4)]],
+                                device const I *rhs_indptr [[buffer(5)]],
+                                device T *out [[buffer(6)]],
+                                constant int &n_rows [[buffer(7)]],
+                                constant int &n_cols [[buffer(8)]],
+                                uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   typedef typename sparse_accumulator<T>::type acc_t;
   threadgroup acc_t scratch[256];
@@ -38,7 +39,8 @@ template <typename T, typename I, bool ConjugateLhs>
       const I lc = lhs_indices[lp];
       const I rc = rhs_indices[rp];
       if (lc == rc) {
-        const T lhs = ConjugateLhs ? sparse_conjugate(lhs_data[lp]) : lhs_data[lp];
+        const T lhs =
+            ConjugateLhs ? sparse_conjugate(lhs_data[lp]) : lhs_data[lp];
         local += sparse_multiply<T>(lhs, rhs_data[rp]);
         ++lp;
         ++rp;

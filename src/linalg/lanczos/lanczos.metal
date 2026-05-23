@@ -17,13 +17,13 @@
 template <typename I>
 [[kernel]] void csr_lanczos_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *v0 [[buffer(3)]], device float *alphas [[buffer(4)]],
     device float *betas [[buffer(5)]], device float *basis [[buffer(6)]],
     device int *actual [[buffer(7)]], device float *work [[buffer(8)]],
     constant int &n_rows [[buffer(9)]], constant int &n_cols [[buffer(10)]],
-    constant int &k [[buffer(11)]], constant int &reorthogonalize [[buffer(12)]],
+    constant int &k [[buffer(11)]],
+    constant int &reorthogonalize [[buffer(12)]],
     uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   threadgroup float scratch[256];
@@ -48,12 +48,12 @@ template <typename I>
        row += static_cast<int>(k_linalg_threads)) {
     norm_local += v0[row] * v0[row];
   }
-  const float norm0 = sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
+  const float norm0 =
+      sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
   for (int row = static_cast<int>(lane); row < n_rows;
        row += static_cast<int>(k_linalg_threads)) {
-    basis[row * k] = norm0 <= 1.1920928955078125e-7f
-                         ? (row == 0 ? 1.0f : 0.0f)
-                         : v0[row] / norm0;
+    basis[row * k] = norm0 <= 1.1920928955078125e-7f ? (row == 0 ? 1.0f : 0.0f)
+                                                     : v0[row] / norm0;
   }
   if (lane == 0) {
     beta_prev = 0.0f;
@@ -123,7 +123,8 @@ template <typename I>
          row += static_cast<int>(k_linalg_threads)) {
       beta_local += work[row] * work[row];
     }
-    const float beta = sqrt(max(reduce_sum_256(beta_local, scratch, lane), 0.0f));
+    const float beta =
+        sqrt(max(reduce_sum_256(beta_local, scratch, lane), 0.0f));
     if (lane == 0) {
       betas[j] = beta;
       shared_beta = beta;

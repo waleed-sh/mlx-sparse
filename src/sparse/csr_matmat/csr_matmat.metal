@@ -18,16 +18,16 @@ template <typename T> inline bool csr_matmat_nonzero(T value) {
   return !(value == T(0));
 }
 
-template <>
-inline bool csr_matmat_nonzero<complex64_t>(complex64_t value) {
+template <> inline bool csr_matmat_nonzero<complex64_t>(complex64_t value) {
   return value.real != 0.0f || value.imag != 0.0f;
 }
 
 template <typename LhsI, typename RhsI>
-inline bool csr_matmat_first_candidate(
-    device const LhsI *lhs_indices, device const LhsI *lhs_indptr,
-    device const RhsI *rhs_indices, device const RhsI *rhs_indptr, int row,
-    LhsI lhs_pos, RhsI rhs_pos, RhsI col) {
+inline bool csr_matmat_first_candidate(device const LhsI *lhs_indices,
+                                       device const LhsI *lhs_indptr,
+                                       device const RhsI *rhs_indices,
+                                       device const RhsI *rhs_indptr, int row,
+                                       LhsI lhs_pos, RhsI rhs_pos, RhsI col) {
   for (LhsI prev_lhs = lhs_indptr[row]; prev_lhs <= lhs_pos; ++prev_lhs) {
     const int prev_rhs_row = static_cast<int>(lhs_indices[prev_lhs]);
     const RhsI prev_end =
@@ -43,15 +43,16 @@ inline bool csr_matmat_first_candidate(
 }
 
 template <typename LhsI, typename RhsI, typename OutI>
-[[kernel]] void csr_matmat_symbolic_kernel(
-    device const LhsI *lhs_indices [[buffer(0)]],
-    device const LhsI *lhs_indptr [[buffer(1)]],
-    device const RhsI *rhs_indices [[buffer(2)]],
-    device const RhsI *rhs_indptr [[buffer(3)]],
-    device OutI *counts [[buffer(4)]], constant int &lhs_n_rows [[buffer(5)]],
-    constant int &rhs_n_rows [[buffer(6)]],
-    constant int &rhs_n_cols [[buffer(7)]],
-    uint row [[thread_position_in_grid]]) {
+[[kernel]] void
+csr_matmat_symbolic_kernel(device const LhsI *lhs_indices [[buffer(0)]],
+                           device const LhsI *lhs_indptr [[buffer(1)]],
+                           device const RhsI *rhs_indices [[buffer(2)]],
+                           device const RhsI *rhs_indptr [[buffer(3)]],
+                           device OutI *counts [[buffer(4)]],
+                           constant int &lhs_n_rows [[buffer(5)]],
+                           constant int &rhs_n_rows [[buffer(6)]],
+                           constant int &rhs_n_cols [[buffer(7)]],
+                           uint row [[thread_position_in_grid]]) {
   if (row >= static_cast<uint>(lhs_n_rows)) {
     return;
   }
@@ -63,8 +64,8 @@ template <typename LhsI, typename RhsI, typename OutI>
     if (rhs_row < 0 || rhs_row >= rhs_n_rows) {
       continue;
     }
-    for (RhsI rhs_pos = rhs_indptr[rhs_row];
-         rhs_pos < rhs_indptr[rhs_row + 1]; ++rhs_pos) {
+    for (RhsI rhs_pos = rhs_indptr[rhs_row]; rhs_pos < rhs_indptr[rhs_row + 1];
+         ++rhs_pos) {
       const RhsI col = rhs_indices[rhs_pos];
       if (col < RhsI(0) || col >= RhsI(rhs_n_cols)) {
         continue;
@@ -80,19 +81,20 @@ template <typename LhsI, typename RhsI, typename OutI>
 }
 
 template <typename T, typename LhsI, typename RhsI, typename OutI>
-[[kernel]] void csr_matmat_numeric_kernel(
-    device const T *lhs_data [[buffer(0)]],
-    device const LhsI *lhs_indices [[buffer(1)]],
-    device const LhsI *lhs_indptr [[buffer(2)]],
-    device const T *rhs_data [[buffer(3)]],
-    device const RhsI *rhs_indices [[buffer(4)]],
-    device const RhsI *rhs_indptr [[buffer(5)]],
-    device const OutI *out_indptr [[buffer(6)]],
-    device T *out_data [[buffer(7)]], device OutI *out_indices [[buffer(8)]],
-    constant int &lhs_n_rows [[buffer(9)]],
-    constant int &rhs_n_rows [[buffer(10)]],
-    constant int &rhs_n_cols [[buffer(11)]],
-    uint row [[thread_position_in_grid]]) {
+[[kernel]] void
+csr_matmat_numeric_kernel(device const T *lhs_data [[buffer(0)]],
+                          device const LhsI *lhs_indices [[buffer(1)]],
+                          device const LhsI *lhs_indptr [[buffer(2)]],
+                          device const T *rhs_data [[buffer(3)]],
+                          device const RhsI *rhs_indices [[buffer(4)]],
+                          device const RhsI *rhs_indptr [[buffer(5)]],
+                          device const OutI *out_indptr [[buffer(6)]],
+                          device T *out_data [[buffer(7)]],
+                          device OutI *out_indices [[buffer(8)]],
+                          constant int &lhs_n_rows [[buffer(9)]],
+                          constant int &rhs_n_rows [[buffer(10)]],
+                          constant int &rhs_n_cols [[buffer(11)]],
+                          uint row [[thread_position_in_grid]]) {
   if (row >= static_cast<uint>(lhs_n_rows)) {
     return;
   }
@@ -104,8 +106,8 @@ template <typename T, typename LhsI, typename RhsI, typename OutI>
     if (rhs_row < 0 || rhs_row >= rhs_n_rows) {
       continue;
     }
-    for (RhsI rhs_pos = rhs_indptr[rhs_row];
-         rhs_pos < rhs_indptr[rhs_row + 1]; ++rhs_pos) {
+    for (RhsI rhs_pos = rhs_indptr[rhs_row]; rhs_pos < rhs_indptr[rhs_row + 1];
+         ++rhs_pos) {
       const RhsI col = rhs_indices[rhs_pos];
       if (col < RhsI(0) || col >= RhsI(rhs_n_cols)) {
         continue;
@@ -126,10 +128,10 @@ template <typename T, typename LhsI, typename RhsI, typename OutI>
         for (RhsI rank_rhs = rhs_indptr[rank_rhs_row];
              rank_rhs < rhs_indptr[rank_rhs_row + 1]; ++rank_rhs) {
           const RhsI rank_col = rhs_indices[rank_rhs];
-          if (rank_col < col && csr_matmat_first_candidate<LhsI, RhsI>(
-                                    lhs_indices, lhs_indptr, rhs_indices,
-                                    rhs_indptr, static_cast<int>(row),
-                                    rank_lhs, rank_rhs, rank_col)) {
+          if (rank_col < col &&
+              csr_matmat_first_candidate<LhsI, RhsI>(
+                  lhs_indices, lhs_indptr, rhs_indices, rhs_indptr,
+                  static_cast<int>(row), rank_lhs, rank_rhs, rank_col)) {
             rank += OutI(1);
           }
         }
@@ -180,9 +182,9 @@ template <typename T, typename I>
 [[kernel]] void csr_matmat_prune_fill_kernel(
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]],
-    device const I *out_indptr [[buffer(3)]],
-    device T *out_data [[buffer(4)]], device I *out_indices [[buffer(5)]],
-    constant int &n_rows [[buffer(6)]], uint row [[thread_position_in_grid]]) {
+    device const I *out_indptr [[buffer(3)]], device T *out_data [[buffer(4)]],
+    device I *out_indices [[buffer(5)]], constant int &n_rows [[buffer(6)]],
+    uint row [[thread_position_in_grid]]) {
   if (row >= static_cast<uint>(n_rows)) {
     return;
   }
@@ -199,8 +201,9 @@ template <typename T, typename I>
 }
 
 #define INSTANTIATE_CSR_MATMAT_SYMBOLIC(LNAME, RNAME, ONAME, LHSI, RHSI, OUTI) \
-  template [[host_name("csr_matmat_symbolic_" #LNAME "_" #RNAME "_" #ONAME)]]  \
-  [[kernel]] void csr_matmat_symbolic_kernel<LHSI, RHSI, OUTI>(                \
+  template [[host_name("csr_matmat_symbolic_" #LNAME "_" #RNAME                \
+                       "_" #ONAME)]] [[kernel]] void                           \
+  csr_matmat_symbolic_kernel<LHSI, RHSI, OUTI>(                                \
       device const LHSI *, device const LHSI *, device const RHSI *,           \
       device const RHSI *, device OUTI *, constant int &, constant int &,      \
       constant int &, uint)
@@ -215,8 +218,8 @@ INSTANTIATE_CSR_MATMAT_SYMBOLIC(int64, int64, int64, long, long, long);
 
 #define INSTANTIATE_CSR_MATMAT_NUMERIC(VNAME, LNAME, RNAME, ONAME, T, LHSI,    \
                                        RHSI, OUTI)                             \
-  template [[host_name("csr_matmat_numeric_" #VNAME "_" #LNAME "_" #RNAME "_"  \
-                       #ONAME)]] [[kernel]] void                               \
+  template [[host_name("csr_matmat_numeric_" #VNAME "_" #LNAME "_" #RNAME      \
+                       "_" #ONAME)]] [[kernel]] void                           \
   csr_matmat_numeric_kernel<T, LHSI, RHSI, OUTI>(                              \
       device const T *, device const LHSI *, device const LHSI *,              \
       device const T *, device const RHSI *, device const RHSI *,              \
@@ -224,7 +227,8 @@ INSTANTIATE_CSR_MATMAT_SYMBOLIC(int64, int64, int64, long, long, long);
       constant int &, constant int &, uint)
 
 #define INSTANTIATE_CSR_MATMAT_NUMERIC_INDEXES(VNAME, T)                       \
-  INSTANTIATE_CSR_MATMAT_NUMERIC(VNAME, int32, int32, int32, T, int, int, int);\
+  INSTANTIATE_CSR_MATMAT_NUMERIC(VNAME, int32, int32, int32, T, int, int,      \
+                                 int);                                         \
   INSTANTIATE_CSR_MATMAT_NUMERIC(VNAME, int32, int32, int64, T, int, int,      \
                                  long);                                        \
   INSTANTIATE_CSR_MATMAT_NUMERIC(VNAME, int32, int64, int64, T, int, long,     \
@@ -260,10 +264,9 @@ INSTANTIATE_CSR_MATMAT_PRUNE_COUNTS(complex64_int64, complex64_t, long);
 
 #define INSTANTIATE_CSR_MATMAT_PRUNE_FILL(NAME, T, I)                          \
   template [[host_name("csr_matmat_prune_fill_" #NAME)]] [[kernel]] void       \
-  csr_matmat_prune_fill_kernel<T, I>(device const T *, device const I *,       \
-                                     device const I *, device const I *,       \
-                                     device T *, device I *, constant int &,   \
-                                     uint)
+  csr_matmat_prune_fill_kernel<T, I>(                                          \
+      device const T *, device const I *, device const I *, device const I *,  \
+      device T *, device I *, constant int &, uint)
 
 INSTANTIATE_CSR_MATMAT_PRUNE_FILL(float32_int32, float, int);
 INSTANTIATE_CSR_MATMAT_PRUNE_FILL(float32_int64, float, long);

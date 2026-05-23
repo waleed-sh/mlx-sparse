@@ -20,14 +20,12 @@ namespace mlx_sparse {
 
 mx::array csr_vdot(const mx::array &lhs_data, const mx::array &lhs_indices,
                    const mx::array &lhs_indptr, const mx::array &rhs_data,
-                   const mx::array &rhs_indices,
-                   const mx::array &rhs_indptr, int n_rows, int n_cols,
-                   mx::StreamOrDevice s = {});
+                   const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                   int n_rows, int n_cols, mx::StreamOrDevice s = {});
 
 mx::array csr_dot(const mx::array &lhs_data, const mx::array &lhs_indices,
                   const mx::array &lhs_indptr, const mx::array &rhs_data,
-                  const mx::array &rhs_indices,
-                  const mx::array &rhs_indptr, int n_rows, int n_cols,
-                  mx::StreamOrDevice s = {});
+                  const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                  int n_rows, int n_cols, mx::StreamOrDevice s = {});
 
 } // namespace mlx_sparse

@@ -123,7 +123,8 @@ mx::array csr_permute_vector(const mx::array &x, const mx::array &perm,
   require_rank(perm, 1, "csr_permute_vector perm");
   require_linalg_float32(x, "csr_permute_vector x");
   if (perm.dtype() != mx::int32) {
-    throw std::invalid_argument("csr_permute_vector perm must have dtype int32.");
+    throw std::invalid_argument(
+        "csr_permute_vector perm must have dtype int32.");
   }
   require_size(perm, static_cast<int>(x.size()), "csr_permute_vector perm");
 

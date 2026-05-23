@@ -15,8 +15,8 @@
 #include "sparse/csr_matmat/csr_matmat.h"
 
 #include <algorithm>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -37,8 +37,7 @@ namespace mlx_sparse {
 
 namespace {
 
-template <typename T>
-typename Accumulator<T>::Type accumulator_value(T value) {
+template <typename T> typename Accumulator<T>::Type accumulator_value(T value) {
   using AccT = typename Accumulator<T>::Type;
   if constexpr (std::is_same_v<T, mx::float16_t> ||
                 std::is_same_v<T, mx::bfloat16_t>) {
@@ -216,8 +215,7 @@ void symbolic_cpu_impl(const mx::array &lhs_indices,
 template <typename T, typename LhsI, typename RhsI, typename OutI>
 void numeric_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
                       const mx::array &lhs_indptr, const mx::array &rhs_data,
-                      const mx::array &rhs_indices,
-                      const mx::array &rhs_indptr,
+                      const mx::array &rhs_indices, const mx::array &rhs_indptr,
                       const mx::array &out_indptr, mx::array &out_data,
                       mx::array &out_indices, int lhs_n_rows, int rhs_n_rows,
                       int rhs_n_cols, mx::Stream stream) {
@@ -334,9 +332,9 @@ void prune_counts_cpu_impl(const mx::array &data, const mx::array &indptr,
 
 template <typename T, typename I>
 void prune_fill_cpu_impl(const mx::array &data, const mx::array &indices,
-                         const mx::array &indptr,
-                         const mx::array &out_indptr, mx::array &out_data,
-                         mx::array &out_indices, mx::Stream stream) {
+                         const mx::array &indptr, const mx::array &out_indptr,
+                         mx::array &out_data, mx::array &out_indices,
+                         mx::Stream stream) {
   out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
   out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
 
@@ -348,33 +346,33 @@ void prune_fill_cpu_impl(const mx::array &data, const mx::array &indices,
   encoder.set_output_array(out_data);
   encoder.set_output_array(out_indices);
 
-  encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
-                    indices = mx::array::unsafe_weak_copy(indices),
-                    indptr = mx::array::unsafe_weak_copy(indptr),
-                    out_indptr = mx::array::unsafe_weak_copy(out_indptr),
-                    out_data = mx::array::unsafe_weak_copy(out_data),
-                    out_indices =
-                        mx::array::unsafe_weak_copy(out_indices)]() mutable {
-    const auto *data_ptr = data.data<T>();
-    const auto *indices_ptr = indices.data<I>();
-    const auto *indptr_ptr = indptr.data<I>();
-    const auto *out_indptr_ptr = out_indptr.data<I>();
-    auto *out_data_ptr = out_data.data<T>();
-    auto *out_indices_ptr = out_indices.data<I>();
-    const int n_rows = static_cast<int>(indptr.size()) - 1;
+  encoder.dispatch(
+      [data = mx::array::unsafe_weak_copy(data),
+       indices = mx::array::unsafe_weak_copy(indices),
+       indptr = mx::array::unsafe_weak_copy(indptr),
+       out_indptr = mx::array::unsafe_weak_copy(out_indptr),
+       out_data = mx::array::unsafe_weak_copy(out_data),
+       out_indices = mx::array::unsafe_weak_copy(out_indices)]() mutable {
+        const auto *data_ptr = data.data<T>();
+        const auto *indices_ptr = indices.data<I>();
+        const auto *indptr_ptr = indptr.data<I>();
+        const auto *out_indptr_ptr = out_indptr.data<I>();
+        auto *out_data_ptr = out_data.data<T>();
+        auto *out_indices_ptr = out_indices.data<I>();
+        const int n_rows = static_cast<int>(indptr.size()) - 1;
 
-    for (int row = 0; row < n_rows; ++row) {
-      I write = out_indptr_ptr[row];
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-        const T value = data_ptr[p];
-        if (value != T{}) {
-          out_data_ptr[write] = value;
-          out_indices_ptr[write] = indices_ptr[p];
-          ++write;
+        for (int row = 0; row < n_rows; ++row) {
+          I write = out_indptr_ptr[row];
+          for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            const T value = data_ptr[p];
+            if (value != T{}) {
+              out_data_ptr[write] = value;
+              out_indices_ptr[write] = indices_ptr[p];
+              ++write;
+            }
+          }
         }
-      }
-    }
-  });
+      });
 }
 
 template <typename I>
@@ -391,7 +389,8 @@ std::pair<mx::array, int> build_indptr_from_counts(const mx::array &counts,
     }
     total += count;
     if (total > std::numeric_limits<int>::max()) {
-      throw std::overflow_error("csr_matmat output nnz exceeds MLX shape limits.");
+      throw std::overflow_error(
+          "csr_matmat output nnz exceeds MLX shape limits.");
     }
     if (total > static_cast<int64_t>(std::numeric_limits<I>::max())) {
       throw std::overflow_error(
@@ -423,7 +422,8 @@ int prefix_counts(const std::vector<I> &counts, std::vector<I> &indptr) {
   for (size_t row = 0; row < counts.size(); ++row) {
     total += static_cast<int64_t>(counts[row]);
     if (total > std::numeric_limits<int>::max()) {
-      throw std::overflow_error("csr_matmat output nnz exceeds MLX shape limits.");
+      throw std::overflow_error(
+          "csr_matmat output nnz exceeds MLX shape limits.");
     }
     if (total > static_cast<int64_t>(std::numeric_limits<I>::max())) {
       throw std::overflow_error(
@@ -435,12 +435,10 @@ int prefix_counts(const std::vector<I> &counts, std::vector<I> &indptr) {
 }
 
 template <typename T, typename LhsI, typename RhsI, typename OutI>
-std::tuple<mx::array, mx::array, mx::array>
-csr_matmat_host_impl(mx::array lhs_data, mx::array lhs_indices,
-                     mx::array lhs_indptr, mx::array rhs_data,
-                     mx::array rhs_indices, mx::array rhs_indptr,
-                     int lhs_n_rows, int rhs_n_rows, int rhs_n_cols,
-                     mx::Dtype out_index_dtype) {
+std::tuple<mx::array, mx::array, mx::array> csr_matmat_host_impl(
+    mx::array lhs_data, mx::array lhs_indices, mx::array lhs_indptr,
+    mx::array rhs_data, mx::array rhs_indices, mx::array rhs_indptr,
+    int lhs_n_rows, int rhs_n_rows, int rhs_n_cols, mx::Dtype out_index_dtype) {
   using AccT = typename Accumulator<T>::Type;
 
   lhs_data.eval();
@@ -462,8 +460,8 @@ csr_matmat_host_impl(mx::array lhs_data, mx::array lhs_indices,
 
   for (int row = 0; row < lhs_n_rows; ++row) {
     int row_count = 0;
-    for (LhsI lhs_pos = lhs_indptr_ptr[row];
-         lhs_pos < lhs_indptr_ptr[row + 1]; ++lhs_pos) {
+    for (LhsI lhs_pos = lhs_indptr_ptr[row]; lhs_pos < lhs_indptr_ptr[row + 1];
+         ++lhs_pos) {
       const int rhs_row = static_cast<int>(lhs_indices_ptr[lhs_pos]);
       if (rhs_row < 0 || rhs_row >= rhs_n_rows) {
         throw std::invalid_argument(
@@ -497,8 +495,8 @@ csr_matmat_host_impl(mx::array lhs_data, mx::array lhs_indices,
   std::vector<int> columns;
   for (int row = 0; row < lhs_n_rows; ++row) {
     columns.clear();
-    for (LhsI lhs_pos = lhs_indptr_ptr[row];
-         lhs_pos < lhs_indptr_ptr[row + 1]; ++lhs_pos) {
+    for (LhsI lhs_pos = lhs_indptr_ptr[row]; lhs_pos < lhs_indptr_ptr[row + 1];
+         ++lhs_pos) {
       const int rhs_row = static_cast<int>(lhs_indices_ptr[lhs_pos]);
       const auto lhs_value = lhs_data_ptr[lhs_pos];
       for (RhsI rhs_pos = rhs_indptr_ptr[rhs_row];
@@ -566,9 +564,8 @@ template <typename T, typename LhsI, typename RhsI>
 std::tuple<mx::array, mx::array, mx::array>
 dispatch_host_out(mx::array lhs_data, mx::array lhs_indices,
                   mx::array lhs_indptr, mx::array rhs_data,
-                  mx::array rhs_indices, mx::array rhs_indptr,
-                  int lhs_n_rows, int rhs_n_rows, int rhs_n_cols,
-                  mx::Dtype out_index_dtype) {
+                  mx::array rhs_indices, mx::array rhs_indptr, int lhs_n_rows,
+                  int rhs_n_rows, int rhs_n_cols, mx::Dtype out_index_dtype) {
   if (out_index_dtype == mx::int32) {
     return csr_matmat_host_impl<T, LhsI, RhsI, int32_t>(
         std::move(lhs_data), std::move(lhs_indices), std::move(lhs_indptr),
@@ -585,9 +582,8 @@ template <typename T, typename LhsI>
 std::tuple<mx::array, mx::array, mx::array>
 dispatch_host_rhs(mx::array lhs_data, mx::array lhs_indices,
                   mx::array lhs_indptr, mx::array rhs_data,
-                  mx::array rhs_indices, mx::array rhs_indptr,
-                  int lhs_n_rows, int rhs_n_rows, int rhs_n_cols,
-                  mx::Dtype out_index_dtype) {
+                  mx::array rhs_indices, mx::array rhs_indptr, int lhs_n_rows,
+                  int rhs_n_rows, int rhs_n_cols, mx::Dtype out_index_dtype) {
   if (rhs_indices.dtype() == mx::int32) {
     return dispatch_host_out<T, LhsI, int32_t>(
         std::move(lhs_data), std::move(lhs_indices), std::move(lhs_indptr),
@@ -604,9 +600,8 @@ template <typename T>
 std::tuple<mx::array, mx::array, mx::array>
 dispatch_host_lhs(mx::array lhs_data, mx::array lhs_indices,
                   mx::array lhs_indptr, mx::array rhs_data,
-                  mx::array rhs_indices, mx::array rhs_indptr,
-                  int lhs_n_rows, int rhs_n_rows, int rhs_n_cols,
-                  mx::Dtype out_index_dtype) {
+                  mx::array rhs_indices, mx::array rhs_indptr, int lhs_n_rows,
+                  int rhs_n_rows, int rhs_n_cols, mx::Dtype out_index_dtype) {
   if (lhs_indices.dtype() == mx::int32) {
     return dispatch_host_rhs<T, int32_t>(
         std::move(lhs_data), std::move(lhs_indices), std::move(lhs_indptr),
@@ -625,8 +620,8 @@ mx::array symbolic_counts(const mx::array &lhs_indices,
                           const mx::array &rhs_indptr, int lhs_n_rows,
                           int rhs_n_rows, int rhs_n_cols,
                           mx::Dtype out_index_dtype, mx::Stream stream) {
-  auto primitive = std::make_shared<CSRMatmatSymbolic>(
-      stream, lhs_n_rows, rhs_n_rows, rhs_n_cols);
+  auto primitive = std::make_shared<CSRMatmatSymbolic>(stream, lhs_n_rows,
+                                                       rhs_n_rows, rhs_n_cols);
   return mx::array(mx::Shape{lhs_n_rows}, out_index_dtype, primitive,
                    {lhs_indices, lhs_indptr, rhs_indices, rhs_indptr});
 }
@@ -638,26 +633,28 @@ numeric_fill(const mx::array &lhs_data, const mx::array &lhs_indices,
              const mx::array &out_indptr, int out_nnz, int lhs_n_rows,
              int rhs_n_rows, int rhs_n_cols, mx::Dtype out_index_dtype,
              mx::Stream stream) {
-  auto primitive = std::make_shared<CSRMatmatNumeric>(
-      stream, lhs_n_rows, rhs_n_rows, rhs_n_cols);
-  auto outputs = mx::array::make_arrays(
-      {mx::Shape{out_nnz}, mx::Shape{out_nnz}},
-      {lhs_data.dtype(), out_index_dtype}, primitive,
-      {lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
-       out_indptr});
+  auto primitive = std::make_shared<CSRMatmatNumeric>(stream, lhs_n_rows,
+                                                      rhs_n_rows, rhs_n_cols);
+  auto outputs =
+      mx::array::make_arrays({mx::Shape{out_nnz}, mx::Shape{out_nnz}},
+                             {lhs_data.dtype(), out_index_dtype}, primitive,
+                             {lhs_data, lhs_indices, lhs_indptr, rhs_data,
+                              rhs_indices, rhs_indptr, out_indptr});
   return {outputs[0], outputs[1]};
 }
 
 mx::array prune_counts(const mx::array &data, const mx::array &indptr,
                        int n_rows, mx::Stream stream) {
   auto primitive = std::make_shared<CSRMatmatPruneCounts>(stream);
-  return mx::array(mx::Shape{n_rows}, indptr.dtype(), primitive, {data, indptr});
+  return mx::array(mx::Shape{n_rows}, indptr.dtype(), primitive,
+                   {data, indptr});
 }
 
-std::tuple<mx::array, mx::array>
-prune_fill(const mx::array &data, const mx::array &indices,
-           const mx::array &indptr, const mx::array &out_indptr, int out_nnz,
-           mx::Stream stream) {
+std::tuple<mx::array, mx::array> prune_fill(const mx::array &data,
+                                            const mx::array &indices,
+                                            const mx::array &indptr,
+                                            const mx::array &out_indptr,
+                                            int out_nnz, mx::Stream stream) {
   auto primitive = std::make_shared<CSRMatmatPruneFill>(stream);
   auto outputs = mx::array::make_arrays(
       {mx::Shape{out_nnz}, mx::Shape{out_nnz}}, {data.dtype(), indices.dtype()},
@@ -673,14 +670,14 @@ void dispatch_symbolic_out(const mx::array &lhs_indices,
                            int lhs_n_rows, int rhs_n_rows, int rhs_n_cols,
                            mx::Stream stream) {
   if (counts.dtype() == mx::int32) {
-    symbolic_cpu_impl<LhsI, RhsI, int32_t>(
-        lhs_indices, lhs_indptr, rhs_indices, rhs_indptr, counts, lhs_n_rows,
-        rhs_n_rows, rhs_n_cols, stream);
+    symbolic_cpu_impl<LhsI, RhsI, int32_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                           rhs_indptr, counts, lhs_n_rows,
+                                           rhs_n_rows, rhs_n_cols, stream);
     return;
   }
-  symbolic_cpu_impl<LhsI, RhsI, int64_t>(
-      lhs_indices, lhs_indptr, rhs_indices, rhs_indptr, counts, lhs_n_rows,
-      rhs_n_rows, rhs_n_cols, stream);
+  symbolic_cpu_impl<LhsI, RhsI, int64_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                         rhs_indptr, counts, lhs_n_rows,
+                                         rhs_n_rows, rhs_n_cols, stream);
 }
 
 template <typename LhsI>
@@ -691,26 +688,23 @@ void dispatch_symbolic_rhs(const mx::array &lhs_indices,
                            int lhs_n_rows, int rhs_n_rows, int rhs_n_cols,
                            mx::Stream stream) {
   if (rhs_indices.dtype() == mx::int32) {
-    dispatch_symbolic_out<LhsI, int32_t>(
-        lhs_indices, lhs_indptr, rhs_indices, rhs_indptr, counts, lhs_n_rows,
-        rhs_n_rows, rhs_n_cols, stream);
+    dispatch_symbolic_out<LhsI, int32_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                         rhs_indptr, counts, lhs_n_rows,
+                                         rhs_n_rows, rhs_n_cols, stream);
     return;
   }
-  dispatch_symbolic_out<LhsI, int64_t>(
-      lhs_indices, lhs_indptr, rhs_indices, rhs_indptr, counts, lhs_n_rows,
-      rhs_n_rows, rhs_n_cols, stream);
+  dispatch_symbolic_out<LhsI, int64_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                       rhs_indptr, counts, lhs_n_rows,
+                                       rhs_n_rows, rhs_n_cols, stream);
 }
 
 template <typename T, typename LhsI, typename RhsI>
-void dispatch_numeric_out(const mx::array &lhs_data,
-                          const mx::array &lhs_indices,
-                          const mx::array &lhs_indptr,
-                          const mx::array &rhs_data,
-                          const mx::array &rhs_indices,
-                          const mx::array &rhs_indptr,
-                          const mx::array &out_indptr, mx::array &out_data,
-                          mx::array &out_indices, int lhs_n_rows,
-                          int rhs_n_rows, int rhs_n_cols, mx::Stream stream) {
+void dispatch_numeric_out(
+    const mx::array &lhs_data, const mx::array &lhs_indices,
+    const mx::array &lhs_indptr, const mx::array &rhs_data,
+    const mx::array &rhs_indices, const mx::array &rhs_indptr,
+    const mx::array &out_indptr, mx::array &out_data, mx::array &out_indices,
+    int lhs_n_rows, int rhs_n_rows, int rhs_n_cols, mx::Stream stream) {
   if (out_indptr.dtype() == mx::int32) {
     numeric_cpu_impl<T, LhsI, RhsI, int32_t>(
         lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
@@ -725,15 +719,12 @@ void dispatch_numeric_out(const mx::array &lhs_data,
 }
 
 template <typename T, typename LhsI>
-void dispatch_numeric_rhs(const mx::array &lhs_data,
-                          const mx::array &lhs_indices,
-                          const mx::array &lhs_indptr,
-                          const mx::array &rhs_data,
-                          const mx::array &rhs_indices,
-                          const mx::array &rhs_indptr,
-                          const mx::array &out_indptr, mx::array &out_data,
-                          mx::array &out_indices, int lhs_n_rows,
-                          int rhs_n_rows, int rhs_n_cols, mx::Stream stream) {
+void dispatch_numeric_rhs(
+    const mx::array &lhs_data, const mx::array &lhs_indices,
+    const mx::array &lhs_indptr, const mx::array &rhs_data,
+    const mx::array &rhs_indices, const mx::array &rhs_indptr,
+    const mx::array &out_indptr, mx::array &out_data, mx::array &out_indices,
+    int lhs_n_rows, int rhs_n_rows, int rhs_n_cols, mx::Stream stream) {
   if (rhs_indices.dtype() == mx::int32) {
     dispatch_numeric_out<T, LhsI, int32_t>(
         lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
@@ -748,15 +739,12 @@ void dispatch_numeric_rhs(const mx::array &lhs_data,
 }
 
 template <typename T>
-void dispatch_numeric_lhs(const mx::array &lhs_data,
-                          const mx::array &lhs_indices,
-                          const mx::array &lhs_indptr,
-                          const mx::array &rhs_data,
-                          const mx::array &rhs_indices,
-                          const mx::array &rhs_indptr,
-                          const mx::array &out_indptr, mx::array &out_data,
-                          mx::array &out_indices, int lhs_n_rows,
-                          int rhs_n_rows, int rhs_n_cols, mx::Stream stream) {
+void dispatch_numeric_lhs(
+    const mx::array &lhs_data, const mx::array &lhs_indices,
+    const mx::array &lhs_indptr, const mx::array &rhs_data,
+    const mx::array &rhs_indices, const mx::array &rhs_indptr,
+    const mx::array &out_indptr, mx::array &out_data, mx::array &out_indices,
+    int lhs_n_rows, int rhs_n_rows, int rhs_n_cols, mx::Stream stream) {
   if (lhs_indices.dtype() == mx::int32) {
     dispatch_numeric_rhs<T, int32_t>(
         lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
@@ -764,17 +752,17 @@ void dispatch_numeric_lhs(const mx::array &lhs_data,
         stream);
     return;
   }
-  dispatch_numeric_rhs<T, int64_t>(
-      lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
-      out_indptr, out_data, out_indices, lhs_n_rows, rhs_n_rows, rhs_n_cols,
-      stream);
+  dispatch_numeric_rhs<T, int64_t>(lhs_data, lhs_indices, lhs_indptr, rhs_data,
+                                   rhs_indices, rhs_indptr, out_indptr,
+                                   out_data, out_indices, lhs_n_rows,
+                                   rhs_n_rows, rhs_n_cols, stream);
 }
 
 template <typename T>
 void dispatch_prune_index(const mx::array &data, const mx::array &indices,
-                          const mx::array &indptr,
-                          const mx::array &out_indptr, mx::array &out_data,
-                          mx::array &out_indices, mx::Stream stream) {
+                          const mx::array &indptr, const mx::array &out_indptr,
+                          mx::array &out_data, mx::array &out_indices,
+                          mx::Stream stream) {
   if (indices.dtype() == mx::int32) {
     prune_fill_cpu_impl<T, int32_t>(data, indices, indptr, out_indptr, out_data,
                                     out_indices, stream);
@@ -796,8 +784,8 @@ void CSRMatmatSymbolic::eval_cpu(const std::vector<mx::array> &inputs,
 
   if (lhs_indices.dtype() == mx::int32) {
     dispatch_symbolic_rhs<int32_t>(lhs_indices, lhs_indptr, rhs_indices,
-                                   rhs_indptr, counts, lhs_n_rows_,
-                                   rhs_n_rows_, rhs_n_cols_, stream());
+                                   rhs_indptr, counts, lhs_n_rows_, rhs_n_rows_,
+                                   rhs_n_cols_, stream());
     return;
   }
   dispatch_symbolic_rhs<int64_t>(lhs_indices, lhs_indptr, rhs_indices,
@@ -842,7 +830,8 @@ void CSRMatmatSymbolic::eval_gpu(const std::vector<mx::array> &inputs,
 #else
 void CSRMatmatSymbolic::eval_gpu(const std::vector<mx::array> &,
                                  std::vector<mx::array> &) {
-  throw std::runtime_error("csr_matmat has no GPU implementation in this build.");
+  throw std::runtime_error(
+      "csr_matmat has no GPU implementation in this build.");
 }
 #endif
 
@@ -859,9 +848,9 @@ void CSRMatmatNumeric::eval_cpu(const std::vector<mx::array> &inputs,
 #define DISPATCH_CSR_MATMAT_NUMERIC_VALUE(DTYPE, TYPE)                         \
   if (lhs_data.dtype() == DTYPE) {                                             \
     dispatch_numeric_lhs<TYPE>(lhs_data, lhs_indices, lhs_indptr, rhs_data,    \
-                               rhs_indices, rhs_indptr, out_indptr, outputs[0],\
-                               outputs[1], lhs_n_rows_, rhs_n_rows_,           \
-                               rhs_n_cols_, stream());                         \
+                               rhs_indices, rhs_indptr, out_indptr,            \
+                               outputs[0], outputs[1], lhs_n_rows_,            \
+                               rhs_n_rows_, rhs_n_cols_, stream());            \
     return;                                                                    \
   }
 
@@ -920,7 +909,8 @@ void CSRMatmatNumeric::eval_gpu(const std::vector<mx::array> &inputs,
 #else
 void CSRMatmatNumeric::eval_gpu(const std::vector<mx::array> &,
                                 std::vector<mx::array> &) {
-  throw std::runtime_error("csr_matmat has no GPU implementation in this build.");
+  throw std::runtime_error(
+      "csr_matmat has no GPU implementation in this build.");
 }
 #endif
 
@@ -932,9 +922,11 @@ void CSRMatmatPruneCounts::eval_cpu(const std::vector<mx::array> &inputs,
 #define DISPATCH_CSR_MATMAT_PRUNE_COUNTS(DTYPE, TYPE)                          \
   if (data.dtype() == DTYPE) {                                                 \
     if (indptr.dtype() == mx::int32) {                                         \
-      prune_counts_cpu_impl<TYPE, int32_t>(data, indptr, outputs[0], stream());\
+      prune_counts_cpu_impl<TYPE, int32_t>(data, indptr, outputs[0],           \
+                                           stream());                          \
     } else {                                                                   \
-      prune_counts_cpu_impl<TYPE, int64_t>(data, indptr, outputs[0], stream());\
+      prune_counts_cpu_impl<TYPE, int64_t>(data, indptr, outputs[0],           \
+                                           stream());                          \
     }                                                                          \
     return;                                                                    \
   }
@@ -960,9 +952,10 @@ void CSRMatmatPruneCounts::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto *kernel = device.get_kernel(
-      sparse_kernel_name("csr_matmat_prune_counts", data.dtype(), indptr.dtype()),
-      lib);
+  auto *kernel =
+      device.get_kernel(sparse_kernel_name("csr_matmat_prune_counts",
+                                           data.dtype(), indptr.dtype()),
+                        lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
   encoder.set_compute_pipeline_state(kernel);
@@ -979,7 +972,8 @@ void CSRMatmatPruneCounts::eval_gpu(const std::vector<mx::array> &inputs,
 #else
 void CSRMatmatPruneCounts::eval_gpu(const std::vector<mx::array> &,
                                     std::vector<mx::array> &) {
-  throw std::runtime_error("csr_matmat has no GPU implementation in this build.");
+  throw std::runtime_error(
+      "csr_matmat has no GPU implementation in this build.");
 }
 #endif
 
@@ -1022,9 +1016,10 @@ void CSRMatmatPruneFill::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto *kernel = device.get_kernel(
-      sparse_kernel_name("csr_matmat_prune_fill", data.dtype(), indices.dtype()),
-      lib);
+  auto *kernel =
+      device.get_kernel(sparse_kernel_name("csr_matmat_prune_fill",
+                                           data.dtype(), indices.dtype()),
+                        lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
   encoder.set_compute_pipeline_state(kernel);
@@ -1044,7 +1039,8 @@ void CSRMatmatPruneFill::eval_gpu(const std::vector<mx::array> &inputs,
 #else
 void CSRMatmatPruneFill::eval_gpu(const std::vector<mx::array> &,
                                   std::vector<mx::array> &) {
-  throw std::runtime_error("csr_matmat has no GPU implementation in this build.");
+  throw std::runtime_error(
+      "csr_matmat has no GPU implementation in this build.");
 }
 #endif
 
@@ -1083,8 +1079,9 @@ csr_matmat(const mx::array &lhs_data, const mx::array &lhs_indices,
     throw std::overflow_error("csr_matmat n_cols exceeds supported limits.");
   }
 
-  const auto out_index_dtype =
-      lhs_indices.dtype() == rhs_indices.dtype() ? lhs_indices.dtype() : mx::int64;
+  const auto out_index_dtype = lhs_indices.dtype() == rhs_indices.dtype()
+                                   ? lhs_indices.dtype()
+                                   : mx::int64;
   if (out_index_dtype == mx::int32 &&
       rhs_n_cols > std::numeric_limits<int32_t>::max()) {
     throw std::overflow_error(
@@ -1143,9 +1140,9 @@ csr_matmat(const mx::array &lhs_data, const mx::array &lhs_indices,
   mx::eval(nonzero_counts);
   auto [out_indptr, out_nnz] =
       build_indptr_from_counts(nonzero_counts, lhs_n_rows, out_index_dtype);
-  auto [out_data, out_indices] = prune_fill(
-      candidate_data, candidate_indices, candidate_indptr, out_indptr, out_nnz,
-      stream);
+  auto [out_data, out_indices] =
+      prune_fill(candidate_data, candidate_indices, candidate_indptr,
+                 out_indptr, out_nnz, stream);
   return {out_data, out_indices, out_indptr};
 }
 

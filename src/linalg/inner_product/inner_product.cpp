@@ -85,8 +85,8 @@ template <typename T, typename I>
 void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
                        const mx::array &lhs_indptr, const mx::array &rhs_data,
                        const mx::array &rhs_indices,
-                       const mx::array &rhs_indptr, mx::array &out,
-                       int n_rows, bool conjugate_lhs, mx::Stream stream) {
+                       const mx::array &rhs_indptr, mx::array &out, int n_rows,
+                       bool conjugate_lhs, mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -104,8 +104,8 @@ void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
                     rhs_data = mx::array::unsafe_weak_copy(rhs_data),
                     rhs_indices = mx::array::unsafe_weak_copy(rhs_indices),
                     rhs_indptr = mx::array::unsafe_weak_copy(rhs_indptr),
-                    out = mx::array::unsafe_weak_copy(out),
-                    n_rows, conjugate_lhs]() mutable {
+                    out = mx::array::unsafe_weak_copy(out), n_rows,
+                    conjugate_lhs]() mutable {
     const auto *lhs_data_ptr = lhs_data.data<T>();
     const auto *lhs_indices_ptr = lhs_indices.data<I>();
     const auto *lhs_indptr_ptr = lhs_indptr.data<I>();
@@ -123,7 +123,7 @@ void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
       while (lp < lend && rp < rend) {
         const I lc = lhs_indices_ptr[lp];
         const I rc = rhs_indices_ptr[rp];
-      if (lc == rc) {
+        if (lc == rc) {
           if constexpr (std::is_same_v<T, mx::complex64_t>) {
             const std::complex<float> lhs_value(lhs_data_ptr[lp]);
             const std::complex<float> rhs_value(rhs_data_ptr[rp]);
@@ -144,9 +144,8 @@ void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
       }
     }
     if constexpr (std::is_same_v<T, mx::complex64_t>) {
-      *out.data<T>() =
-          mx::complex64_t(static_cast<float>(acc.real()),
-                          static_cast<float>(acc.imag()));
+      *out.data<T>() = mx::complex64_t(static_cast<float>(acc.real()),
+                                       static_cast<float>(acc.imag()));
     } else {
       *out.data<T>() = static_cast<T>(acc);
     }
@@ -188,8 +187,8 @@ void CSRVdot::eval_cpu(const std::vector<mx::array> &inputs,
         outputs[0], n_rows_, conjugate_lhs_, stream());
     return;
   }
-  throw std::runtime_error(
-      "csr_vdot requires float32 or complex64 data with int32 or int64 indices.");
+  throw std::runtime_error("csr_vdot requires float32 or complex64 data with "
+                           "int32 or int64 indices.");
 }
 
 #ifdef _METAL_
@@ -208,9 +207,8 @@ void CSRVdot::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name =
-      sparse_kernel_name(conjugate_lhs_ ? "csr_vdot" : "csr_dot",
-                         lhs_data.dtype(), lhs_indices.dtype());
+  auto kernel_name = sparse_kernel_name(conjugate_lhs_ ? "csr_vdot" : "csr_dot",
+                                        lhs_data.dtype(), lhs_indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -238,9 +236,8 @@ mx::array csr_inner_product(const mx::array &lhs_data,
                             const mx::array &lhs_indptr,
                             const mx::array &rhs_data,
                             const mx::array &rhs_indices,
-                            const mx::array &rhs_indptr, int n_rows,
-                            int n_cols, bool conjugate_lhs,
-                            mx::StreamOrDevice s) {
+                            const mx::array &rhs_indptr, int n_rows, int n_cols,
+                            bool conjugate_lhs, mx::StreamOrDevice s) {
   if (n_rows < 0 || n_cols < 0) {
     throw std::invalid_argument(
         "csr sparse inner product shape dimensions must be non-negative.");
@@ -286,24 +283,22 @@ mx::array csr_inner_product(const mx::array &lhs_data,
   return mx::array(
       mx::Shape{}, lhs_data.dtype(),
       std::make_shared<CSRVdot>(stream, n_rows, n_cols, conjugate_lhs),
-      {lhs_data_contig, lhs_indices_contig, lhs_indptr_contig,
-       rhs_data_contig, rhs_indices_contig, rhs_indptr_contig});
+      {lhs_data_contig, lhs_indices_contig, lhs_indptr_contig, rhs_data_contig,
+       rhs_indices_contig, rhs_indptr_contig});
 }
 
 mx::array csr_vdot(const mx::array &lhs_data, const mx::array &lhs_indices,
                    const mx::array &lhs_indptr, const mx::array &rhs_data,
-                   const mx::array &rhs_indices,
-                   const mx::array &rhs_indptr, int n_rows, int n_cols,
-                   mx::StreamOrDevice s) {
+                   const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                   int n_rows, int n_cols, mx::StreamOrDevice s) {
   return csr_inner_product(lhs_data, lhs_indices, lhs_indptr, rhs_data,
                            rhs_indices, rhs_indptr, n_rows, n_cols, true, s);
 }
 
 mx::array csr_dot(const mx::array &lhs_data, const mx::array &lhs_indices,
                   const mx::array &lhs_indptr, const mx::array &rhs_data,
-                  const mx::array &rhs_indices,
-                  const mx::array &rhs_indptr, int n_rows, int n_cols,
-                  mx::StreamOrDevice s) {
+                  const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                  int n_rows, int n_cols, mx::StreamOrDevice s) {
   return csr_inner_product(lhs_data, lhs_indices, lhs_indptr, rhs_data,
                            rhs_indices, rhs_indptr, n_rows, n_cols, false, s);
 }

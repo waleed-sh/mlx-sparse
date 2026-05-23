@@ -57,12 +57,13 @@ std::vector<float> qr_eigenvalues_real(std::vector<float> h, int n) {
       for (int prev = 0; prev < col; ++prev) {
         double coeff = 0.0;
         for (int row = 0; row < n; ++row) {
-          coeff += q[static_cast<size_t>(row) * n + prev] * v[static_cast<size_t>(row)];
+          coeff += q[static_cast<size_t>(row) * n + prev] *
+                   v[static_cast<size_t>(row)];
         }
         r[static_cast<size_t>(prev) * n + col] = static_cast<float>(coeff);
         for (int row = 0; row < n; ++row) {
-          v[static_cast<size_t>(row)] -=
-              static_cast<float>(coeff) * q[static_cast<size_t>(row) * n + prev];
+          v[static_cast<size_t>(row)] -= static_cast<float>(coeff) *
+                                         q[static_cast<size_t>(row) * n + prev];
         }
       }
       const float v_norm = norm_float(v);
@@ -144,10 +145,11 @@ csr_eigs_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
 
 } // namespace
 
-std::tuple<mx::array, mx::array>
-csr_eigs(const mx::array &data, const mx::array &indices,
-         const mx::array &indptr, int n_rows, int n_cols, int k, int ncv,
-         const std::string &which) {
+std::tuple<mx::array, mx::array> csr_eigs(const mx::array &data,
+                                          const mx::array &indices,
+                                          const mx::array &indptr, int n_rows,
+                                          int n_cols, int k, int ncv,
+                                          const std::string &which) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_eigs requires a non-empty square matrix.");
   }
@@ -167,12 +169,10 @@ csr_eigs(const mx::array &data, const mx::array &indices,
   }
   ncv = std::min(n_rows, std::max(ncv, k + 1));
   if (indices.dtype() == mx::int32) {
-    return csr_eigs_impl<int32_t>(data, indices, indptr, n_rows, k, ncv,
-                                  which);
+    return csr_eigs_impl<int32_t>(data, indices, indptr, n_rows, k, ncv, which);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_eigs_impl<int64_t>(data, indices, indptr, n_rows, k, ncv,
-                                  which);
+    return csr_eigs_impl<int64_t>(data, indices, indptr, n_rows, k, ncv, which);
   }
   throw std::runtime_error("csr_eigs requires int32 or int64 indices.");
 }

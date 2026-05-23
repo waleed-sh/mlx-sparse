@@ -21,9 +21,8 @@
 namespace mlx_sparse {
 
 std::tuple<mx::array, mx::array, mx::array, mx::array>
-csr_cg(const mx::array &data, const mx::array &indices,
-       const mx::array &indptr, const mx::array &b, const mx::array &x0,
-       int n_rows, int n_cols, float rtol, float atol, int maxiter,
-       mx::StreamOrDevice s = {});
+csr_cg(const mx::array &data, const mx::array &indices, const mx::array &indptr,
+       const mx::array &b, const mx::array &x0, int n_rows, int n_cols,
+       float rtol, float atol, int maxiter, mx::StreamOrDevice s = {});
 
 } // namespace mlx_sparse

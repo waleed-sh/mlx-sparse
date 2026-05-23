@@ -18,7 +18,8 @@
 
 constant uint k_linalg_threads = 256;
 
-inline float reduce_sum_256(float value, threadgroup float *scratch, uint lane) {
+inline float reduce_sum_256(float value, threadgroup float *scratch,
+                            uint lane) {
   scratch[lane] = value;
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint stride = k_linalg_threads / 2; stride > 0; stride >>= 1) {

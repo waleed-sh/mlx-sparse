@@ -110,8 +110,7 @@ private:
 
 template <typename T, typename I>
 void fromdense_counts_cpu_impl(const mx::array &dense, mx::array &counts,
-                               int n_cols, float threshold,
-                               mx::Stream stream) {
+                               int n_cols, float threshold, mx::Stream stream) {
   counts.set_data(mx::allocator::malloc(counts.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -140,9 +139,9 @@ void fromdense_counts_cpu_impl(const mx::array &dense, mx::array &counts,
 
 template <typename T, typename I>
 void fromdense_fill_cpu_impl(const mx::array &dense,
-                             const mx::array &out_indptr,
-                             mx::array &out_data, mx::array &out_indices,
-                             int n_cols, float threshold, mx::Stream stream) {
+                             const mx::array &out_indptr, mx::array &out_data,
+                             mx::array &out_indices, int n_cols,
+                             float threshold, mx::Stream stream) {
   out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
   out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
 
@@ -375,7 +374,8 @@ csr_fromdense(const mx::array &dense, int index_dtype_bits, float threshold,
   require_rank(dense, 2, "csr_fromdense dense");
   require_supported_value_dtype(dense, "csr_fromdense dense");
   if (threshold < 0.0f) {
-    throw std::invalid_argument("csr_fromdense threshold must be non-negative.");
+    throw std::invalid_argument(
+        "csr_fromdense threshold must be non-negative.");
   }
 
   const auto index_dtype = index_dtype_from_bits(index_dtype_bits);
@@ -389,14 +389,14 @@ csr_fromdense(const mx::array &dense, int index_dtype_bits, float threshold,
 
   auto stream = mx::to_stream(s);
   auto dense_contig = mx::contiguous(dense, false, stream);
-  auto counts =
-      fromdense_counts(dense_contig, n_rows, index_dtype, n_cols, threshold,
-                       stream);
+  auto counts = fromdense_counts(dense_contig, n_rows, index_dtype, n_cols,
+                                 threshold, stream);
   mx::eval(counts);
   auto [out_indptr, out_nnz] =
       build_indptr_from_counts(counts, n_rows, index_dtype);
-  auto [out_data, out_indices] = fromdense_fill(
-      dense_contig, out_indptr, out_nnz, n_cols, threshold, index_dtype, stream);
+  auto [out_data, out_indices] =
+      fromdense_fill(dense_contig, out_indptr, out_nnz, n_cols, threshold,
+                     index_dtype, stream);
   return {out_data, out_indices, out_indptr};
 }
 

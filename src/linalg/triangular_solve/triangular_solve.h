@@ -21,7 +21,6 @@ namespace mlx_sparse {
 mx::array csr_triangular_solve(const mx::array &data, const mx::array &indices,
                                const mx::array &indptr, const mx::array &b,
                                int n_rows, int n_cols, bool lower,
-                               bool unit_diagonal,
-                               mx::StreamOrDevice s = {});
+                               bool unit_diagonal, mx::StreamOrDevice s = {});
 
 } // namespace mlx_sparse

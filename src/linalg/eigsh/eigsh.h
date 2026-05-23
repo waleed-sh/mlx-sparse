@@ -21,9 +21,10 @@
 
 namespace mlx_sparse {
 
-std::tuple<mx::array, mx::array>
-csr_eigsh(const mx::array &data, const mx::array &indices,
-          const mx::array &indptr, int n_rows, int n_cols, int k, int ncv,
-          const std::string &which);
+std::tuple<mx::array, mx::array> csr_eigsh(const mx::array &data,
+                                           const mx::array &indices,
+                                           const mx::array &indptr, int n_rows,
+                                           int n_cols, int k, int ncv,
+                                           const std::string &which);
 
 } // namespace mlx_sparse

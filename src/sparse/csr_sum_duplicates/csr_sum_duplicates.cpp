@@ -36,8 +36,7 @@ namespace mlx_sparse {
 
 namespace {
 
-template <typename T>
-typename Accumulator<T>::Type accumulator_value(T value) {
+template <typename T> typename Accumulator<T>::Type accumulator_value(T value) {
   using AccT = typename Accumulator<T>::Type;
   if constexpr (std::is_same_v<T, mx::float16_t> ||
                 std::is_same_v<T, mx::bfloat16_t>) {
@@ -129,39 +128,39 @@ void duplicate_fill_cpu_impl(const mx::array &data, const mx::array &indices,
   encoder.set_output_array(out_data);
   encoder.set_output_array(out_indices);
 
-  encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
-                    indices = mx::array::unsafe_weak_copy(indices),
-                    indptr = mx::array::unsafe_weak_copy(indptr),
-                    out_indptr = mx::array::unsafe_weak_copy(out_indptr),
-                    out_data = mx::array::unsafe_weak_copy(out_data),
-                    out_indices =
-                        mx::array::unsafe_weak_copy(out_indices)]() mutable {
-    using AccT = typename Accumulator<T>::Type;
+  encoder.dispatch(
+      [data = mx::array::unsafe_weak_copy(data),
+       indices = mx::array::unsafe_weak_copy(indices),
+       indptr = mx::array::unsafe_weak_copy(indptr),
+       out_indptr = mx::array::unsafe_weak_copy(out_indptr),
+       out_data = mx::array::unsafe_weak_copy(out_data),
+       out_indices = mx::array::unsafe_weak_copy(out_indices)]() mutable {
+        using AccT = typename Accumulator<T>::Type;
 
-    const auto *data_ptr = data.data<T>();
-    const auto *indices_ptr = indices.data<I>();
-    const auto *indptr_ptr = indptr.data<I>();
-    const auto *out_indptr_ptr = out_indptr.data<I>();
-    auto *out_data_ptr = out_data.data<T>();
-    auto *out_indices_ptr = out_indices.data<I>();
-    const int n_rows = static_cast<int>(indptr.size()) - 1;
+        const auto *data_ptr = data.data<T>();
+        const auto *indices_ptr = indices.data<I>();
+        const auto *indptr_ptr = indptr.data<I>();
+        const auto *out_indptr_ptr = out_indptr.data<I>();
+        auto *out_data_ptr = out_data.data<T>();
+        auto *out_indices_ptr = out_indices.data<I>();
+        const int n_rows = static_cast<int>(indptr.size()) - 1;
 
-    for (int row = 0; row < n_rows; ++row) {
-      I write = out_indptr_ptr[row];
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1];) {
-        const I col = indices_ptr[p];
-        AccT acc = Accumulator<T>::zero();
-        do {
-          acc += accumulator_value<T>(data_ptr[p]);
-          ++p;
-        } while (p < indptr_ptr[row + 1] && indices_ptr[p] == col);
+        for (int row = 0; row < n_rows; ++row) {
+          I write = out_indptr_ptr[row];
+          for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1];) {
+            const I col = indices_ptr[p];
+            AccT acc = Accumulator<T>::zero();
+            do {
+              acc += accumulator_value<T>(data_ptr[p]);
+              ++p;
+            } while (p < indptr_ptr[row + 1] && indices_ptr[p] == col);
 
-        out_indices_ptr[write] = col;
-        out_data_ptr[write] = Accumulator<T>::cast(acc);
-        ++write;
-      }
-    }
-  });
+            out_indices_ptr[write] = col;
+            out_data_ptr[write] = Accumulator<T>::cast(acc);
+            ++write;
+          }
+        }
+      });
 }
 
 template <typename I>
@@ -216,9 +215,8 @@ duplicate_fill(const mx::array &data, const mx::array &indices,
                int out_nnz, mx::Stream stream) {
   auto primitive = std::make_shared<CSRDuplicateFill>(stream);
   auto outputs = mx::array::make_arrays(
-      {mx::Shape{out_nnz}, mx::Shape{out_nnz}},
-      {data.dtype(), indices.dtype()}, primitive,
-      {data, indices, indptr, out_indptr});
+      {mx::Shape{out_nnz}, mx::Shape{out_nnz}}, {data.dtype(), indices.dtype()},
+      primitive, {data, indices, indptr, out_indptr});
   return {outputs[0], outputs[1]};
 }
 
@@ -254,8 +252,8 @@ void CSRDuplicateCounts::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name =
-      std::string("csr_sum_duplicates_counts_") + index_kernel_suffix(indices.dtype());
+  auto kernel_name = std::string("csr_sum_duplicates_counts_") +
+                     index_kernel_suffix(indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -324,8 +322,8 @@ void CSRDuplicateFill::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name =
-      sparse_kernel_name("csr_sum_duplicates_fill", data.dtype(), indices.dtype());
+  auto kernel_name = sparse_kernel_name("csr_sum_duplicates_fill", data.dtype(),
+                                        indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -377,9 +375,8 @@ csr_sum_duplicates(const mx::array &data, const mx::array &indices,
   auto counts = duplicate_counts(indices_contig, indptr_contig, n_rows, stream);
   mx::eval(counts);
   auto [out_indptr, out_nnz] = build_indptr_from_counts(counts, n_rows);
-  auto [out_data, out_indices] =
-      duplicate_fill(data_contig, indices_contig, indptr_contig, out_indptr,
-                     out_nnz, stream);
+  auto [out_data, out_indices] = duplicate_fill(
+      data_contig, indices_contig, indptr_contig, out_indptr, out_nnz, stream);
   return {out_data, out_indices, out_indptr};
 }
 

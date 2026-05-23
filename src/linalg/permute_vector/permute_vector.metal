@@ -15,10 +15,11 @@
 #include "linalg/common/metal_common.h"
 
 [[host_name("csr_permute_vector_float32")]] [[kernel]] void
-csr_permute_vector_float32_kernel(
-    device const float *x [[buffer(0)]], device const int *perm [[buffer(1)]],
-    device float *out [[buffer(2)]], constant int &size [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
+csr_permute_vector_float32_kernel(device const float *x [[buffer(0)]],
+                                  device const int *perm [[buffer(1)]],
+                                  device float *out [[buffer(2)]],
+                                  constant int &size [[buffer(3)]],
+                                  uint tid [[thread_position_in_grid]]) {
   if (static_cast<int>(tid) >= size) {
     return;
   }

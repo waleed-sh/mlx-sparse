@@ -46,14 +46,14 @@ template <typename I>
 std::tuple<mx::array, mx::array, mx::array>
 csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
                   int n_rows, int n_cols, mx::Dtype index_dtype) {
-  auto input_rows =
-      read_csr_rows_float32<I>(std::move(data), std::move(indices),
-                               std::move(indptr), n_rows);
+  auto input_rows = read_csr_rows_float32<I>(
+      std::move(data), std::move(indices), std::move(indptr), n_rows);
   std::vector<std::map<int, float>> lower(static_cast<size_t>(n_rows));
   for (int row = 0; row < n_rows; ++row) {
     for (const auto &[col, value] : input_rows[static_cast<size_t>(row)]) {
       if (col < 0 || col >= n_cols) {
-        throw std::invalid_argument("csr_cholesky input contains an out-of-bounds column.");
+        throw std::invalid_argument(
+            "csr_cholesky input contains an out-of-bounds column.");
       }
       if (row >= col) {
         lower[static_cast<size_t>(row)][col] += value;
@@ -81,8 +81,7 @@ csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
       if (std::abs(diag[static_cast<size_t>(pivot_col)]) <= eps) {
         throw std::runtime_error("csr_cholesky encountered a zero pivot.");
       }
-      const float factor =
-          it->second / diag[static_cast<size_t>(pivot_col)];
+      const float factor = it->second / diag[static_cast<size_t>(pivot_col)];
       it->second = factor;
       for (const auto &[update_col, update_value] :
            columns[static_cast<size_t>(pivot_col)]) {
@@ -95,7 +94,8 @@ csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
     }
     const float diag_value = current[row];
     if (diag_value <= eps) {
-      throw std::runtime_error("csr_cholesky requires a positive-definite matrix.");
+      throw std::runtime_error(
+          "csr_cholesky requires a positive-definite matrix.");
     }
     diag[static_cast<size_t>(row)] = std::sqrt(diag_value);
     current[row] = diag[static_cast<size_t>(row)];
@@ -111,8 +111,7 @@ csr_cholesky_impl(mx::array data, mx::array indices, mx::array indptr,
         out_indices.push_back(static_cast<I>(col));
       }
     }
-    out_indptr[static_cast<size_t>(row) + 1] =
-        static_cast<I>(out_data.size());
+    out_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(out_data.size());
   }
   return make_csr_arrays_float32(out_data, out_indices, out_indptr,
                                  index_dtype);

@@ -17,15 +17,13 @@
 template <typename I>
 [[kernel]] void csr_cg_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *b [[buffer(3)]], device const float *x0 [[buffer(4)]],
     device float *x [[buffer(5)]], device int *info [[buffer(6)]],
     device float *residual [[buffer(7)]], device int *iterations [[buffer(8)]],
     device float *work [[buffer(9)]], constant int &n_rows [[buffer(10)]],
-    constant int &n_cols [[buffer(11)]],
-    constant int &maxiter [[buffer(12)]], constant float &rtol [[buffer(13)]],
-    constant float &atol [[buffer(14)]],
+    constant int &n_cols [[buffer(11)]], constant int &maxiter [[buffer(12)]],
+    constant float &rtol [[buffer(13)]], constant float &atol [[buffer(14)]],
     uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   threadgroup float scratch[256];

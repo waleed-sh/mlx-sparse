@@ -22,7 +22,7 @@ namespace mlx_sparse {
 
 std::tuple<mx::array, mx::array, mx::array, mx::array, mx::array, mx::array,
            mx::array>
-csr_lu(const mx::array &data, const mx::array &indices,
-       const mx::array &indptr, int n_rows, int n_cols);
+csr_lu(const mx::array &data, const mx::array &indices, const mx::array &indptr,
+       int n_rows, int n_cols);
 
 } // namespace mlx_sparse

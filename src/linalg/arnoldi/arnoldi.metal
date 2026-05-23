@@ -17,8 +17,7 @@
 template <typename I>
 [[kernel]] void csr_arnoldi_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *v0 [[buffer(3)]], device float *h [[buffer(4)]],
     device float *basis [[buffer(5)]], device int *actual [[buffer(6)]],
     device float *work [[buffer(7)]], constant int &n_rows [[buffer(8)]],
@@ -45,7 +44,8 @@ template <typename I>
        row += static_cast<int>(k_linalg_threads)) {
     norm_local += v0[row] * v0[row];
   }
-  const float norm0 = sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
+  const float norm0 =
+      sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
   for (int row = static_cast<int>(lane); row < n_rows;
        row += static_cast<int>(k_linalg_threads)) {
     basis[row * cols] = norm0 <= 1.1920928955078125e-7f

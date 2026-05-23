@@ -114,9 +114,8 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
     for (int row = 0; row < n_rows; ++row) {
       double update = 0.0;
       for (int col = 0; col < used; ++col) {
-        update +=
-            basis_ptr[static_cast<size_t>(row) * (steps + 1) + col] *
-            y[static_cast<size_t>(col)];
+        update += basis_ptr[static_cast<size_t>(row) * (steps + 1) + col] *
+                  y[static_cast<size_t>(col)];
       }
       x[static_cast<size_t>(row)] += static_cast<float>(update);
     }
@@ -142,7 +141,8 @@ csr_gmres(const mx::array &data, const mx::array &indices,
           int n_rows, int n_cols, float rtol, float atol, int restart,
           int maxiter) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
-    throw std::invalid_argument("csr_gmres requires a non-empty square matrix.");
+    throw std::invalid_argument(
+        "csr_gmres requires a non-empty square matrix.");
   }
   if (restart <= 0 || maxiter < 0) {
     throw std::invalid_argument(

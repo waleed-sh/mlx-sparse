@@ -53,10 +53,10 @@ csr_eigsh_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
   auto v0 = mx::array(v0_data.begin(), mx::Shape{n_rows}, mx::float32);
   auto stream = mx::default_stream(mx::default_device());
 
-  // Lanczos tridiagonalisation via GPU kernel (falls back to CPU if no GPU device)
-  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] =
-      csr_lanczos(data, indices, indptr, v0, n_rows, n_rows, steps, true,
-                  stream);
+  // Lanczos tridiagonalisation via GPU kernel (falls back to CPU if no GPU
+  // device)
+  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] = csr_lanczos(
+      data, indices, indptr, v0, n_rows, n_rows, steps, true, stream);
   mx::eval(alphas_mx, betas_mx, basis_mx, actual_k_mx);
 
   const int used = static_cast<int>(actual_k_mx.item<int32_t>());
@@ -89,8 +89,7 @@ csr_eigsh_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
         acc += basis_ptr[static_cast<size_t>(row) * steps + j] *
                vectors_small[static_cast<size_t>(j) * used + eig_col];
       }
-      vectors[static_cast<size_t>(row) * k + out_col] =
-          static_cast<float>(acc);
+      vectors[static_cast<size_t>(row) * k + out_col] = static_cast<float>(acc);
     }
   }
   return {mx::array(values.begin(), mx::Shape{k}, mx::float32),
@@ -99,12 +98,14 @@ csr_eigsh_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
 
 } // namespace
 
-std::tuple<mx::array, mx::array>
-csr_eigsh(const mx::array &data, const mx::array &indices,
-          const mx::array &indptr, int n_rows, int n_cols, int k, int ncv,
-          const std::string &which) {
+std::tuple<mx::array, mx::array> csr_eigsh(const mx::array &data,
+                                           const mx::array &indices,
+                                           const mx::array &indptr, int n_rows,
+                                           int n_cols, int k, int ncv,
+                                           const std::string &which) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
-    throw std::invalid_argument("csr_eigsh requires a non-empty square matrix.");
+    throw std::invalid_argument(
+        "csr_eigsh requires a non-empty square matrix.");
   }
   if (k <= 0 || k >= n_rows) {
     throw std::invalid_argument("csr_eigsh k must satisfy 0 < k < n_rows.");

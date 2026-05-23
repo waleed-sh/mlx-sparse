@@ -72,10 +72,9 @@ private:
 template <typename I>
 void csr_triangular_solve_cpu_impl(const mx::array &data,
                                    const mx::array &indices,
-                                   const mx::array &indptr,
-                                   const mx::array &b, mx::array &x,
-                                   int n_rows, bool lower, bool unit_diagonal,
-                                   mx::Stream stream) {
+                                   const mx::array &indptr, const mx::array &b,
+                                   mx::array &x, int n_rows, bool lower,
+                                   bool unit_diagonal, mx::Stream stream) {
   x.set_data(mx::allocator::malloc(x.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -111,7 +110,8 @@ void csr_triangular_solve_cpu_impl(const mx::array &data,
         }
         if (!unit_diagonal &&
             std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
-          throw std::runtime_error("csr_triangular_solve encountered a zero diagonal.");
+          throw std::runtime_error(
+              "csr_triangular_solve encountered a zero diagonal.");
         }
         x_ptr[row] = unit_diagonal ? sum : sum / diag;
       }
@@ -129,7 +129,8 @@ void csr_triangular_solve_cpu_impl(const mx::array &data,
         }
         if (!unit_diagonal &&
             std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
-          throw std::runtime_error("csr_triangular_solve encountered a zero diagonal.");
+          throw std::runtime_error(
+              "csr_triangular_solve encountered a zero diagonal.");
         }
         x_ptr[row] = unit_diagonal ? sum : sum / diag;
       }
@@ -147,15 +148,15 @@ void CSRTriangularSolve::eval_cpu(const std::vector<mx::array> &inputs,
   auto &b = inputs[3];
 
   if (indices.dtype() == mx::int32) {
-    csr_triangular_solve_cpu_impl<int32_t>(
-        data, indices, indptr, b, outputs[0], n_rows_, lower_, unit_diagonal_,
-        stream());
+    csr_triangular_solve_cpu_impl<int32_t>(data, indices, indptr, b, outputs[0],
+                                           n_rows_, lower_, unit_diagonal_,
+                                           stream());
     return;
   }
   if (indices.dtype() == mx::int64) {
-    csr_triangular_solve_cpu_impl<int64_t>(
-        data, indices, indptr, b, outputs[0], n_rows_, lower_, unit_diagonal_,
-        stream());
+    csr_triangular_solve_cpu_impl<int64_t>(data, indices, indptr, b, outputs[0],
+                                           n_rows_, lower_, unit_diagonal_,
+                                           stream());
     return;
   }
   throw std::runtime_error(
@@ -232,11 +233,10 @@ mx::array csr_triangular_solve(const mx::array &data, const mx::array &indices,
   auto indptr_contig = mx::contiguous(indptr, false, stream);
   auto b_contig = mx::contiguous(b, false, stream);
 
-  return mx::array(
-      mx::Shape{n_rows}, mx::float32,
-      std::make_shared<CSRTriangularSolve>(stream, n_rows, n_cols, lower,
-                                           unit_diagonal),
-      {data_contig, indices_contig, indptr_contig, b_contig});
+  return mx::array(mx::Shape{n_rows}, mx::float32,
+                   std::make_shared<CSRTriangularSolve>(stream, n_rows, n_cols,
+                                                        lower, unit_diagonal),
+                   {data_contig, indices_contig, indptr_contig, b_contig});
 }
 
 } // namespace mlx_sparse

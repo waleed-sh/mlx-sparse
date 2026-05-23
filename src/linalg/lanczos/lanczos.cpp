@@ -58,8 +58,8 @@ public:
 
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSRLanczos &>(other);
-    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ &&
-           k_ == rhs.k_ && reorthogonalize_ == rhs.reorthogonalize_;
+    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ && k_ == rhs.k_ &&
+           reorthogonalize_ == rhs.reorthogonalize_;
   }
 
 private:
@@ -72,9 +72,9 @@ private:
 template <typename I>
 void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
                           const mx::array &indptr, const mx::array &v0,
-                          mx::array &alphas, mx::array &betas,
-                          mx::array &basis, mx::array &actual, int n_rows,
-                          int k, bool reorthogonalize, mx::Stream stream) {
+                          mx::array &alphas, mx::array &betas, mx::array &basis,
+                          mx::array &actual, int n_rows, int k,
+                          bool reorthogonalize, mx::Stream stream) {
   alphas.set_data(mx::allocator::malloc(alphas.nbytes()));
   betas.set_data(mx::allocator::malloc(betas.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
@@ -114,7 +114,8 @@ void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
 
     double v_norm2 = 0.0;
     for (int i = 0; i < n_rows; ++i) {
-      v_norm2 += static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
+      v_norm2 +=
+          static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
     }
     float v_norm = std::sqrt(std::max(v_norm2, 0.0));
     if (v_norm <= std::numeric_limits<float>::epsilon()) {
@@ -217,9 +218,9 @@ void CSRLanczos::eval_gpu(const std::vector<mx::array> &inputs,
   betas.set_data(mx::allocator::malloc(betas.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
   actual.set_data(mx::allocator::malloc(actual.nbytes()));
-  mx::array work(mx::allocator::malloc(static_cast<size_t>(n_rows_) *
-                                       sizeof(float)),
-                 mx::Shape{n_rows_}, mx::float32);
+  mx::array work(
+      mx::allocator::malloc(static_cast<size_t>(n_rows_) * sizeof(float)),
+      mx::Shape{n_rows_}, mx::float32);
 
   auto &s = stream();
   auto &device = mx::metal::device(s.device);

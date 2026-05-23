@@ -73,15 +73,15 @@ inline std::vector<double> solve_dense_system(std::vector<double> a,
     int pivot = col;
     double pivot_abs = std::abs(a[static_cast<size_t>(col) * n + col]);
     for (int row = col + 1; row < n; ++row) {
-      const double candidate =
-          std::abs(a[static_cast<size_t>(row) * n + col]);
+      const double candidate = std::abs(a[static_cast<size_t>(row) * n + col]);
       if (candidate > pivot_abs) {
         pivot_abs = candidate;
         pivot = row;
       }
     }
     if (pivot_abs <= std::numeric_limits<double>::epsilon()) {
-      throw std::runtime_error("small dense solve encountered a singular matrix.");
+      throw std::runtime_error(
+          "small dense solve encountered a singular matrix.");
     }
     if (pivot != col) {
       for (int j = col; j < n; ++j) {
@@ -108,11 +108,10 @@ inline std::vector<double> solve_dense_system(std::vector<double> a,
   for (int row = n - 1; row >= 0; --row) {
     double sum = b[static_cast<size_t>(row)];
     for (int col = row + 1; col < n; ++col) {
-      sum -= a[static_cast<size_t>(row) * n + col] *
-             x[static_cast<size_t>(col)];
+      sum -=
+          a[static_cast<size_t>(row) * n + col] * x[static_cast<size_t>(col)];
     }
-    x[static_cast<size_t>(row)] =
-        sum / a[static_cast<size_t>(row) * n + row];
+    x[static_cast<size_t>(row)] = sum / a[static_cast<size_t>(row) * n + row];
   }
   return x;
 }
@@ -187,9 +186,8 @@ jacobi_symmetric(std::vector<float> a, int n) {
     const float aqq = a[static_cast<size_t>(q) * n + q];
     const float apq = a[static_cast<size_t>(p) * n + q];
     const float tau = (aqq - app) / (2.0f * apq);
-    const float t =
-        (tau >= 0.0f ? 1.0f : -1.0f) /
-        (std::abs(tau) + std::sqrt(1.0f + tau * tau));
+    const float t = (tau >= 0.0f ? 1.0f : -1.0f) /
+                    (std::abs(tau) + std::sqrt(1.0f + tau * tau));
     const float c = 1.0f / std::sqrt(1.0f + t * t);
     const float s = t * c;
     for (int k = 0; k < n; ++k) {
@@ -219,8 +217,7 @@ jacobi_symmetric(std::vector<float> a, int n) {
 }
 
 inline std::vector<int> select_ritz_indices(const std::vector<float> &values,
-                                            int k,
-                                            const std::string &which) {
+                                            int k, const std::string &which) {
   std::vector<int> order(values.size());
   std::iota(order.begin(), order.end(), 0);
   if (which == "SM" || which == "SA" || which == "SR") {
@@ -229,7 +226,8 @@ inline std::vector<int> select_ritz_indices(const std::vector<float> &values,
         return std::abs(values[static_cast<size_t>(lhs)]) <
                std::abs(values[static_cast<size_t>(rhs)]);
       }
-      return values[static_cast<size_t>(lhs)] < values[static_cast<size_t>(rhs)];
+      return values[static_cast<size_t>(lhs)] <
+             values[static_cast<size_t>(rhs)];
     });
   } else {
     std::sort(order.begin(), order.end(), [&](int lhs, int rhs) {
@@ -237,7 +235,8 @@ inline std::vector<int> select_ritz_indices(const std::vector<float> &values,
         return std::abs(values[static_cast<size_t>(lhs)]) >
                std::abs(values[static_cast<size_t>(rhs)]);
       }
-      return values[static_cast<size_t>(lhs)] > values[static_cast<size_t>(rhs)];
+      return values[static_cast<size_t>(lhs)] >
+             values[static_cast<size_t>(rhs)];
     });
   }
   order.resize(static_cast<size_t>(k));
@@ -259,8 +258,7 @@ host_lanczos_operator(int n, int steps, Apply &&apply) {
   for (int j = 0; j < steps; ++j) {
     std::vector<float> q(static_cast<size_t>(n));
     for (int row = 0; row < n; ++row) {
-      q[static_cast<size_t>(row)] =
-          basis[static_cast<size_t>(row) * steps + j];
+      q[static_cast<size_t>(row)] = basis[static_cast<size_t>(row) * steps + j];
     }
     auto w = apply(q);
     if (j > 0) {
@@ -324,8 +322,8 @@ inline void require_linalg_float32(const mx::array &array, const char *name) {
 inline void require_inner_product_dtype(const mx::array &array,
                                         const char *name) {
   if (array.dtype() != mx::float32 && array.dtype() != mx::complex64) {
-    throw std::invalid_argument(
-        std::string(name) + " requires dtype float32 or complex64.");
+    throw std::invalid_argument(std::string(name) +
+                                " requires dtype float32 or complex64.");
   }
 }
 
@@ -334,12 +332,12 @@ std::tuple<mx::array, mx::array, mx::array>
 make_csr_arrays_float32(const std::vector<float> &data,
                         const std::vector<I> &indices,
                         const std::vector<I> &indptr, mx::Dtype index_dtype) {
-  return {mx::array(data.begin(),
-                    mx::Shape{static_cast<int>(data.size())}, mx::float32),
+  return {mx::array(data.begin(), mx::Shape{static_cast<int>(data.size())},
+                    mx::float32),
           mx::array(indices.begin(),
                     mx::Shape{static_cast<int>(indices.size())}, index_dtype),
-          mx::array(indptr.begin(),
-                    mx::Shape{static_cast<int>(indptr.size())}, index_dtype)};
+          mx::array(indptr.begin(), mx::Shape{static_cast<int>(indptr.size())},
+                    index_dtype)};
 }
 
 template <typename I>

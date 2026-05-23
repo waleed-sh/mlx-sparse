@@ -17,8 +17,7 @@
 template <typename I>
 [[kernel]] void csr_triangular_solve_kernel(
     device const float *data [[buffer(0)]],
-    device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
     device const float *b [[buffer(3)]], device float *x [[buffer(4)]],
     constant int &n_rows [[buffer(5)]], constant int &n_cols [[buffer(6)]],
     constant int &lower [[buffer(7)]],
@@ -60,13 +59,14 @@ template <typename I>
 }
 
 template [[host_name("csr_triangular_solve_float32_int32")]] [[kernel]] void
-csr_triangular_solve_kernel<int>(
-    device const float *, device const int *, device const int *,
-    device const float *, device float *, constant int &, constant int &,
-    constant int &, constant int &, uint);
+csr_triangular_solve_kernel<int>(device const float *, device const int *,
+                                 device const int *, device const float *,
+                                 device float *, constant int &, constant int &,
+                                 constant int &, constant int &, uint);
 
 template [[host_name("csr_triangular_solve_float32_int64")]] [[kernel]] void
-csr_triangular_solve_kernel<long>(
-    device const float *, device const long *, device const long *,
-    device const float *, device float *, constant int &, constant int &,
-    constant int &, constant int &, uint);
+csr_triangular_solve_kernel<long>(device const float *, device const long *,
+                                  device const long *, device const float *,
+                                  device float *, constant int &,
+                                  constant int &, constant int &,
+                                  constant int &, uint);

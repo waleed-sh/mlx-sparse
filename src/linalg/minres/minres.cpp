@@ -45,8 +45,8 @@ using namespace linalg_detail;
 
 template <typename I>
 std::tuple<mx::array, mx::array, mx::array, mx::array>
-csr_minres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
-                mx::array x0, int n_rows, float rtol, float atol,
+csr_minres_impl(mx::array data, mx::array indices, mx::array indptr,
+                mx::array b, mx::array x0, int n_rows, float rtol, float atol,
                 int maxiter) {
   data.eval();
   indices.eval();
@@ -83,9 +83,8 @@ csr_minres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b
   auto stream = mx::default_stream(mx::default_device());
 
   // Lanczos tridiagonalisation via GPU kernel
-  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] =
-      csr_lanczos(data, indices, indptr, v0, n_rows, n_rows, steps, true,
-                  stream);
+  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] = csr_lanczos(
+      data, indices, indptr, v0, n_rows, n_rows, steps, true, stream);
   mx::eval(alphas_mx, betas_mx, basis_mx, actual_k_mx);
 
   const int used = static_cast<int>(actual_k_mx.item<int32_t>());
@@ -137,7 +136,8 @@ csr_minres(const mx::array &data, const mx::array &indices,
            const mx::array &indptr, const mx::array &b, const mx::array &x0,
            int n_rows, int n_cols, float rtol, float atol, int maxiter) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
-    throw std::invalid_argument("csr_minres requires a non-empty square matrix.");
+    throw std::invalid_argument(
+        "csr_minres requires a non-empty square matrix.");
   }
   if (maxiter < 0) {
     throw std::invalid_argument("csr_minres maxiter must be non-negative.");
@@ -160,12 +160,12 @@ csr_minres(const mx::array &data, const mx::array &indices,
         "csr_minres data and indices must have equal length.");
   }
   if (indices.dtype() == mx::int32) {
-    return csr_minres_impl<int32_t>(data, indices, indptr, b, x0, n_rows,
-                                    rtol, atol, maxiter);
+    return csr_minres_impl<int32_t>(data, indices, indptr, b, x0, n_rows, rtol,
+                                    atol, maxiter);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_minres_impl<int64_t>(data, indices, indptr, b, x0, n_rows,
-                                    rtol, atol, maxiter);
+    return csr_minres_impl<int64_t>(data, indices, indptr, b, x0, n_rows, rtol,
+                                    atol, maxiter);
   }
   throw std::runtime_error("csr_minres requires int32 or int64 indices.");
 }

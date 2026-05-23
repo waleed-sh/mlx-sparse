@@ -19,11 +19,11 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/common.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
 #include "mlx/primitives.h"
-#include "common/common.h"
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"

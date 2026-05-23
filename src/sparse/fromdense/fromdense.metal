@@ -14,7 +14,8 @@
 
 #include "common/metal_common.h"
 
-template <typename T> inline bool fromdense_keep_value(T value, float threshold) {
+template <typename T>
+inline bool fromdense_keep_value(T value, float threshold) {
   if (threshold == 0.0f) {
     return !(value == T(0));
   }
@@ -31,10 +32,12 @@ inline bool fromdense_keep_value<complex64_t>(complex64_t value,
 }
 
 template <typename T, typename I>
-[[kernel]] void fromdense_counts_kernel(
-    device const T *dense [[buffer(0)]], device I *counts [[buffer(1)]],
-    constant int &n_rows [[buffer(2)]], constant int &n_cols [[buffer(3)]],
-    constant float &threshold [[buffer(4)]], uint row [[thread_position_in_grid]]) {
+[[kernel]] void fromdense_counts_kernel(device const T *dense [[buffer(0)]],
+                                        device I *counts [[buffer(1)]],
+                                        constant int &n_rows [[buffer(2)]],
+                                        constant int &n_cols [[buffer(3)]],
+                                        constant float &threshold [[buffer(4)]],
+                                        uint row [[thread_position_in_grid]]) {
   if (row >= static_cast<uint>(n_rows)) {
     return;
   }
@@ -50,12 +53,14 @@ template <typename T, typename I>
 }
 
 template <typename T, typename I>
-[[kernel]] void fromdense_fill_kernel(
-    device const T *dense [[buffer(0)]],
-    device const I *out_indptr [[buffer(1)]],
-    device T *out_data [[buffer(2)]], device I *out_indices [[buffer(3)]],
-    constant int &n_rows [[buffer(4)]], constant int &n_cols [[buffer(5)]],
-    constant float &threshold [[buffer(6)]], uint row [[thread_position_in_grid]]) {
+[[kernel]] void fromdense_fill_kernel(device const T *dense [[buffer(0)]],
+                                      device const I *out_indptr [[buffer(1)]],
+                                      device T *out_data [[buffer(2)]],
+                                      device I *out_indices [[buffer(3)]],
+                                      constant int &n_rows [[buffer(4)]],
+                                      constant int &n_cols [[buffer(5)]],
+                                      constant float &threshold [[buffer(6)]],
+                                      uint row [[thread_position_in_grid]]) {
   if (row >= static_cast<uint>(n_rows)) {
     return;
   }

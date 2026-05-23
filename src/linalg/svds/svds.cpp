@@ -53,8 +53,8 @@ csr_svds_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
   const auto *indices_ptr = indices.data<I>();
   const auto *indptr_ptr = indptr.data<I>();
   const int steps = std::min(n_cols, std::max(ncv, k + 1));
-  auto [tridiagonal, basis, used] = host_lanczos_operator(
-      n_cols, steps, [&](const std::vector<float> &x) {
+  auto [tridiagonal, basis, used] =
+      host_lanczos_operator(n_cols, steps, [&](const std::vector<float> &x) {
         auto ax = host_csr_spmv(data_ptr, indices_ptr, indptr_ptr, x, n_rows);
         return host_csr_spmv_transpose(data_ptr, indices_ptr, indptr_ptr, ax,
                                        n_rows, n_cols);
@@ -103,8 +103,7 @@ csr_svds(const mx::array &data, const mx::array &indices,
     throw std::invalid_argument("csr_svds requires a non-empty matrix.");
   }
   if (k <= 0 || k >= std::min(n_rows, n_cols)) {
-    throw std::invalid_argument(
-        "csr_svds k must satisfy 0 < k < min(shape).");
+    throw std::invalid_argument("csr_svds k must satisfy 0 < k < min(shape).");
   }
   require_rank(data, 1, "csr_svds data");
   require_rank(indices, 1, "csr_svds indices");
@@ -119,12 +118,12 @@ csr_svds(const mx::array &data, const mx::array &indices,
   }
   ncv = std::min(n_cols, std::max(ncv, k + 1));
   if (indices.dtype() == mx::int32) {
-    return csr_svds_impl<int32_t>(data, indices, indptr, n_rows, n_cols, k,
-                                  ncv, which);
+    return csr_svds_impl<int32_t>(data, indices, indptr, n_rows, n_cols, k, ncv,
+                                  which);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_svds_impl<int64_t>(data, indices, indptr, n_rows, n_cols, k,
-                                  ncv, which);
+    return csr_svds_impl<int64_t>(data, indices, indptr, n_rows, n_cols, k, ncv,
+                                  which);
   }
   throw std::runtime_error("csr_svds requires int32 or int64 indices.");
 }

@@ -41,9 +41,9 @@ template <typename T, typename I>
 [[kernel]] void csr_sum_duplicates_fill_kernel(
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]],
-    device const I *out_indptr [[buffer(3)]],
-    device T *out_data [[buffer(4)]], device I *out_indices [[buffer(5)]],
-    constant int &n_rows [[buffer(6)]], uint row [[thread_position_in_grid]]) {
+    device const I *out_indptr [[buffer(3)]], device T *out_data [[buffer(4)]],
+    device I *out_indices [[buffer(5)]], constant int &n_rows [[buffer(6)]],
+    uint row [[thread_position_in_grid]]) {
   if (row >= static_cast<uint>(n_rows)) {
     return;
   }

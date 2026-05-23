@@ -59,8 +59,7 @@ public:
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSRCG &>(other);
     return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ &&
-           rtol_ == rhs.rtol_ && atol_ == rhs.atol_ &&
-           maxiter_ == rhs.maxiter_;
+           rtol_ == rhs.rtol_ && atol_ == rhs.atol_ && maxiter_ == rhs.maxiter_;
   }
 
 private:
@@ -118,8 +117,7 @@ void csr_cg_cpu_impl(const mx::array &data, const mx::array &indices,
     std::vector<float> ap(static_cast<size_t>(n_rows));
     std::copy(x0_ptr, x0_ptr + n_rows, x_ptr);
 
-    csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, x_ptr, ap.data(),
-                   n_rows);
+    csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, x_ptr, ap.data(), n_rows);
     for (int i = 0; i < n_rows; ++i) {
       r[i] = b_ptr[i] - ap[i];
       p[i] = r[i];
@@ -191,14 +189,14 @@ void CSRCG::eval_cpu(const std::vector<mx::array> &inputs,
 
   if (indices.dtype() == mx::int32) {
     csr_cg_cpu_impl<int32_t>(data, indices, indptr, b, x0, outputs[0],
-                             outputs[1], outputs[2], outputs[3], n_rows_,
-                             rtol_, atol_, maxiter_, stream());
+                             outputs[1], outputs[2], outputs[3], n_rows_, rtol_,
+                             atol_, maxiter_, stream());
     return;
   }
   if (indices.dtype() == mx::int64) {
     csr_cg_cpu_impl<int64_t>(data, indices, indptr, b, x0, outputs[0],
-                             outputs[1], outputs[2], outputs[3], n_rows_,
-                             rtol_, atol_, maxiter_, stream());
+                             outputs[1], outputs[2], outputs[3], n_rows_, rtol_,
+                             atol_, maxiter_, stream());
     return;
   }
   throw std::runtime_error("csr_cg requires int32 or int64 indices.");
@@ -221,14 +219,15 @@ void CSRCG::eval_gpu(const std::vector<mx::array> &inputs,
   info.set_data(mx::allocator::malloc(info.nbytes()));
   residual.set_data(mx::allocator::malloc(residual.nbytes()));
   iterations.set_data(mx::allocator::malloc(iterations.nbytes()));
-  mx::array work(mx::allocator::malloc(static_cast<size_t>(3 * n_rows_) *
-                                       sizeof(float)),
-                 mx::Shape{3 * n_rows_}, mx::float32);
+  mx::array work(
+      mx::allocator::malloc(static_cast<size_t>(3 * n_rows_) * sizeof(float)),
+      mx::Shape{3 * n_rows_}, mx::float32);
 
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name = sparse_kernel_name("csr_cg", data.dtype(), indices.dtype());
+  auto kernel_name =
+      sparse_kernel_name("csr_cg", data.dtype(), indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -253,17 +252,15 @@ void CSRCG::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.add_temporary(std::move(work));
 }
 #else
-void CSRCG::eval_gpu(const std::vector<mx::array> &,
-                     std::vector<mx::array> &) {
+void CSRCG::eval_gpu(const std::vector<mx::array> &, std::vector<mx::array> &) {
   throw std::runtime_error("csr_cg has no GPU implementation in this build.");
 }
 #endif
 
 std::tuple<mx::array, mx::array, mx::array, mx::array>
-csr_cg(const mx::array &data, const mx::array &indices,
-       const mx::array &indptr, const mx::array &b, const mx::array &x0,
-       int n_rows, int n_cols, float rtol, float atol, int maxiter,
-       mx::StreamOrDevice s) {
+csr_cg(const mx::array &data, const mx::array &indices, const mx::array &indptr,
+       const mx::array &b, const mx::array &x0, int n_rows, int n_cols,
+       float rtol, float atol, int maxiter, mx::StreamOrDevice s) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_cg requires a non-empty square matrix.");
   }
@@ -278,13 +275,13 @@ csr_cg(const mx::array &data, const mx::array &indices,
   require_linalg_float32(data, "csr_cg data");
   require_linalg_float32(b, "csr_cg b");
   require_linalg_float32(x0, "csr_cg x0");
-  require_same_index_dtype(indices, indptr, "csr_cg indices",
-                           "csr_cg indptr");
+  require_same_index_dtype(indices, indptr, "csr_cg indices", "csr_cg indptr");
   require_size(indptr, n_rows + 1, "csr_cg indptr");
   require_size(b, n_rows, "csr_cg b");
   require_size(x0, n_cols, "csr_cg x0");
   if (indices.size() != data.size()) {
-    throw std::invalid_argument("csr_cg data and indices must have equal length.");
+    throw std::invalid_argument(
+        "csr_cg data and indices must have equal length.");
   }
 
   auto stream = mx::to_stream(s);
