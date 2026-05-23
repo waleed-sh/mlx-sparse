@@ -56,6 +56,8 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matmul/csr_batched_matmul.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matvec/csr_batched_matvec.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmat/csr_matmat.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul/csr_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.cpp
@@ -95,6 +97,8 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/permute_vector/permute_vector.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matmul/csr_batched_matmul.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matvec/csr_batched_matvec.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmat/csr_matmat.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul/csr_matmul.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.metal

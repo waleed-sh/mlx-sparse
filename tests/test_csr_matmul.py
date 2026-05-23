@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import mlx_sparse as ms
+import mlx_sparse._native as native
 from mlx_sparse._host import to_numpy
 
 
@@ -85,6 +87,143 @@ def test_csr_matmul_batched_rhs_matches_dense_mlx(mx):
 
     expected = to_numpy(csr.todense()) @ rhs_np
     np.testing.assert_allclose(to_numpy(out), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_explicit_csr_batched_matmul_matches_dense_and_scipy(mx, scipy_sparse):
+    rng = np.random.default_rng(790)
+    scipy_csr = scipy_sparse.random(
+        36,
+        45,
+        density=0.07,
+        format="csr",
+        dtype=np.float32,
+        random_state=rng,
+    )
+    scipy_csr.sum_duplicates()
+    scipy_csr.sort_indices()
+    rhs_np = rng.normal(size=(2, 4, 45, 6)).astype(np.float32)
+
+    csr = ms.csr_array(
+        (
+            mx.array(scipy_csr.data.astype(np.float32)),
+            mx.array(scipy_csr.indices.astype(np.int32)),
+            mx.array(scipy_csr.indptr.astype(np.int32)),
+        ),
+        shape=scipy_csr.shape,
+        sorted_indices=True,
+        canonical=True,
+    )
+
+    out = ms.csr_batched_matmul(csr, mx.array(rhs_np))
+    dense_expected = to_numpy(csr.todense()) @ rhs_np
+    scipy_expected = np.stack(
+        [scipy_csr @ rhs_np.reshape(-1, 45, 6)[i] for i in range(8)],
+        axis=0,
+    ).reshape(2, 4, 36, 6)
+
+    np.testing.assert_allclose(to_numpy(out), dense_expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(to_numpy(out), scipy_expected, rtol=1e-5, atol=1e-5)
+
+
+def test_native_csr_transpose_matmul_matches_dense_and_scipy(mx, scipy_sparse):
+    rng = np.random.default_rng(791)
+    scipy_csr = scipy_sparse.random(
+        70,
+        55,
+        density=0.05,
+        format="csr",
+        dtype=np.float32,
+        random_state=rng,
+    )
+    rhs_np = rng.normal(size=(70, 5)).astype(np.float32)
+    csr = ms.csr_array(
+        (
+            mx.array(scipy_csr.data.astype(np.float32)),
+            mx.array(scipy_csr.indices.astype(np.int32)),
+            mx.array(scipy_csr.indptr.astype(np.int32)),
+        ),
+        shape=scipy_csr.shape,
+        sorted_indices=True,
+    )
+
+    out = native.csr_matmul_transpose(
+        csr.data, csr.indices, csr.indptr, mx.array(rhs_np), csr.shape
+    )
+    dense_expected = to_numpy(csr.todense()).T @ rhs_np
+    scipy_expected = scipy_csr.T @ rhs_np
+
+    np.testing.assert_allclose(to_numpy(out), dense_expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(to_numpy(out), scipy_expected, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("dtype_name", "rtol", "atol"),
+    [
+        ("float16", 5e-3, 5e-3),
+        ("bfloat16", 3e-2, 3e-2),
+        ("complex64", 1e-5, 1e-5),
+    ],
+)
+def test_native_csr_transpose_matmul_segmented_dtypes(
+    mx, scipy_sparse, dtype_name, rtol, atol
+):
+    data_np = np.array([2.0, -1.0, 0.5, 3.0, -2.5, 1.25], dtype=np.float32)
+    rhs_np = np.array(
+        [
+            [1.0, -0.5, 0.25],
+            [0.5, 2.0, -1.5],
+            [-2.0, 0.75, 1.0],
+            [1.25, -1.0, 0.5],
+        ],
+        dtype=np.float32,
+    )
+    if dtype_name == "complex64":
+        data_np = data_np.astype(np.complex64) + 1j * np.array(
+            [0.5, 0.0, -1.0, 0.25, 0.75, -0.5], dtype=np.float32
+        )
+        rhs_np = rhs_np.astype(np.complex64) + 1j * np.array(
+            [
+                [0.25, 0.0, -0.5],
+                [-0.75, 0.5, 0.25],
+                [0.5, -1.0, 0.75],
+                [1.0, 0.25, -0.25],
+            ],
+            dtype=np.float32,
+        )
+
+    indices_np = np.array([0, 3, 1, 3, 2, 4], dtype=np.int64)
+    indptr_np = np.array([0, 2, 3, 5, 6], dtype=np.int64)
+    dtype = getattr(mx, dtype_name)
+    csr = ms.csr_array(
+        (
+            mx.array(data_np).astype(dtype),
+            mx.array(indices_np),
+            mx.array(indptr_np),
+        ),
+        shape=(4, 5),
+        sorted_indices=True,
+    )
+    rhs = mx.array(rhs_np).astype(dtype)
+
+    out = native.csr_matmul_transpose(csr.data, csr.indices, csr.indptr, rhs, csr.shape)
+    dense_expected = mx.transpose(csr.todense()) @ rhs
+    scipy_expected = (
+        scipy_sparse.csr_matrix(
+            (data_np, indices_np.astype(np.int32), indptr_np.astype(np.int32)),
+            shape=csr.shape,
+        ).T
+        @ rhs_np
+    )
+
+    out_np = to_numpy(out)
+    dense_np = to_numpy(dense_expected)
+    if dtype_name != "complex64":
+        out_np = out_np.astype(np.float32)
+        dense_np = dense_np.astype(np.float32)
+        scipy_expected = np.asarray(scipy_expected, dtype=np.float32)
+
+    np.testing.assert_allclose(out_np, dense_np, rtol=rtol, atol=atol)
+    np.testing.assert_allclose(out_np, scipy_expected, rtol=rtol, atol=atol)
 
 
 def test_csr_sparse_sparse_matmul_matches_dense(mx):

@@ -61,7 +61,15 @@ from mlx_sparse._construct import (
 from mlx_sparse._coo import COOArray, coo_array
 from mlx_sparse._csr import CSRArray, csr_array
 from mlx_sparse._device import use_cpu, use_device, use_gpu
-from mlx_sparse._ops import csr_matmat, csr_matmul, csr_matvec, identity_like, todense
+from mlx_sparse._ops import (
+    csr_batched_matmul,
+    csr_batched_matvec,
+    csr_matmat,
+    csr_matmul,
+    csr_matvec,
+    identity_like,
+    todense,
+)
 from mlx_sparse._typing import is_available
 
 try:
@@ -101,6 +109,8 @@ __all__ = [
     "config",
     "config_context",
     "csr_array",
+    "csr_batched_matmul",
+    "csr_batched_matvec",
     "csr_matmat",
     "csr_matmul",
     "csr_matvec",

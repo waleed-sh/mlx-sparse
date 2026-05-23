@@ -141,6 +141,77 @@ def test_csr_matmul_native_performance_regression(mx, scipy_sparse):
 
 
 @pytest.mark.performance
+def test_csr_transpose_matmul_native_performance_regression(mx, scipy_sparse):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    csr, scipy_csr, rng = _random_csr(
+        mx,
+        scipy_sparse,
+        rows=768,
+        cols=640,
+        density=0.004,
+    )
+    rhs_np = rng.standard_normal((768, 4)).astype(np.float32)
+    rhs = mx.array(rhs_np)
+    dense = csr.todense()
+
+    np.testing.assert_allclose(
+        to_numpy(
+            native.csr_matmul_transpose(
+                csr.data, csr.indices, csr.indptr, rhs, csr.shape
+            )
+        ),
+        scipy_csr.T @ rhs_np,
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    native_ms = _bench_ms(
+        mx,
+        lambda: native.csr_matmul_transpose(
+            csr.data, csr.indices, csr.indptr, rhs, csr.shape
+        ),
+        warmup=2,
+        iters=4,
+    )
+    dense_ms = _bench_ms(mx, lambda: mx.transpose(dense) @ rhs, warmup=2, iters=4)
+
+    assert native_ms <= max(100.0, 30.0 * dense_ms)
+
+
+@pytest.mark.performance
+def test_csr_batched_matmul_native_performance_regression(mx, scipy_sparse):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    csr, scipy_csr, rng = _random_csr(
+        mx,
+        scipy_sparse,
+        rows=512,
+        cols=512,
+        density=0.006,
+    )
+    rhs_np = rng.standard_normal((4, 512, 6)).astype(np.float32)
+    rhs = mx.array(rhs_np)
+    dense = csr.todense()
+
+    np.testing.assert_allclose(
+        to_numpy(ms.csr_batched_matmul(csr, rhs)),
+        np.asarray([scipy_csr @ rhs_np[i] for i in range(4)]),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    native_ms = _bench_ms(
+        mx, lambda: ms.csr_batched_matmul(csr, rhs), warmup=2, iters=4
+    )
+    dense_ms = _bench_ms(mx, lambda: dense[None, :, :] @ rhs, warmup=2, iters=4)
+
+    assert native_ms <= max(100.0, 30.0 * dense_ms)
+
+
+@pytest.mark.performance
 def test_linalg_cg_native_performance_regression(mx, scipy_sparse):
     if not ms.is_available():
         pytest.skip("native extension is required for performance regression checks")

@@ -117,6 +117,40 @@ def csr_matvec(a: CSRArray, x) -> mx.array:
     return _native.csr_matvec(a.data, a.indices, a.indptr, x, a.shape)
 
 
+def csr_batched_matvec(a: CSRArray, rhs) -> mx.array:
+    """Multiply a CSR sparse matrix by a batch of dense vectors.
+
+    Computes ``Y[b] = A @ X[b]`` for ``X`` with shape ``(..., n_cols)`` and
+    returns shape ``(..., n_rows)``. The implementation uses native batched
+    CPU/Metal kernels after flattening any leading batch dimensions.
+    """
+    if not isinstance(a, CSRArray):
+        raise TypeError(f"csr_batched_matvec expects CSRArray, got {type(a).__name__}.")
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim < 2:
+        raise ValueError(
+            f"csr_batched_matvec expects rank-2 or higher RHS, got {rhs.shape}."
+        )
+    if rhs.shape[-1] != a.shape[1]:
+        raise ValueError(
+            f"csr_batched_matvec RHS has vector dimension {rhs.shape[-1]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    if a.data.dtype != rhs.dtype:
+        raise TypeError(
+            "csr_batched_matvec requires sparse data and RHS to have the same dtype, "
+            f"got {a.data.dtype} and {rhs.dtype}."
+        )
+
+    batch_shape = tuple(int(dim) for dim in rhs.shape[:-1])
+    batch_size = _prod(batch_shape)
+    rhs_flat = mx.reshape(rhs, (batch_size, a.shape[1]))
+    out_flat = _native.csr_batched_matvec(
+        a.data, a.indices, a.indptr, rhs_flat, a.shape
+    )
+    return mx.reshape(out_flat, (*batch_shape, a.shape[0]))
+
+
 def csr_matmat(a: CSRArray, rhs: CSRArray) -> CSRArray:
     """Multiply two CSR sparse matrices and return a canonical CSR matrix.
 
@@ -180,6 +214,43 @@ def _csr_matmul_rank2(a: CSRArray, rhs: mx.array) -> mx.array:
     return _native.csr_matmul(a.data, a.indices, a.indptr, rhs, a.shape)
 
 
+def _csr_matmul_batched(a: CSRArray, rhs: mx.array) -> mx.array:
+    if a.data.dtype != rhs.dtype:
+        raise TypeError(
+            "csr_matmul requires sparse data and RHS to have the same dtype, "
+            f"got {a.data.dtype} and {rhs.dtype}."
+        )
+    batch_shape = tuple(int(dim) for dim in rhs.shape[:-2])
+    rhs_cols = int(rhs.shape[-1])
+    batch_size = _prod(batch_shape)
+    rhs_flat = mx.reshape(rhs, (batch_size, a.shape[1], rhs_cols))
+    out_flat = _native.csr_batched_matmul(
+        a.data, a.indices, a.indptr, rhs_flat, a.shape
+    )
+    return mx.reshape(out_flat, (*batch_shape, a.shape[0], rhs_cols))
+
+
+def csr_batched_matmul(a: CSRArray, rhs) -> mx.array:
+    """Multiply a CSR sparse matrix by a batch of dense matrices.
+
+    ``rhs`` must have shape ``(..., n_cols, k)`` and the result has shape
+    ``(..., n_rows, k)``. For rank-2 dense matrices, use :func:`csr_matmul`.
+    """
+    if not isinstance(a, CSRArray):
+        raise TypeError(f"csr_batched_matmul expects CSRArray, got {type(a).__name__}.")
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim < 3:
+        raise ValueError(
+            f"csr_batched_matmul expects rank-3 or higher RHS, got {rhs.shape}."
+        )
+    if rhs.shape[-2] != a.shape[1]:
+        raise ValueError(
+            f"csr_batched_matmul RHS has sparse dimension {rhs.shape[-2]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    return _csr_matmul_batched(a, rhs)
+
+
 def csr_matmul(a: CSRArray, rhs) -> mx.array:
     """Multiply a CSR sparse matrix by a dense matrix.
 
@@ -229,15 +300,4 @@ def csr_matmul(a: CSRArray, rhs) -> mx.array:
             f"but sparse n_cols={a.shape[1]}."
         )
 
-    batch_shape = tuple(int(dim) for dim in rhs.shape[:-2])
-    rhs_cols = int(rhs.shape[-1])
-    batch_size = _prod(batch_shape)
-    rhs_axes = (len(batch_shape), *range(len(batch_shape)), len(batch_shape) + 1)
-    flattened = mx.reshape(
-        mx.transpose(rhs, rhs_axes),
-        (a.shape[1], batch_size * rhs_cols),
-    )
-    out_flat = _csr_matmul_rank2(a, flattened)
-    expanded = mx.reshape(out_flat, (a.shape[0], *batch_shape, rhs_cols))
-    out_axes = (*range(1, len(batch_shape) + 1), 0, len(batch_shape) + 1)
-    return mx.transpose(expanded, out_axes)
+    return _csr_matmul_batched(a, rhs)

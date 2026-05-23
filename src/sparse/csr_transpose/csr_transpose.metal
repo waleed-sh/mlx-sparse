@@ -14,88 +14,101 @@
 
 #include "common/metal_common.h"
 
-template <typename I>
-inline int csr_source_row(device const I *indptr, int n_rows, I p) {
-  for (int row = 0; row < n_rows; ++row) {
-    if (p >= indptr[row] && p < indptr[row + 1]) {
-      return row;
-    }
+[[kernel]] void csr_transpose_zero_offsets(device int *offsets [[buffer(0)]],
+                                           constant int &n_cols [[buffer(1)]],
+                                           uint tid
+                                           [[thread_position_in_grid]]) {
+  if (tid <= static_cast<uint>(n_cols)) {
+    offsets[tid] = 0;
   }
-  return 0;
 }
 
-template <typename T, typename I>
-[[kernel]] void csr_transpose_rank_kernel(
-    device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
-    device const I *indptr [[buffer(2)]], device T *out_data [[buffer(3)]],
-    device I *out_indices [[buffer(4)]], constant int &nnz [[buffer(5)]],
-    constant int &n_rows [[buffer(6)]], uint tid [[thread_position_in_grid]]) {
+template <typename I>
+[[kernel]] void csr_transpose_count_kernel(
+    device const I *indices [[buffer(0)]], device int *offsets [[buffer(1)]],
+    constant int &nnz [[buffer(2)]], uint tid [[thread_position_in_grid]]) {
   if (tid >= static_cast<uint>(nnz)) {
     return;
   }
-
-  const I p = static_cast<I>(tid);
-  const int src_row = csr_source_row<I>(indptr, n_rows, p);
-  const I dst_row = indices[p];
-
-  int rank = 0;
-  for (int j = 0; j < nnz; ++j) {
-    const I q = static_cast<I>(j);
-    const int other_src = csr_source_row<I>(indptr, n_rows, q);
-    const I other_dst = indices[q];
-    const bool less = other_dst < dst_row ||
-                      (other_dst == dst_row &&
-                       (other_src < src_row ||
-                        (other_src == src_row && j < static_cast<int>(tid))));
-    if (less) {
-      rank += 1;
-    }
-  }
-
-  out_data[rank] = data[p];
-  out_indices[rank] = static_cast<I>(src_row);
+  const int col = static_cast<int>(indices[tid]);
+  device atomic_int *atomic_offsets =
+      reinterpret_cast<device atomic_int *>(offsets);
+  atomic_fetch_add_explicit(&atomic_offsets[col + 1], 1, memory_order_relaxed);
 }
 
 template <typename I>
-[[kernel]] void csr_transpose_indptr_kernel(
-    device const I *indices [[buffer(0)]], device I *out_indptr [[buffer(1)]],
-    constant int &nnz [[buffer(2)]], constant int &n_cols [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
+[[kernel]] void csr_transpose_prefix_kernel(device int *offsets [[buffer(0)]],
+                                            device I *out_indptr [[buffer(1)]],
+                                            constant int &n_cols [[buffer(2)]],
+                                            constant int &nnz [[buffer(3)]],
+                                            uint tid
+                                            [[thread_position_in_grid]]) {
   if (tid != 0) {
     return;
   }
 
-  for (int r = 0; r <= n_cols; ++r) {
-    out_indptr[r] = I(0);
+  int running = 0;
+  for (int col = 0; col < n_cols; ++col) {
+    const int count = offsets[col + 1];
+    offsets[col] = running;
+    out_indptr[col] = static_cast<I>(running);
+    running += count;
   }
-  for (int p = 0; p < nnz; ++p) {
-    out_indptr[static_cast<int>(indices[p]) + 1] += I(1);
+  offsets[n_cols] = running;
+  out_indptr[n_cols] = static_cast<I>(nnz);
+}
+
+template <typename T, typename I>
+[[kernel]] void csr_transpose_fill_kernel(
+    device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
+    device const I *indptr [[buffer(2)]],
+    device const I *out_indptr [[buffer(3)]], device T *out_data [[buffer(4)]],
+    device I *out_indices [[buffer(5)]], constant int &n_rows [[buffer(6)]],
+    constant int &n_cols [[buffer(7)]],
+    uint dst_row [[thread_position_in_grid]]) {
+  if (static_cast<int>(dst_row) >= n_cols) {
+    return;
   }
-  for (int r = 0; r < n_cols; ++r) {
-    out_indptr[r + 1] += out_indptr[r];
+
+  I write = out_indptr[dst_row];
+  for (int src_row = 0; src_row < n_rows; ++src_row) {
+    for (I p = indptr[src_row]; p < indptr[src_row + 1]; ++p) {
+      if (static_cast<int>(indices[p]) == static_cast<int>(dst_row)) {
+        out_data[write] = data[p];
+        out_indices[write] = static_cast<I>(src_row);
+        ++write;
+      }
+    }
   }
 }
 
-#define INSTANTIATE_CSR_TRANSPOSE_RANK(NAME, T, I)                             \
-  template [[host_name("csr_transpose_rank_" #NAME)]] [[kernel]] void          \
-  csr_transpose_rank_kernel<T, I>(device const T *, device const I *,          \
-                                  device const I *, device T *, device I *,    \
-                                  constant int &, constant int &, uint)
+template [[host_name("csr_transpose_count_int32")]] [[kernel]] void
+csr_transpose_count_kernel<int>(device const int *, device int *,
+                                constant int &, uint);
+template [[host_name("csr_transpose_count_int64")]] [[kernel]] void
+csr_transpose_count_kernel<long>(device const long *, device int *,
+                                 constant int &, uint);
 
-INSTANTIATE_CSR_TRANSPOSE_RANK(float32_int32, float, int);
-INSTANTIATE_CSR_TRANSPOSE_RANK(float32_int64, float, long);
-INSTANTIATE_CSR_TRANSPOSE_RANK(float16_int32, half, int);
-INSTANTIATE_CSR_TRANSPOSE_RANK(float16_int64, half, long);
-INSTANTIATE_CSR_TRANSPOSE_RANK(bfloat16_int32, bfloat16_t, int);
-INSTANTIATE_CSR_TRANSPOSE_RANK(bfloat16_int64, bfloat16_t, long);
-INSTANTIATE_CSR_TRANSPOSE_RANK(complex64_int32, complex64_t, int);
-INSTANTIATE_CSR_TRANSPOSE_RANK(complex64_int64, complex64_t, long);
+template [[host_name("csr_transpose_prefix_int32")]] [[kernel]] void
+csr_transpose_prefix_kernel<int>(device int *, device int *, constant int &,
+                                 constant int &, uint);
+template [[host_name("csr_transpose_prefix_int64")]] [[kernel]] void
+csr_transpose_prefix_kernel<long>(device int *, device long *, constant int &,
+                                  constant int &, uint);
 
-#undef INSTANTIATE_CSR_TRANSPOSE_RANK
+#define INSTANTIATE_CSR_TRANSPOSE_FILL(NAME, T, I)                             \
+  template [[host_name("csr_transpose_fill_" #NAME)]] [[kernel]] void          \
+  csr_transpose_fill_kernel<T, I>(                                             \
+      device const T *, device const I *, device const I *, device const I *,  \
+      device T *, device I *, constant int &, constant int &, uint)
 
-template [[host_name("csr_transpose_indptr_int32")]] [[kernel]] void
-csr_transpose_indptr_kernel<int>(device const int *, device int *,
-                                 constant int &, constant int &, uint);
-template [[host_name("csr_transpose_indptr_int64")]] [[kernel]] void
-csr_transpose_indptr_kernel<long>(device const long *, device long *,
-                                  constant int &, constant int &, uint);
+INSTANTIATE_CSR_TRANSPOSE_FILL(float32_int32, float, int);
+INSTANTIATE_CSR_TRANSPOSE_FILL(float32_int64, float, long);
+INSTANTIATE_CSR_TRANSPOSE_FILL(float16_int32, half, int);
+INSTANTIATE_CSR_TRANSPOSE_FILL(float16_int64, half, long);
+INSTANTIATE_CSR_TRANSPOSE_FILL(bfloat16_int32, bfloat16_t, int);
+INSTANTIATE_CSR_TRANSPOSE_FILL(bfloat16_int64, bfloat16_t, long);
+INSTANTIATE_CSR_TRANSPOSE_FILL(complex64_int32, complex64_t, int);
+INSTANTIATE_CSR_TRANSPOSE_FILL(complex64_int64, complex64_t, long);
+
+#undef INSTANTIATE_CSR_TRANSPOSE_FILL

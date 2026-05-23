@@ -14,6 +14,8 @@
 
 #include "sparse/csr_matvec_transpose/csr_matvec_transpose.h"
 
+#include "sparse/csr_matvec/csr_matvec.h"
+#include "sparse/csr_transpose/csr_transpose.h"
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
@@ -54,6 +56,13 @@ private:
   int n_rows_;
   int n_cols_;
 };
+
+mx::Dtype segmented_accumulator_dtype(mx::Dtype dtype) {
+  if (dtype == mx::float16 || dtype == mx::bfloat16) {
+    return mx::float32;
+  }
+  return dtype;
+}
 
 template <typename T, typename I>
 void csr_matvec_transpose_cpu_impl(const mx::array &data,
@@ -156,20 +165,121 @@ void CSRMatVecTranspose::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name =
-      sparse_kernel_name("csr_matvec_transpose", data.dtype(), indices.dtype());
-  auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
-  encoder.set_compute_pipeline_state(kernel);
+  if (data.dtype() == mx::float32) {
+    auto *zero_kernel =
+        device.get_kernel("csr_matvec_transpose_zero_float32", lib);
+    encoder.set_compute_pipeline_state(zero_kernel);
+    encoder.set_output_array(out, 0);
+    encoder.set_bytes(n_cols_, 1);
+    auto zero_threads = static_cast<size_t>(std::max(n_cols_, 1));
+    auto zero_group =
+        std::min(zero_threads, zero_kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(zero_threads, 1, 1),
+                             MTL::Size(zero_group, 1, 1));
+
+    auto atomic_kernel_name = std::string("csr_matvec_transpose_atomic_") +
+                              index_kernel_suffix(indices.dtype());
+    auto *kernel = device.get_kernel(atomic_kernel_name, lib);
+    encoder.set_compute_pipeline_state(kernel);
+    encoder.set_input_array(data, 0);
+    encoder.set_input_array(indices, 1);
+    encoder.set_input_array(indptr, 2);
+    encoder.set_input_array(x, 3);
+    encoder.set_output_array(out, 4);
+    encoder.set_bytes(n_rows_, 5);
+    encoder.set_bytes(n_cols_, 6);
+    auto threads = static_cast<size_t>(std::max(n_rows_, 1));
+    auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+    return;
+  }
+
+  if (data.dtype() == mx::complex64) {
+    throw std::runtime_error("complex64 GPU csr_matvec_transpose should be "
+                             "lowered through csr_transpose + csr_matvec.");
+  }
+
+  mx::array offsets(
+      mx::allocator::malloc(static_cast<size_t>(n_cols_ + 1) * sizeof(int32_t)),
+      mx::Shape{n_cols_ + 1}, mx::int32);
+  mx::array segments(
+      mx::allocator::malloc(static_cast<size_t>(n_cols_ + 1) * sizeof(int32_t)),
+      mx::Shape{n_cols_ + 1}, mx::int32);
+  auto grouped_dtype = segmented_accumulator_dtype(data.dtype());
+  mx::array grouped(
+      mx::allocator::malloc(data.size() * mx::size_of(grouped_dtype)),
+      mx::Shape{static_cast<int>(data.size())}, grouped_dtype);
+
+  auto *zero_kernel =
+      device.get_kernel("csr_matvec_transpose_zero_offsets", lib);
+  encoder.set_compute_pipeline_state(zero_kernel);
+  encoder.set_output_array(offsets, 0);
+  encoder.set_bytes(n_cols_, 1);
+  auto zero_threads = static_cast<size_t>(std::max(n_cols_ + 1, 1));
+  auto zero_group =
+      std::min(zero_threads, zero_kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(zero_threads, 1, 1),
+                           MTL::Size(zero_group, 1, 1));
+
+  auto count_kernel_name = std::string("csr_matvec_transpose_count_") +
+                           index_kernel_suffix(indices.dtype());
+  auto *count_kernel = device.get_kernel(count_kernel_name, lib);
+  encoder.set_compute_pipeline_state(count_kernel);
+  encoder.set_input_array(indices, 0);
+  encoder.set_output_array(offsets, 1);
+  encoder.set_bytes(static_cast<int>(data.size()), 2);
+  auto count_threads = std::max<size_t>(data.size(), 1);
+  auto count_group =
+      std::min(count_threads, count_kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(count_threads, 1, 1),
+                           MTL::Size(count_group, 1, 1));
+
+  auto *prefix_kernel =
+      device.get_kernel("csr_matvec_transpose_prefix_segments", lib);
+  encoder.set_compute_pipeline_state(prefix_kernel);
+  encoder.set_input_array(offsets, 0);
+  encoder.set_output_array(segments, 1);
+  encoder.set_bytes(n_cols_, 2);
+  encoder.set_bytes(static_cast<int>(data.size()), 3);
+  encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+
+  auto scatter_kernel_name = sparse_kernel_name("csr_matvec_transpose_scatter",
+                                                data.dtype(), indices.dtype());
+  auto *scatter_kernel = device.get_kernel(scatter_kernel_name, lib);
+  encoder.set_compute_pipeline_state(scatter_kernel);
   encoder.set_input_array(data, 0);
   encoder.set_input_array(indices, 1);
   encoder.set_input_array(indptr, 2);
   encoder.set_input_array(x, 3);
-  encoder.set_output_array(out, 4);
-  encoder.set_bytes(n_rows_, 5);
-  encoder.set_bytes(n_cols_, 6);
-  encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+  encoder.set_input_array(offsets, 4);
+  encoder.set_output_array(grouped, 5);
+  encoder.set_bytes(n_rows_, 6);
+  encoder.set_bytes(n_cols_, 7);
+  auto scatter_threads = static_cast<size_t>(std::max(n_rows_, 1));
+  auto scatter_group = std::min(
+      scatter_threads, scatter_kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(scatter_threads, 1, 1),
+                           MTL::Size(scatter_group, 1, 1));
+
+  auto segmented_kernel_name = sparse_kernel_name(
+      "csr_matvec_transpose_segmented", data.dtype(), indices.dtype());
+  auto *segmented_kernel = device.get_kernel(segmented_kernel_name, lib);
+  encoder.set_compute_pipeline_state(segmented_kernel);
+  encoder.set_input_array(grouped, 0);
+  encoder.set_input_array(segments, 1);
+  encoder.set_output_array(out, 2);
+  encoder.set_bytes(n_cols_, 3);
+  auto segmented_threads = static_cast<size_t>(std::max(n_cols_, 1));
+  auto segmented_group = std::min(
+      segmented_threads, segmented_kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(segmented_threads, 1, 1),
+                           MTL::Size(segmented_group, 1, 1));
+
+  encoder.add_temporary(std::move(offsets));
+  encoder.add_temporary(std::move(segments));
+  encoder.add_temporary(std::move(grouped));
 }
 #else
 void CSRMatVecTranspose::eval_gpu(const std::vector<mx::array> &,
@@ -206,6 +316,13 @@ mx::array csr_matvec_transpose(const mx::array &data, const mx::array &indices,
   auto indices_contig = mx::contiguous(indices, false, stream);
   auto indptr_contig = mx::contiguous(indptr, false, stream);
   auto x_contig = mx::contiguous(x, false, stream);
+
+  if (stream.device == mx::Device::gpu && data.dtype() == mx::complex64) {
+    auto [transpose_data, transpose_indices, transpose_indptr] = csr_transpose(
+        data_contig, indices_contig, indptr_contig, n_rows, n_cols, stream);
+    return csr_matvec(transpose_data, transpose_indices, transpose_indptr,
+                      x_contig, n_cols, n_rows, stream);
+  }
 
   return mx::array(mx::Shape{n_cols}, data.dtype(),
                    std::make_shared<CSRMatVecTranspose>(stream, n_rows, n_cols),

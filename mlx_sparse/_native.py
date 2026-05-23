@@ -75,6 +75,20 @@ def csr_matvec(
     return ext.csr_matvec(data, indices, indptr, x, shape[0], shape[1])
 
 
+def csr_batched_matvec(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        dense = _fallback.csr_todense(data, indices, indptr, shape)
+        return rhs @ mx.transpose(dense)
+    return ext.csr_batched_matvec(data, indices, indptr, rhs, shape[0], shape[1])
+
+
 def csr_matvec_transpose(
     data: mx.array,
     indices: mx.array,
@@ -99,6 +113,20 @@ def csr_matmul(
     if ext is None:
         return _fallback.csr_matmul(data, indices, indptr, rhs, shape)
     return ext.csr_matmul(data, indices, indptr, rhs, shape[0], shape[1])
+
+
+def csr_batched_matmul(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        dense = _fallback.csr_todense(data, indices, indptr, shape)
+        return mx.matmul(dense[None, :, :], rhs)
+    return ext.csr_batched_matmul(data, indices, indptr, rhs, shape[0], shape[1])
 
 
 def csr_matmul_transpose(

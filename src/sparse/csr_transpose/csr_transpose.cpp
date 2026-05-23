@@ -88,31 +88,22 @@ void csr_transpose_cpu_impl(const mx::array &data, const mx::array &indices,
     auto *out_indptr_ptr = out_indptr.data<I>();
     const auto nnz = data.size();
 
-    std::vector<I> source_rows(nnz);
-    for (int row = 0; row < n_rows; ++row) {
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-        source_rows[static_cast<size_t>(p)] = static_cast<I>(row);
-      }
-    }
-
-    std::vector<size_t> order(nnz);
-    std::iota(order.begin(), order.end(), size_t{0});
-    std::stable_sort(order.begin(), order.end(), [&](size_t lhs, size_t rhs) {
-      if (indices_ptr[lhs] != indices_ptr[rhs]) {
-        return indices_ptr[lhs] < indices_ptr[rhs];
-      }
-      return source_rows[lhs] < source_rows[rhs];
-    });
-
     std::fill(out_indptr_ptr, out_indptr_ptr + n_cols + 1, I{0});
-    for (size_t k = 0; k < nnz; ++k) {
-      const auto src = order[k];
-      out_data_ptr[k] = data_ptr[src];
-      out_indices_ptr[k] = source_rows[src];
-      out_indptr_ptr[static_cast<size_t>(indices_ptr[src]) + 1] += I{1};
+    for (size_t p = 0; p < nnz; ++p) {
+      out_indptr_ptr[static_cast<size_t>(indices_ptr[p]) + 1] += I{1};
     }
     for (int col = 0; col < n_cols; ++col) {
       out_indptr_ptr[col + 1] += out_indptr_ptr[col];
+    }
+
+    std::vector<I> next(out_indptr_ptr, out_indptr_ptr + n_cols);
+    for (int row = 0; row < n_rows; ++row) {
+      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+        const auto col = static_cast<size_t>(indices_ptr[p]);
+        const auto dst = static_cast<size_t>(next[col]++);
+        out_data_ptr[dst] = data_ptr[p];
+        out_indices_ptr[dst] = static_cast<I>(row);
+      }
     }
   });
 }
@@ -171,33 +162,62 @@ void CSRTranspose::eval_gpu(const std::vector<mx::array> &inputs,
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
 
   auto &encoder = mx::metal::get_command_encoder(s);
-  auto rank_kernel_name =
-      sparse_kernel_name("csr_transpose_rank", data.dtype(), indices.dtype());
-  auto *rank_kernel = device.get_kernel(rank_kernel_name, lib);
-  encoder.set_compute_pipeline_state(rank_kernel);
+  mx::array offsets(
+      mx::allocator::malloc(static_cast<size_t>(n_cols_ + 1) * sizeof(int32_t)),
+      mx::Shape{n_cols_ + 1}, mx::int32);
+
+  auto *zero_kernel = device.get_kernel("csr_transpose_zero_offsets", lib);
+  encoder.set_compute_pipeline_state(zero_kernel);
+  encoder.set_output_array(offsets, 0);
+  encoder.set_bytes(n_cols_, 1);
+  auto zero_threads = static_cast<size_t>(std::max(n_cols_ + 1, 1));
+  auto zero_group =
+      std::min(zero_threads, zero_kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(zero_threads, 1, 1),
+                           MTL::Size(zero_group, 1, 1));
+
+  auto count_kernel_name = std::string("csr_transpose_count_") +
+                           index_kernel_suffix(indices.dtype());
+  auto *count_kernel = device.get_kernel(count_kernel_name, lib);
+  encoder.set_compute_pipeline_state(count_kernel);
+  encoder.set_input_array(indices, 0);
+  encoder.set_output_array(offsets, 1);
+  encoder.set_bytes(static_cast<int>(data.size()), 2);
+  auto count_threads = std::max<size_t>(data.size(), 1);
+  auto count_group =
+      std::min(count_threads, count_kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(count_threads, 1, 1),
+                           MTL::Size(count_group, 1, 1));
+
+  auto prefix_kernel_name = std::string("csr_transpose_prefix_") +
+                            index_kernel_suffix(indices.dtype());
+  auto *prefix_kernel = device.get_kernel(prefix_kernel_name, lib);
+  encoder.set_compute_pipeline_state(prefix_kernel);
+  encoder.set_input_array(offsets, 0);
+  encoder.set_output_array(out_indptr, 1);
+  encoder.set_bytes(n_cols_, 2);
+  encoder.set_bytes(static_cast<int>(data.size()), 3);
+  encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+
+  auto fill_kernel_name =
+      sparse_kernel_name("csr_transpose_fill", data.dtype(), indices.dtype());
+  auto *fill_kernel = device.get_kernel(fill_kernel_name, lib);
+  encoder.set_compute_pipeline_state(fill_kernel);
   encoder.set_input_array(data, 0);
   encoder.set_input_array(indices, 1);
   encoder.set_input_array(indptr, 2);
-  encoder.set_output_array(out_data, 3);
-  encoder.set_output_array(out_indices, 4);
-  encoder.set_bytes(static_cast<uint32_t>(data.size()), 5);
-  encoder.set_bytes(static_cast<uint32_t>(n_rows_), 6);
+  encoder.set_input_array(out_indptr, 3);
+  encoder.set_output_array(out_data, 4);
+  encoder.set_output_array(out_indices, 5);
+  encoder.set_bytes(n_rows_, 6);
+  encoder.set_bytes(n_cols_, 7);
+  auto fill_threads = static_cast<size_t>(std::max(n_cols_, 1));
+  auto fill_group =
+      std::min(fill_threads, fill_kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(fill_threads, 1, 1),
+                           MTL::Size(fill_group, 1, 1));
 
-  auto rank_threads = std::max<size_t>(data.size(), 1);
-  auto rank_group =
-      std::min(rank_threads, rank_kernel->maxTotalThreadsPerThreadgroup());
-  encoder.dispatch_threads(MTL::Size(rank_threads, 1, 1),
-                           MTL::Size(rank_group, 1, 1));
-
-  auto indptr_kernel_name = std::string("csr_transpose_indptr_") +
-                            index_kernel_suffix(indices.dtype());
-  auto *indptr_kernel = device.get_kernel(indptr_kernel_name, lib);
-  encoder.set_compute_pipeline_state(indptr_kernel);
-  encoder.set_input_array(indices, 0);
-  encoder.set_output_array(out_indptr, 1);
-  encoder.set_bytes(static_cast<uint32_t>(data.size()), 2);
-  encoder.set_bytes(static_cast<uint32_t>(n_cols_), 3);
-  encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+  encoder.add_temporary(std::move(offsets));
 }
 #else
 void CSRTranspose::eval_gpu(const std::vector<mx::array> &,

@@ -84,6 +84,98 @@ def test_csr_matmul_dense_rhs_gradient_matches_dense_mlx(mx):
     )
 
 
+def test_csr_batched_matvec_data_and_rhs_gradients_match_dense_mlx(mx):
+    row_np = np.array([0, 0, 2, 2], dtype=np.int32)
+    col_np = np.array([0, 2, 1, 3], dtype=np.int32)
+    indptr_np = np.array([0, 2, 2, 4], dtype=np.int32)
+    data_np = np.array([2.0, -1.0, 4.0, 5.0], dtype=np.float32)
+    rhs_np = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4) / 7.0
+    dense_np = np.zeros((3, 4), dtype=np.float32)
+    dense_np[row_np, col_np] = data_np
+
+    indices = mx.array(col_np)
+    indptr = mx.array(indptr_np)
+    data = mx.array(data_np)
+    rhs = mx.array(rhs_np)
+    dense = mx.array(dense_np)
+
+    def sparse_loss(values, vectors):
+        csr = ms.csr_array(
+            (values, indices, indptr),
+            shape=(3, 4),
+            sorted_indices=True,
+            canonical=True,
+        )
+        y = ms.csr_batched_matvec(csr, vectors)
+        return mx.sum(y * y)
+
+    def dense_loss(matrix, vectors):
+        y = vectors @ mx.transpose(matrix)
+        return mx.sum(y * y)
+
+    grad_data_sparse, grad_rhs_sparse = mx.grad(sparse_loss, argnums=(0, 1))(data, rhs)
+    grad_dense, grad_rhs_dense = mx.grad(dense_loss, argnums=(0, 1))(dense, rhs)
+
+    np.testing.assert_allclose(
+        to_numpy(grad_data_sparse),
+        to_numpy(grad_dense)[row_np, col_np],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        to_numpy(grad_rhs_sparse),
+        to_numpy(grad_rhs_dense),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
+def test_csr_batched_matmul_data_and_rhs_gradients_match_dense_mlx(mx):
+    row_np = np.array([0, 0, 2, 2], dtype=np.int32)
+    col_np = np.array([0, 2, 1, 3], dtype=np.int32)
+    indptr_np = np.array([0, 2, 2, 4], dtype=np.int32)
+    data_np = np.array([2.0, -1.0, 4.0, 5.0], dtype=np.float32)
+    rhs_np = np.arange(2 * 4 * 3, dtype=np.float32).reshape(2, 4, 3) / 9.0
+    dense_np = np.zeros((3, 4), dtype=np.float32)
+    dense_np[row_np, col_np] = data_np
+
+    indices = mx.array(col_np)
+    indptr = mx.array(indptr_np)
+    data = mx.array(data_np)
+    rhs = mx.array(rhs_np)
+    dense = mx.array(dense_np)
+
+    def sparse_loss(values, matrices):
+        csr = ms.csr_array(
+            (values, indices, indptr),
+            shape=(3, 4),
+            sorted_indices=True,
+            canonical=True,
+        )
+        y = ms.csr_batched_matmul(csr, matrices)
+        return mx.sum(y * y)
+
+    def dense_loss(matrix, matrices):
+        y = matrix[None, :, :] @ matrices
+        return mx.sum(y * y)
+
+    grad_data_sparse, grad_rhs_sparse = mx.grad(sparse_loss, argnums=(0, 1))(data, rhs)
+    grad_dense, grad_rhs_dense = mx.grad(dense_loss, argnums=(0, 1))(dense, rhs)
+
+    np.testing.assert_allclose(
+        to_numpy(grad_data_sparse),
+        to_numpy(grad_dense)[row_np, col_np],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        to_numpy(grad_rhs_sparse),
+        to_numpy(grad_rhs_dense),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
 def test_csr_matvec_data_and_rhs_gradients_match_dense_mlx(mx):
     indices_np = np.array([0, 2, 1, 3], dtype=np.int32)
     indptr_np = np.array([0, 2, 2, 4], dtype=np.int32)

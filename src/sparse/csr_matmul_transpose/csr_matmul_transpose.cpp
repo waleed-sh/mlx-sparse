@@ -14,6 +14,8 @@
 
 #include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
 
+#include "sparse/csr_matmul/csr_matmul.h"
+#include "sparse/csr_transpose/csr_transpose.h"
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
@@ -123,21 +125,41 @@ void CSRMatMulTranspose::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name =
-      sparse_kernel_name("csr_matmul_transpose", data.dtype(), indices.dtype());
-  auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
-  encoder.set_compute_pipeline_state(kernel);
-  encoder.set_input_array(data, 0);
-  encoder.set_input_array(indices, 1);
-  encoder.set_input_array(indptr, 2);
-  encoder.set_input_array(rhs, 3);
-  encoder.set_output_array(out, 4);
-  encoder.set_bytes(n_rows_, 5);
-  encoder.set_bytes(n_cols_, 6);
-  encoder.set_bytes(rhs_cols_, 7);
-  encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+  if (data.dtype() == mx::float32) {
+    auto *zero_kernel =
+        device.get_kernel("csr_matmul_transpose_zero_float32", lib);
+    encoder.set_compute_pipeline_state(zero_kernel);
+    encoder.set_output_array(out, 0);
+    encoder.set_bytes(n_cols_, 1);
+    encoder.set_bytes(rhs_cols_, 2);
+    auto zero_threads = static_cast<size_t>(std::max(n_cols_ * rhs_cols_, 1));
+    auto zero_group =
+        std::min(zero_threads, zero_kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(zero_threads, 1, 1),
+                             MTL::Size(zero_group, 1, 1));
+
+    auto atomic_kernel_name = std::string("csr_matmul_transpose_atomic_") +
+                              index_kernel_suffix(indices.dtype());
+    auto *kernel = device.get_kernel(atomic_kernel_name, lib);
+    encoder.set_compute_pipeline_state(kernel);
+    encoder.set_input_array(data, 0);
+    encoder.set_input_array(indices, 1);
+    encoder.set_input_array(indptr, 2);
+    encoder.set_input_array(rhs, 3);
+    encoder.set_output_array(out, 4);
+    encoder.set_bytes(n_rows_, 5);
+    encoder.set_bytes(n_cols_, 6);
+    encoder.set_bytes(rhs_cols_, 7);
+    auto threads = static_cast<size_t>(std::max(n_rows_ * rhs_cols_, 1));
+    auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+    return;
+  }
+
+  throw std::runtime_error("non-float32 GPU csr_matmul_transpose should be "
+                           "lowered through csr_transpose + csr_matmul.");
 }
 #else
 void CSRMatMulTranspose::eval_gpu(const std::vector<mx::array> &,
@@ -214,6 +236,13 @@ mx::array csr_matmul_transpose(const mx::array &data, const mx::array &indices,
   auto indptr_contig = mx::contiguous(indptr, false, stream);
   auto rhs_contig = mx::contiguous(rhs, false, stream);
   const int rhs_cols = rhs.shape(1);
+
+  if (stream.device == mx::Device::gpu && data.dtype() != mx::float32) {
+    auto [transpose_data, transpose_indices, transpose_indptr] = csr_transpose(
+        data_contig, indices_contig, indptr_contig, n_rows, n_cols, stream);
+    return csr_matmul(transpose_data, transpose_indices, transpose_indptr,
+                      rhs_contig, n_cols, n_rows, stream);
+  }
 
   return mx::array(
       mx::Shape{n_cols, rhs_cols}, data.dtype(),

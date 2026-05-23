@@ -40,3 +40,9 @@ def test_public_constructor_exports():
     for name in ("fromdense", "from_dense", "from_numpy", "from_scipy", "asarray"):
         assert name in ms.__all__
         assert callable(getattr(ms, name))
+
+
+def test_public_batched_operation_exports():
+    for name in ("csr_batched_matvec", "csr_batched_matmul"):
+        assert name in ms.__all__
+        assert callable(getattr(ms, name))

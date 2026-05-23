@@ -31,7 +31,9 @@ def test_native_extension_imports_after_editable_build():
     ext = importlib.import_module("mlx_sparse._ext")
 
     assert hasattr(ext, "csr_matvec")
+    assert hasattr(ext, "csr_batched_matvec")
     assert hasattr(ext, "csr_matmul")
+    assert hasattr(ext, "csr_batched_matmul")
     assert hasattr(ext, "csr_transpose")
     assert hasattr(ext, "coo_tocsr")
     assert hasattr(ext, "csr_todense")
@@ -58,9 +60,17 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
             seen.append(("csr_matvec", kwargs))
             return "matvec"
 
+        def csr_batched_matvec(self, *args, **kwargs):
+            seen.append(("csr_batched_matvec", kwargs))
+            return "batched_matvec"
+
         def csr_matmul(self, *args, **kwargs):
             seen.append(("csr_matmul", kwargs))
             return "matmul"
+
+        def csr_batched_matmul(self, *args, **kwargs):
+            seen.append(("csr_batched_matmul", kwargs))
+            return "batched_matmul"
 
         def csr_transpose(self, *args, **kwargs):
             seen.append(("csr_transpose", kwargs))
@@ -76,7 +86,15 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert native.coo_tocsr("data", "row", "col", (1, 2)) == "coo"
     assert native.csr_todense("data", "indices", "indptr", (1, 2)) == "dense"
     assert native.csr_matvec("data", "indices", "indptr", "x", (1, 2)) == "matvec"
+    assert (
+        native.csr_batched_matvec("data", "indices", "indptr", "x", (1, 2))
+        == "batched_matvec"
+    )
     assert native.csr_matmul("data", "indices", "indptr", "x", (1, 2)) == "matmul"
+    assert (
+        native.csr_batched_matmul("data", "indices", "indptr", "x", (1, 2))
+        == "batched_matmul"
+    )
     assert native.csr_transpose("data", "indices", "indptr", (1, 2)) == "transpose"
     assert native.csr_sort_indices("data", "indices", "indptr") == "sort"
     assert all("stream" not in kwargs for _, kwargs in seen)

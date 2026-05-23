@@ -18,6 +18,8 @@
 
 #include "linalg/linalg.h"
 #include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/csr_batched_matmul/csr_batched_matmul.h"
+#include "sparse/csr_batched_matvec/csr_batched_matvec.h"
 #include "sparse/csr_matmat/csr_matmat.h"
 #include "sparse/csr_matmul/csr_matmul.h"
 #include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
@@ -113,6 +115,18 @@ NB_MODULE(_ext, m) {
       "Multiply CSR buffers by a dense vector.");
 
   m.def(
+      "csr_batched_matvec",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csr_batched_matvec(data, indices, indptr, rhs,
+                                              n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply CSR buffers by a batch of dense vectors.");
+
+  m.def(
       "csr_matvec_transpose",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -135,6 +149,18 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
       "Multiply CSR buffers by a dense matrix.");
+
+  m.def(
+      "csr_batched_matmul",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csr_batched_matmul(data, indices, indptr, rhs,
+                                              n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply CSR buffers by a batch of dense matrices.");
 
   m.def(
       "csr_matmul_transpose",
