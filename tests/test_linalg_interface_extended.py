@@ -22,7 +22,12 @@ import pytest
 
 import mlx_sparse as ms
 from mlx_sparse.linalg._interface import LinearOperator, aslinearoperator
+from mlx_sparse.linalg._iterative import _as_csr
 from mlx_sparse.linalg._utils import ensure_array
+
+# ---------------------------------------------------------------------------
+# ensure_array
+# ---------------------------------------------------------------------------
 
 
 class TestEnsureArray:
@@ -55,6 +60,11 @@ class TestEnsureArray:
         arr = np.array([1.0, 2.0], dtype=np.float32)
         result = ensure_array(arr)
         assert isinstance(result, mx.array)
+
+
+# ---------------------------------------------------------------------------
+# LinearOperator construction
+# ---------------------------------------------------------------------------
 
 
 def _make_identity_op(n: int) -> LinearOperator:
@@ -111,6 +121,11 @@ class TestLinearOperatorConstruction:
         assert op.dtype == mx.float32
 
 
+# ---------------------------------------------------------------------------
+# matvec
+# ---------------------------------------------------------------------------
+
+
 class TestLinearOperatorMatvec:
     def test_valid_matvec(self):
         op = _make_identity_op(3)
@@ -137,6 +152,11 @@ class TestLinearOperatorMatvec:
         x = mx.array([1.0, 2.0], dtype=mx.float32)  # length 2, expected 3
         with pytest.raises(ValueError, match="length"):
             op.matvec(x)
+
+
+# ---------------------------------------------------------------------------
+# matmat
+# ---------------------------------------------------------------------------
 
 
 class TestLinearOperatorMatmat:
@@ -183,6 +203,11 @@ class TestLinearOperatorMatmat:
         assert called == ["b"]
 
 
+# ---------------------------------------------------------------------------
+# rmatvec
+# ---------------------------------------------------------------------------
+
+
 class TestLinearOperatorRmatvec:
     def test_valid_rmatvec(self):
         op = _make_identity_op(3)
@@ -219,12 +244,88 @@ class TestLinearOperatorRmatvec:
         assert called == ["b"]
 
 
+# ---------------------------------------------------------------------------
+# transpose and Hermitian adjoints
+# ---------------------------------------------------------------------------
+
+
+class TestLinearOperatorAdjoints:
+    def test_transpose_requires_rmatvec(self):
+        op = LinearOperator((2, 2), matvec=lambda x: x)
+        with pytest.raises(NotImplementedError, match="requires rmatvec"):
+            _ = op.T
+
+    def test_hermitian_requires_rmatvec(self):
+        op = LinearOperator((2, 2), matvec=lambda x: x)
+        with pytest.raises(NotImplementedError, match="requires rmatvec"):
+            _ = op.H
+
+    def test_transpose_uses_conjugated_rmatvec_formula(self):
+        matrix = mx.array(
+            np.array(
+                [[1.0 + 2.0j, 3.0 - 1.0j], [0.5 + 0.25j, -2.0 + 1.5j]],
+                dtype=np.complex64,
+            )
+        )
+        op = LinearOperator(
+            matrix.shape,
+            matvec=lambda x: matrix @ x,
+            matmat=lambda X: matrix @ X,
+            rmatvec=lambda x: mx.conjugate(mx.transpose(matrix)) @ x,
+            dtype=mx.complex64,
+        )
+        x = mx.array(np.array([1.0 - 0.5j, -2.0 + 3.0j], dtype=np.complex64))
+
+        y = op.T @ x
+        expected = mx.transpose(matrix) @ x
+        mx.eval(y, expected)
+
+        np.testing.assert_allclose(np.array(y), np.array(expected), rtol=1e-5)
+
+    def test_hermitian_swaps_matvec_and_rmatvec(self):
+        matrix = mx.array(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
+        op = LinearOperator(
+            matrix.shape,
+            matvec=lambda x: matrix @ x,
+            matmat=lambda X: matrix @ X,
+            rmatvec=lambda x: mx.transpose(matrix) @ x,
+            dtype=mx.float32,
+        )
+        x = mx.array(np.array([1.0, -1.0], dtype=np.float32))
+
+        y = op.H @ x
+        double = op.H.H @ x
+        mx.eval(y, double)
+
+        np.testing.assert_allclose(np.array(y), np.array(matrix.T) @ np.array(x))
+        np.testing.assert_allclose(np.array(double), np.array(matrix) @ np.array(x))
+
+    def test_sparse_operator_adjoint_keeps_sparse_backing(self):
+        csr = _make_2x2_csr()
+        op = aslinearoperator(csr)
+
+        assert op.T._sparse_array is not None
+        assert op.H._sparse_array is not None
+        assert op.T.shape == (2, 2)
+        assert op.H.shape == (2, 2)
+
+
+# ---------------------------------------------------------------------------
+# __matmul__ error path
+# ---------------------------------------------------------------------------
+
+
 class TestLinearOperatorMatmul:
     def test_rank3_raises(self):
         op = _make_identity_op(3)
         x = mx.array([[[1.0, 2.0], [3.0, 4.0]]], dtype=mx.float32)
         with pytest.raises(ValueError, match="rank-1 or rank-2"):
             op @ x
+
+
+# ---------------------------------------------------------------------------
+# aslinearoperator
+# ---------------------------------------------------------------------------
 
 
 class TestAsLinearOperator:
@@ -313,3 +414,19 @@ class TestAsLinearOperator:
         x = mx.array([[1.0, 2.0], [3.0, 4.0]], dtype=mx.float32)
         with pytest.raises(TypeError, match="aslinearoperator"):
             aslinearoperator(x)
+
+
+class TestIterativeAsCsrLinearOperatorBranches:
+    def test_csr_backed_linear_operator_extracts_canonical_csr(self):
+        csr = _make_2x2_csr()
+        op = aslinearoperator(csr)
+        out = _as_csr(op)
+
+        assert isinstance(out, ms.CSRArray)
+        assert out.has_canonical_format
+
+    def test_matrix_free_linear_operator_is_rejected_by_native_iterative_helpers(self):
+        op = LinearOperator((2, 2), matvec=lambda x: x)
+
+        with pytest.raises(TypeError, match="CSRArray"):
+            _as_csr(op)
