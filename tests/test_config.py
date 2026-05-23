@@ -61,6 +61,26 @@ def test_config_public_exports_and_default_sync():
         assert name in ms.__all__
 
 
+def test_config_does_not_export_internal_manager_api():
+    namespace: dict[str, object] = {}
+    exec("from mlx_sparse import *", namespace)
+
+    for name in (
+        "cfg",
+        "ConfigManager",
+        "ConfigError",
+        "UnknownOptionError",
+        "ConfigValidationError",
+        "ConfigMutability",
+        "ConfigSource",
+        "ConfigMutation",
+        "ConfigOption",
+    ):
+        assert name not in ms.__all__
+        assert not hasattr(ms, name)
+        assert name not in namespace
+
+
 def test_set_config_updates_attribute_and_native_env_flag():
     assert ms.set_config(OPTION, True) is True
     assert ms.config.EXPERIMENTAL_METAL_SPGEMM is True

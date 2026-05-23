@@ -4,9 +4,9 @@ Configuration
 .. currentmodule:: mlx_sparse
 
 ``mlx_sparse`` exposes a typed package configuration manager as
-:data:`config`. Options may be read and
-written as attributes, through :func:`get_config` / :func:`set_config`, or
-temporarily patched with :func:`config_context`.
+:data:`config`. Options may be read and written as attributes, through
+:func:`get_config` / :func:`set_config`, or temporarily patched with
+:func:`config_context`.
 
 The manager keeps the corresponding ``MLX_SPARSE_*`` environment variables in
 sync so native code can read the same values without a Python callback.

@@ -35,13 +35,19 @@ do not compute anything immediately. They add nodes to a computation graph.
 Computation runs when ``mx.eval()`` is called explicitly, or implicitly when a
 value is read (for example via ``numpy.array(y)`` or ``print(y)``).
 
-mlx-sparse follows this model strictly:
+mlx-sparse follows this model for fixed-output numerical kernels:
 
-* **No sparse operation calls ``mx.eval`` internally.** The constructors, ``@``,
-  ``todense``, ``T``, ``H``, and ``canonicalize`` all operate on the lazy graph.
-* **Full validation (``validate="full"``) is an exception.** It must read
-  ``indptr`` and ``indices`` values to check bounds, so it calls ``mx.eval``
-  on those arrays. Keep this in mind when constructing from device arrays.
+* **Fixed-output operations are lazy.** ``csr_matvec``, ``csr_matmul``,
+  ``todense``, ``T``, ``H``, transpose products, and autodiff primitives add
+  nodes to the MLX graph and do not materialize values immediately.
+* **Dynamic-output structural operations must discover output sizes.**
+  ``fromdense()``, ``sum_duplicates()`` / ``canonicalize()``, and
+  sparse-sparse ``CSR @ CSR`` run native counting or symbolic work first, then
+  synchronize compact counts or structure so final CSR buffers can be
+  allocated.
+* **Full validation (``validate="full"``) also reads values.** It must inspect
+  ``indptr`` and ``indices`` to check bounds, so it calls ``mx.eval`` on those
+  arrays. Keep this in mind when constructing from device arrays.
 * **``to_numpy``** (used internally by fallback operations and full validation)
   always calls ``mx.eval``.
 
@@ -88,27 +94,37 @@ Which operations run on GPU
      - Yes
    * - ``csr_sum_duplicates`` / ``canonicalize``
      - Yes
-     - No (CPU only. Dynamic output size.)
+     - Yes (staged count/prefix/fill; synchronizes row counts)
+   * - ``fromdense``
+     - Yes
+     - Yes (staged count/prefix/fill; synchronizes row counts)
    * - Sparse-sparse ``CSR @ CSR``
      - Yes
-     - No (CPU host assembly. Dynamic output size.)
+     - Experimental via ``EXPERIMENTAL_METAL_SPGEMM``; host native path is
+       default.
+   * - Batched ``csr_matvec`` / ``csr_matmul``
+     - Yes
+     - Yes
    * - Autodiff (JVP / VJP, sparse values and dense RHS)
      - Yes
      - Yes
 
 When a GPU primitive encounters an unsupported configuration, it raises a
-``RuntimeError`` with a clear message. It does not silently fall back to CPU.
+``RuntimeError`` with a clear message. Some public operations intentionally
+lower to other native primitives on GPU; for example complex transpose matvec
+uses ``csr_transpose`` followed by ``csr_matvec`` rather than a direct complex
+atomic scatter kernel.
 
 Typical workflow: construct on CPU, multiply on GPU
 ----------------------------------------------------
 
 The most common pattern for large-scale workloads is:
 
-1. Assemble the sparse matrix structure on CPU (conversion, canonicalization
-   are CPU primitives).
-2. Transfer the resulting buffers to GPU arrays (or keep them as MLX arrays,
-   which are device-agnostic until evaluated).
-3. Run repeated ``csr_matvec`` / ``csr_matmul`` on GPU.
+1. Assemble or canonicalize sparse structure once. Native staged constructors
+   can run on CPU or GPU, but they may synchronize counts to allocate compact
+   output buffers.
+2. Keep the resulting CSR buffers and dense RHS arrays on the target device.
+3. Run repeated ``csr_matvec`` / ``csr_matmul`` / batched products on GPU.
 
 .. code-block:: python
 
@@ -116,10 +132,10 @@ The most common pattern for large-scale workloads is:
    import numpy as np
    import mlx_sparse as ms
 
-   # Assembly phase: build on CPU
+   # Assembly phase: build and canonicalize once
    ms.use_cpu()
    coo = ms.coo_array((data, (row, col)), shape=(m, n))
-   csr = coo.tocsr(canonical=True)  # conversion runs on CPU
+   csr = coo.tocsr(canonical=True)
    mx.eval(csr.data, csr.indices, csr.indptr)  # materialise buffers
 
    # Compute phase: multiply on GPU

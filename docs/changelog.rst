@@ -1,6 +1,90 @@
 Changelog
 =========
 
+mlx-sparse v0.0.3b0 (Unreleased)
+----------------------------------
+
+New features
+~~~~~~~~~~~~
+
+* Added a typed runtime configuration manager exposed as
+  :data:`mlx_sparse.config`, with attribute access, ``get_config`` /
+  ``set_config``, context-manager overrides, environment-variable sync, and
+  forced environment overrides.
+
+* Added the ``EXPERIMENTAL_METAL_SPGEMM`` configuration flag for opting into
+  the staged Metal CSR x CSR implementation while keeping the optimized native
+  host implementation as the default.
+
+* Added explicit batched sparse-dense APIs:
+  :func:`mlx_sparse.csr_batched_matvec` for RHS shape ``(..., n_cols)`` and
+  :func:`mlx_sparse.csr_batched_matmul` for RHS shape ``(..., n_cols, k)``.
+  ``CSRArray @ dense`` with rank greater than 2 now dispatches through these
+  native batched primitives.
+
+* Added native staged ``fromdense`` and ``CSRArray.sum_duplicates`` /
+  ``canonicalize`` implementations. These replace NumPy fallback behavior in
+  the native path with count/prefix/fill C++ and Metal primitives.
+
+* Added native CSR x CSR multiplication with a symbolic pass, prefix-sum
+  output allocation, and numeric fill pass returning canonical CSR output.
+
+Improvements
+~~~~~~~~~~~~
+
+* Reorganized the native source tree so sparse and linalg operations live in
+  operation-specific directories containing their C++, header, and Metal files.
+  The previous monolithic sparse/linalg source layout has been split into
+  localized implementation units.
+
+* Improved CSR transpose. The CPU path now uses a counting transpose, and the
+  Metal path performs parallel counts and prefix construction followed by a
+  deterministic fill that preserves sorted row indices in the transposed CSR.
+
+* Improved transpose-product kernels used by autodiff. ``float32`` Metal
+  transpose matvec/matmul now use parallel atomic scatter-add kernels.
+  Non-``float32`` GPU transpose products lower through native transpose plus
+  native sparse-dense product to avoid unsupported Metal atomic semantics while
+  staying out of NumPy.
+
+* Extended JVP/VJP coverage through the new batched sparse-dense primitives,
+  including sparse-value and dense-RHS gradients.
+
+* Broadened native correctness and regression tests against dense MLX and
+  SciPy references, including GPU dtype coverage, complex gradients,
+  pathological linalg cases, and performance regression checks.
+
+Backwards incompatible changes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* None.
+
+Deprecations
+~~~~~~~~~~~~
+
+* None.
+
+Bug fixes
+~~~~~~~~~
+
+* Removed several hidden NumPy fallback paths from native structural operations
+  so canonicalization, dense conversion, and sparse-sparse multiplication use
+  native implementations when the extension is available.
+
+* Fixed GPU transpose correctness for solver paths by replacing the previous
+  fragile transpose fill behavior with a deterministic native fill.
+
+Documentation
+~~~~~~~~~~~~~
+
+* Added the :doc:`api/configuration` reference page.
+
+* Updated operation, autodiff, device-execution, supported-feature, and
+  performance documentation to explain batched sparse-dense dispatch, atomic
+  scatter-add kernels, native transpose-product lowering, symbolic/numeric
+  CSR x CSR assembly, and dynamic-output synchronization points.
+
+
 mlx-sparse v0.0.2b0 (21.05.2026)
 ----------------------------------
 

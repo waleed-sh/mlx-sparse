@@ -79,6 +79,29 @@ Output example:
 Current kernel characteristics
 --------------------------------
 
+Terminology
+~~~~~~~~~~~
+
+The kernel notes below use a few implementation terms:
+
+* **Atomic add**: many GPU threads can contribute to the same output element,
+  so the kernel uses a hardware atomic operation to make each addition safe.
+  This is fast for ``float32`` transpose products and avoids a separate
+  reduction pass.
+* **Scatter**: each thread writes a contribution to the output position implied
+  by the sparse column index. Scatter is natural for transpose products
+  because CSR stores rows but ``A.T`` writes by columns.
+* **Segmented reduction**: contributions are first grouped by output column,
+  then each column segment is reduced independently. This avoids value atomics
+  for dtypes where Metal does not provide the right atomic operation.
+* **Symbolic pass**: compute the output sparsity pattern or row counts without
+  writing final values. CSR x CSR uses this to know how much output storage to
+  allocate.
+* **Prefix sum**: convert per-row or per-column counts into an ``indptr`` array
+  and stable write offsets.
+* **Numeric pass**: fill the already-allocated output ``data`` and ``indices``
+  using the pattern discovered by the symbolic pass.
+
 **Metal csr_matvec**
 
 * Short rows use a scalar row kernel: one thread reads the indptr slice for its
@@ -95,6 +118,45 @@ Current kernel characteristics
 * Long rows use a threadgroup reduction per output element.
 * Better than dense when density is low enough that the sparse row fits in
   cache across multiple threads.
+
+**Metal csr_batched_matvec / csr_batched_matmul**
+
+* Batched dense right-hand sides use dedicated native kernels rather than
+  flattening through Python.
+* The public helpers accept leading batch dimensions and flatten them only for
+  dispatch; the kernels still see contiguous batches, rows, and RHS columns.
+* As with the rank-1/rank-2 kernels, short rows use scalar output kernels and
+  long rows use threadgroup reductions.
+
+**Metal csr_transpose**
+
+* The CPU path uses a counting transpose: count destination-row sizes, prefix
+  sum to build ``out_indptr``, then fill outputs in source-row order.
+* The Metal path counts destination rows in parallel, builds ``out_indptr``,
+  then fills each destination row deterministically. This preserves sorted row
+  indices in the transposed CSR output.
+
+**Metal transpose matvec and transpose matmul**
+
+* ``float32`` transpose matvec uses a parallel scatter-add kernel with
+  ``atomic_float`` output updates.
+* ``float32`` transpose matmul uses one thread per source row and RHS column,
+  again with atomic adds into the transposed output.
+* Non-``float32`` transpose products lower through native ``csr_transpose``
+  followed by native ``csr_matvec`` / ``csr_matmul``. This is still entirely
+  native C++/Metal and avoids NumPy. It is intentional because Metal does not
+  expose a general complex or low-precision atomic add with the semantics
+  needed for a direct scatter kernel.
+
+**CSR x CSR**
+
+* Native sparse-sparse multiplication uses a symbolic pass to determine each
+  output row's column set, a prefix sum to allocate compact output buffers, and
+  a numeric pass to accumulate values.
+* The default implementation performs the structural assembly on the host
+  because the output size is data-dependent. A staged Metal implementation is
+  available behind ``ms.config.EXPERIMENTAL_METAL_SPGEMM`` for experimentation,
+  but the optimized host path remains the default on the current benchmark set.
 
 **CPU backends**
 

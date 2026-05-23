@@ -61,8 +61,9 @@ Constructors
      - One or more diagonals at specified offsets. Returns canonical CSR.
    * - ``fromdense(array, threshold)``
      - Done
-     - Dense-to-sparse conversion with optional threshold for near-zeros.
-       Synchronizes to host to determine output size.
+     - Native staged conversion with optional threshold for near-zeros.
+       Counts on the active backend, synchronizes row counts to allocate
+       compact output buffers, then fills CSR data natively.
    * - ``from_dense(array)`` / ``from_numpy(array)``
      - Done
      - PEP 8 and NumPy-oriented aliases for dense-to-CSR conversion.
@@ -111,7 +112,8 @@ Conversions and structural operations
      - Native primitive (CPU and Metal).
    * - ``CSRArray.sum_duplicates()``
      - Done
-     - Python/NumPy host implementation via fallback.
+     - Native staged primitive (CPU and Metal). Dynamic output size requires
+       a row-count synchronization before compact output fill.
    * - ``CSRArray.canonicalize()``
      - Done
      - Combines ``sort_indices`` and ``sum_duplicates``.
@@ -145,19 +147,18 @@ Sparse-dense arithmetic
        for long rows on Metal.
    * - Batched dense RHS (``CSRArray @ batch``)
      - Done
-     - RHS with ``ndim > 2`` is reshaped to 2D internally.
+     - RHS with ``ndim > 2`` dispatches native batched sparse-dense kernels.
+       Explicit helpers are ``csr_batched_matvec`` and ``csr_batched_matmul``.
    * - Sparse-sparse multiplication (``CSRArray @ CSRArray``)
      - Done
-     - Host structural assembly returning canonical CSR. Dynamic output size
-       requires host synchronization.
+     - Native symbolic pass, prefix-sum allocation, and numeric pass returning
+       canonical CSR. Dynamic output size requires host synchronization.
    * - Scalar multiply (``alpha * A``)
      - Not yet
      - Can be approximated with ``ms.csr_array((alpha * data, ...), ...)``.
    * - Sparse-sparse addition
      - Not planned
      - Dynamic output size. May be added as a host-side utility.
-
-.. _gpu-supported-linalg:
 
 Sparse linear algebra
 ---------------------
@@ -257,13 +258,15 @@ Automatic differentiation
      - Notes
    * - VJP w.r.t. dense ``x`` in ``A @ x``
      - Done
-     - Dispatches ``CSRMatVecTranspose`` primitive. CPU and Metal GPU.
+     - Dispatches native transpose matvec. ``float32`` uses Metal atomics,
+       other GPU value dtypes lower through native transpose plus matvec.
    * - JVP w.r.t. dense ``x`` in ``A @ x``
      - Done
      - Reuses forward ``csr_matvec``. CPU and Metal GPU.
    * - VJP w.r.t. dense ``X`` in ``A @ X``
      - Done
-     - Dispatches ``CSRMatMulTranspose`` primitive. CPU and Metal GPU.
+     - Dispatches native transpose matmul. ``float32`` uses Metal atomics,
+       other GPU value dtypes lower through native transpose plus matmul.
    * - JVP w.r.t. dense ``X`` in ``A @ X``
      - Done
      - Reuses forward ``csr_matmul``. CPU and Metal GPU.
@@ -280,8 +283,11 @@ Automatic differentiation
      - Structural parameters are not differentiable variables.
    * - ``vmap`` over dense RHS
      - Done
-     - Batched dense RHS lowers to one ``csr_matmul`` over flattened batch
-       columns.
+     - Batched dense RHS uses native batched sparse-dense kernels.
+   * - VJP/JVP through batched dense RHS
+     - Done
+     - Native batched matvec/matmul primitives support sparse-value and
+       dense-RHS differentiation.
    * - ``vmap`` over sparse matrices
      - Not planned
      - Batch of sparse matrices is an unusual use case. Deferred.
@@ -289,7 +295,10 @@ Automatic differentiation
 Metal GPU kernel coverage
 --------------------------
 
-All fixed-shape kernels cover the full value and index dtype matrix.
+Most sparse primitives cover the full value and index dtype matrix. A few
+linalg kernels are intentionally ``float32``-only, and dynamic-output
+structural primitives synchronize counts or output structure before allocating
+compact buffers.
 
 .. list-table::
    :widths: 40 30 30
@@ -301,15 +310,29 @@ All fixed-shape kernels cover the full value and index dtype matrix.
    * - ``csr_matvec``
      - All value and index dtypes
      - Scalar row kernel plus threadgroup vector reduction for long rows
+   * - ``csr_batched_matvec``
+     - All value and index dtypes
+     - Native batched dense-vector RHS kernel
    * - ``csr_matvec_data_vjp``
      - All value and index dtypes
      - Fixed-output sparse-value VJP primitive
+   * - ``csr_matvec_transpose``
+     - All value and index dtypes
+     - ``float32`` uses atomic scatter-add, other GPU value dtypes lower
+       through native transpose plus matvec
    * - ``csr_matmul``
      - All value and index dtypes
      - Scalar element kernel plus threadgroup vector reduction for long rows
+   * - ``csr_batched_matmul``
+     - All value and index dtypes
+     - Native batched dense-matrix RHS kernel
    * - ``csr_matmul_data_vjp``
      - All value and index dtypes
      - Fixed-output sparse-value VJP primitive
+   * - ``csr_matmul_transpose``
+     - All value and index dtypes
+     - ``float32`` uses atomic scatter-add, other value dtypes lower through
+       native transpose plus matmul
    * - ``csr_todense``
      - All value and index dtypes
      - Fixed-output materialization kernel
@@ -318,7 +341,7 @@ All fixed-shape kernels cover the full value and index dtype matrix.
      - Rank-based stable sort plus indptr build
    * - ``csr_transpose``
      - All value and index dtypes
-     - Rank-based transpose sort plus indptr build
+     - Parallel count/prefix plus deterministic fill
    * - ``csr_sort_indices``
      - All value and index dtypes
      - Rank-based stable per-row sort
@@ -344,15 +367,24 @@ All fixed-shape kernels cover the full value and index dtype matrix.
      - Sparse Frobenius inner products with explicit complex conjugation
        semantics
    * - ``csr_sum_duplicates``
-     - Not implemented
-     - Dynamic output size. Deferred.
+     - All value and index dtypes
+     - Staged count/prefix/fill primitive, dynamic output size requires
+       row-count synchronization
+   * - ``csr_fromdense``
+     - All value and index dtypes
+     - Staged count/prefix/fill dense-to-CSR conversion
+   * - ``csr_matmat``
+     - All value and index dtypes
+     - Optimized host path by default, experimental staged Metal path behind
+       ``EXPERIMENTAL_METAL_SPGEMM``
 
 Known limitations
 -----------------------------
 
 * GPU availability depends on the MLX and macOS Metal runtime.
-* Dynamic-output helpers (``canonicalize()``, dense/SciPy construction, and
-  ``CSR @ CSR``) synchronize to host for structural assembly.
+* Dynamic-output helpers (``fromdense()``, ``canonicalize()``, dense/SciPy
+  construction, and ``CSR @ CSR``) synchronize compact row counts or structure
+  to host before allocating final output buffers.
 * Sparse solver, factorization, and spectral kernels are real-valued.
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.

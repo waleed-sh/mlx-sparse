@@ -15,6 +15,9 @@ What is differentiable
 * JVP and VJP for sparse values ``data`` in ``A @ x`` and ``A @ X``.
 * JVP and VJP for the dense vector ``x`` in ``A @ x``.
 * JVP and VJP for the dense matrix ``X`` in ``A @ X``.
+* JVP and VJP for explicit batched sparse-dense products,
+  :func:`mlx_sparse.csr_batched_matvec` and
+  :func:`mlx_sparse.csr_batched_matmul`.
 * Real dtypes and ``complex64`` on CPU and Metal GPU.
 
 **Not implemented:**
@@ -35,9 +38,10 @@ to ``x`` is:
 where :math:`A^H` is the Hermitian adjoint. For real dtypes this is simply
 ``A.T``. For ``complex64`` the VJP conjugates ``data`` before dispatching the
 transpose primitive, matching MLX's complex VJP convention for dense matmul.
-This is implemented as a separate ``CSRMatVecTranspose`` primitive that
-computes scatter-add into the output vector (i.e. it traverses rows and
-accumulates into column positions).
+For ``float32`` on Metal this is implemented as a parallel scatter-add kernel
+using ``atomic_float`` output updates. Other GPU value dtypes lower through
+native ``csr_transpose`` and ``csr_matvec`` so the implementation stays native
+without relying on unsupported complex or low-precision atomic adds.
 
 For the matmul case ``Y = A @ X``, the VJP with respect to ``X`` is:
 
@@ -45,7 +49,9 @@ For the matmul case ``Y = A @ X``, the VJP with respect to ``X`` is:
 
    \overline{X} = A^H \overline{Y}
 
-which dispatches to the transpose matmul primitive.
+which dispatches to the transpose matmul primitive. The ``float32`` Metal path
+uses atomic scatter-add over source rows and RHS columns. Other value dtypes
+lower through native ``csr_transpose`` followed by ``csr_matmul``.
 
 Both operations have CPU and Metal implementations for all supported value
 dtypes.
@@ -83,6 +89,19 @@ JVP with respect to sparse values uses the same formula with ``data`` replaced
 by ``dot(data)``. JVP with respect to the dense RHS replaces ``x`` / ``X`` with
 the corresponding tangent. These reuse the forward primitives and therefore
 have the same device and dtype coverage as the forward operation.
+
+Batched RHS
+-----------
+
+For batched vector RHS ``X`` with shape ``(..., n_cols)``,
+:func:`mlx_sparse.csr_batched_matvec` computes ``A @ X[b]`` for every leading
+batch element and returns ``(..., n_rows)``. For batched matrix RHS
+``(..., n_cols, k)``, :func:`mlx_sparse.csr_batched_matmul` returns
+``(..., n_rows, k)``. Their JVP and VJP rules flatten the leading batch
+dimensions only inside the native primitive, then reshape the gradients back to
+the user's batch shape. Sparse-value VJPs reuse the same fixed-output
+``csr_matmul_data_vjp`` kernel over the flattened RHS/cotangent columns, and
+dense-RHS VJPs reuse the native transpose-product path.
 
 Using ``mx.grad``
 -----------------

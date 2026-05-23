@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 import mlx_sparse as ms
 from mlx_sparse._host import to_numpy
@@ -312,4 +313,43 @@ def test_csr_matvec_complex_jvp_and_vjp_match_dense_mlx(mx):
         to_numpy(dense_vjp[0]),
         rtol=1e-5,
         atol=1e-5,
+    )
+
+
+@pytest.mark.parametrize(
+    ("dtype_name", "rtol", "atol"),
+    [
+        ("float16", 5e-3, 5e-3),
+        ("bfloat16", 3e-2, 3e-2),
+    ],
+)
+def test_csr_matvec_low_precision_vjp_matches_dense_mlx(mx, dtype_name, rtol, atol):
+    indices_np = np.array([0, 3, 1, 3, 2, 4], dtype=np.int64)
+    indptr_np = np.array([0, 2, 3, 5, 6], dtype=np.int64)
+    data_np = np.array([2.0, -1.0, 0.5, 3.0, -2.5, 1.25], dtype=np.float32)
+    x_np = np.array([1.0, -0.5, 2.0, 0.75, -1.25], dtype=np.float32)
+    cotangent_np = np.array([1.0, -0.5, 2.0, 0.75], dtype=np.float32)
+
+    dtype = getattr(mx, dtype_name)
+    data = mx.array(data_np).astype(dtype)
+    indices = mx.array(indices_np)
+    indptr = mx.array(indptr_np)
+    x = mx.array(x_np).astype(dtype)
+    cotangent = mx.array(cotangent_np).astype(dtype)
+    csr = ms.csr_array(
+        (data, indices, indptr),
+        shape=(4, 5),
+        sorted_indices=True,
+        canonical=True,
+    )
+    dense = csr.todense()
+
+    _, sparse_vjp = mx.vjp(lambda rhs: csr @ rhs, (x,), (cotangent,))
+    _, dense_vjp = mx.vjp(lambda rhs: dense @ rhs, (x,), (cotangent,))
+
+    np.testing.assert_allclose(
+        to_numpy(sparse_vjp[0]).astype(np.float32),
+        to_numpy(dense_vjp[0]).astype(np.float32),
+        rtol=rtol,
+        atol=atol,
     )

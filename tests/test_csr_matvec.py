@@ -136,7 +136,7 @@ def test_native_csr_transpose_matvec_matches_dense_and_scipy(mx, scipy_sparse):
         ("complex64", 1e-5, 1e-5),
     ],
 )
-def test_native_csr_transpose_matvec_segmented_dtypes(
+def test_native_csr_transpose_matvec_non_float_dtypes(
     mx, scipy_sparse, dtype_name, rtol, atol
 ):
     data_np = np.array([2.0, -1.0, 0.5, 3.0, -2.5, 1.25], dtype=np.float32)
@@ -182,6 +182,73 @@ def test_native_csr_transpose_matvec_segmented_dtypes(
 
     np.testing.assert_allclose(out_np, dense_np, rtol=rtol, atol=atol)
     np.testing.assert_allclose(out_np, scipy_expected, rtol=rtol, atol=atol)
+
+
+@pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
+@pytest.mark.parametrize(
+    ("dtype_name", "rtol", "atol"),
+    [
+        ("float16", 5e-3, 5e-3),
+        ("bfloat16", 3e-2, 3e-2),
+    ],
+)
+def test_native_csr_transpose_matvec_low_precision_column_order_regression(
+    mx, scipy_sparse, dtype_name, rtol, atol, index_dtype
+):
+    data_np = np.array(
+        [
+            0.5,
+            -2.0,
+            3.0,
+            1.25,
+            -0.75,
+            4.0,
+            -1.5,
+            2.5,
+            -3.5,
+            0.875,
+            1.75,
+            -0.25,
+        ],
+        dtype=np.float32,
+    )
+    indices_np = np.array([4, 1, 3, 0, 4, 2, 1, 3, 2, 4, 0, 3], dtype=index_dtype)
+    indptr_np = np.array([0, 3, 5, 8, 8, 12], dtype=index_dtype)
+    x_np = np.array([1.0, -0.5, 2.0, -3.0, 0.25], dtype=np.float32)
+    dtype = getattr(mx, dtype_name)
+    csr = ms.csr_array(
+        (
+            mx.array(data_np).astype(dtype),
+            mx.array(indices_np),
+            mx.array(indptr_np),
+        ),
+        shape=(5, 5),
+        sorted_indices=False,
+    )
+    x = mx.array(x_np).astype(dtype)
+
+    out = native.csr_matvec_transpose(csr.data, csr.indices, csr.indptr, x, csr.shape)
+    dense_expected = mx.transpose(csr.todense()) @ x
+    scipy_expected = (
+        scipy_sparse.csr_matrix(
+            (data_np, indices_np.astype(np.int32), indptr_np.astype(np.int32)),
+            shape=csr.shape,
+        ).T
+        @ x_np
+    )
+
+    np.testing.assert_allclose(
+        to_numpy(out).astype(np.float32),
+        to_numpy(dense_expected).astype(np.float32),
+        rtol=rtol,
+        atol=atol,
+    )
+    np.testing.assert_allclose(
+        to_numpy(out).astype(np.float32),
+        np.asarray(scipy_expected, dtype=np.float32),
+        rtol=rtol,
+        atol=atol,
+    )
 
 
 def test_csr_matvec_accepts_noncontiguous_inputs(mx):
