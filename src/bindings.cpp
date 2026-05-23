@@ -16,8 +16,8 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 
-#include "linalg/linalg.h"
 #include "sparse/coo_tocsr/coo_tocsr.h"
+#include "linalg/linalg.h"
 #include "sparse/csr_matmat/csr_matmat.h"
 #include "sparse/csr_matmul/csr_matmul.h"
 #include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
@@ -157,9 +157,10 @@ NB_MODULE(_ext, m) {
          const mlx_sparse::mx::array &rhs_indices,
          const mlx_sparse::mx::array &rhs_indptr, int lhs_n_rows,
          int lhs_n_cols, int rhs_n_rows, int rhs_n_cols) {
-        return mlx_sparse::csr_matmat(
-            lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices,
-            rhs_indptr, lhs_n_rows, lhs_n_cols, rhs_n_rows, rhs_n_cols);
+        return mlx_sparse::csr_matmat(lhs_data, lhs_indices, lhs_indptr,
+                                      rhs_data, rhs_indices, rhs_indptr,
+                                      lhs_n_rows, lhs_n_cols, rhs_n_rows,
+                                      rhs_n_cols);
       },
       "lhs_data"_a, "lhs_indices"_a, "lhs_indptr"_a, "rhs_data"_a,
       "rhs_indices"_a, "rhs_indptr"_a, "lhs_n_rows"_a, "lhs_n_cols"_a,
@@ -176,8 +177,8 @@ NB_MODULE(_ext, m) {
         return mlx_sparse::csr_cg(data, indices, indptr, b, x0, n_rows, n_cols,
                                   rtol, atol, maxiter);
       },
-      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a, "n_cols"_a,
-      "rtol"_a, "atol"_a, "maxiter"_a,
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a,
+      "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
       "Solve a float32 SPD CSR system with conjugate gradients.");
 
   m.def(
@@ -189,8 +190,9 @@ NB_MODULE(_ext, m) {
         return mlx_sparse::csr_lanczos(data, indices, indptr, v0, n_rows,
                                        n_cols, k, reorthogonalize);
       },
-      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
-      "reorthogonalize"_a, "Run a float32 CSR Lanczos basis construction.");
+      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a,
+      "k"_a, "reorthogonalize"_a,
+      "Run a float32 CSR Lanczos basis construction.");
 
   m.def(
       "csr_gmres",
@@ -202,8 +204,8 @@ NB_MODULE(_ext, m) {
         return mlx_sparse::csr_gmres(data, indices, indptr, b, x0, n_rows,
                                      n_cols, rtol, atol, restart, maxiter);
       },
-      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a, "n_cols"_a,
-      "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a,
+      "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
       "Solve a float32 CSR system with restarted GMRES.");
 
   m.def(
@@ -216,8 +218,8 @@ NB_MODULE(_ext, m) {
         return mlx_sparse::csr_minres(data, indices, indptr, b, x0, n_rows,
                                       n_cols, rtol, atol, maxiter);
       },
-      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a, "n_cols"_a,
-      "rtol"_a, "atol"_a, "maxiter"_a,
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a,
+      "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
       "Solve a float32 Hermitian CSR system with MINRES.");
 
   m.def(
@@ -227,10 +229,10 @@ NB_MODULE(_ext, m) {
          const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &v0,
          int n_rows, int n_cols, int k) {
         return mlx_sparse::csr_arnoldi(data, indices, indptr, v0, n_rows,
-                                       n_cols, k);
+                                      n_cols, k);
       },
-      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
-      "Run a float32 CSR Arnoldi basis construction.");
+      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a,
+      "k"_a, "Run a float32 CSR Arnoldi basis construction.");
 
   m.def(
       "csr_eigsh",
@@ -241,8 +243,9 @@ NB_MODULE(_ext, m) {
         return mlx_sparse::csr_eigsh(data, indices, indptr, n_rows, n_cols, k,
                                      ncv, which);
       },
-      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a, "ncv"_a,
-      "which"_a, "Compute selected Hermitian Ritz pairs from a CSR matrix.");
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "ncv"_a, "which"_a,
+      "Compute selected Hermitian Ritz pairs from a CSR matrix.");
 
   m.def(
       "csr_eigs",
@@ -253,8 +256,9 @@ NB_MODULE(_ext, m) {
         return mlx_sparse::csr_eigs(data, indices, indptr, n_rows, n_cols, k,
                                     ncv, which);
       },
-      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a, "ncv"_a,
-      "which"_a, "Compute selected Arnoldi Ritz pairs from a CSR matrix.");
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "ncv"_a, "which"_a,
+      "Compute selected Arnoldi Ritz pairs from a CSR matrix.");
 
   m.def(
       "csr_svds",
@@ -265,8 +269,9 @@ NB_MODULE(_ext, m) {
         return mlx_sparse::csr_svds(data, indices, indptr, n_rows, n_cols, k,
                                     ncv, which);
       },
-      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a, "ncv"_a,
-      "which"_a, "Compute selected singular triplets from a CSR matrix.");
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "ncv"_a, "which"_a,
+      "Compute selected singular triplets from a CSR matrix.");
 
   m.def(
       "csr_cholesky",
@@ -298,7 +303,8 @@ NB_MODULE(_ext, m) {
             data, indices, indptr, b, n_rows, n_cols, lower, unit_diagonal);
       },
       "data"_a, "indices"_a, "indptr"_a, "b"_a, "n_rows"_a, "n_cols"_a,
-      "lower"_a, "unit_diagonal"_a, "Solve a sparse triangular CSR system.");
+      "lower"_a, "unit_diagonal"_a,
+      "Solve a sparse triangular CSR system.");
 
   m.def(
       "csr_vdot",
@@ -332,7 +338,8 @@ NB_MODULE(_ext, m) {
 
   m.def(
       "csr_permute_vector",
-      [](const mlx_sparse::mx::array &x, const mlx_sparse::mx::array &perm) {
+      [](const mlx_sparse::mx::array &x,
+         const mlx_sparse::mx::array &perm) {
         return mlx_sparse::csr_permute_vector(x, perm);
       },
       "x"_a, "perm"_a, "Apply an int32 permutation to a float32 vector.");
