@@ -14,9 +14,19 @@
 
 from __future__ import annotations
 
+import mlx.core as mx
+
 import mlx_sparse._fallback as _fallback
 from mlx_sparse._ext_loader import extension
 from mlx_sparse._typing import Shape2D
+
+
+def _index_dtype_bits(index_dtype) -> int:
+    if index_dtype == mx.int32:
+        return 32
+    if index_dtype == mx.int64:
+        return 64
+    raise TypeError(f"index_dtype must be mx.int32 or mx.int64, got {index_dtype}.")
 
 
 def identity_like(x):
@@ -143,6 +153,29 @@ def csr_sort_indices(
     if ext is None:
         return _fallback.sort_csr_indices(data, indices, indptr)
     return ext.csr_sort_indices(data, indices, indptr)
+
+
+def csr_sum_duplicates(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+):
+    ext = extension()
+    if ext is None:
+        return _fallback.sum_csr_duplicates(data, indices, indptr)
+    return ext.csr_sum_duplicates(data, indices, indptr)
+
+
+def csr_fromdense(
+    dense: mx.array,
+    *,
+    index_dtype,
+    threshold: float,
+):
+    ext = extension()
+    if ext is None:
+        return _fallback.fromdense(dense, index_dtype=index_dtype, threshold=threshold)
+    return ext.csr_fromdense(dense, _index_dtype_bits(index_dtype), float(threshold))
 
 
 def csr_cg(

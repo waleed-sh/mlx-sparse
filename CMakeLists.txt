@@ -64,8 +64,10 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_transpose/csr_matvec_transpose.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sum_duplicates/csr_sum_duplicates.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/fromdense/fromdense.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/identity_like/identity_like.cpp)
 
 target_include_directories(
@@ -100,8 +102,10 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_matvec_transpose/csr_matvec_transpose.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sum_duplicates/csr_sum_duplicates.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/fromdense/fromdense.metal
     DEPS
       ${CMAKE_CURRENT_LIST_DIR}/src/common/metal_common.h
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/common/metal_common.h

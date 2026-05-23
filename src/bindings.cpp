@@ -24,8 +24,10 @@
 #include "sparse/csr_matvec/csr_matvec.h"
 #include "sparse/csr_matvec_transpose/csr_matvec_transpose.h"
 #include "sparse/csr_sort_indices/csr_sort_indices.h"
+#include "sparse/csr_sum_duplicates/csr_sum_duplicates.h"
 #include "sparse/csr_todense/csr_todense.h"
 #include "sparse/csr_transpose/csr_transpose.h"
+#include "sparse/fromdense/fromdense.h"
 #include "sparse/identity_like/identity_like.h"
 
 namespace nb = nanobind;
@@ -69,6 +71,25 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a,
       "Sort CSR column indices independently within each row.");
+
+  m.def(
+      "csr_sum_duplicates",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr) {
+        return mlx_sparse::csr_sum_duplicates(data, indices, indptr);
+      },
+      "data"_a, "indices"_a, "indptr"_a,
+      "Sum adjacent duplicate CSR column entries in each sorted row.");
+
+  m.def(
+      "csr_fromdense",
+      [](const mlx_sparse::mx::array &dense, int index_dtype_bits,
+         float threshold) {
+        return mlx_sparse::csr_fromdense(dense, index_dtype_bits, threshold);
+      },
+      "dense"_a, "index_dtype_bits"_a, "threshold"_a,
+      "Convert a dense rank-2 MLX array into canonical CSR buffers.");
 
   m.def(
       "csr_transpose",

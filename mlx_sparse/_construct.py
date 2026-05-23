@@ -19,6 +19,7 @@ from collections.abc import Sequence
 import mlx.core as mx
 import numpy as np
 
+import mlx_sparse._native as _native
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._host import to_mx, to_numpy
 from mlx_sparse._typing import INDEX_DTYPES, VALUE_DTYPES, Shape2D
@@ -356,10 +357,9 @@ def fromdense(
     """Construct a canonical CSR matrix from a rank-2 dense MLX array.
 
     Identifies the non-zero (or above-threshold) entries of a dense matrix and
-    packages them into a :class:`~mlx_sparse.CSRArray`. This operation
-    synchronizes to host to discover which entries are non-zero, so it is not
-    suitable for use inside a JIT-compiled function or inside a hot loop on a
-    GPU stream.
+    packages them into a :class:`~mlx_sparse.CSRArray`. The native path stages
+    this as count, allocate, then fill work so Metal builds can perform the
+    dense scan and CSR writes on device while still returning compact buffers.
 
     The value dtype is preserved from the input array. Index dtype defaults to
     ``int32`` and can be overridden for matrices with more than ~2 billion
@@ -418,22 +418,18 @@ def fromdense(
         raise ValueError(f"threshold must be non-negative, got {threshold}.")
 
     index_dtype = _normalize_index_dtype(index_dtype)
-    index_np_dtype = _numpy_index_dtype(index_dtype)
-    dense_np = to_numpy(dense)
-    if threshold == 0:
-        mask = dense_np != 0
-    else:
-        mask = np.abs(dense_np) > threshold
-    row, col = np.nonzero(mask)
-    data = dense_np[row, col]
-
-    return _csr_from_sorted_triplets(
-        data,
-        row.astype(index_np_dtype, copy=False),
-        col.astype(index_np_dtype, copy=False),
-        (int(dense.shape[0]), int(dense.shape[1])),
-        dtype=dense.dtype,
+    data, indices, indptr = _native.csr_fromdense(
+        dense,
         index_dtype=index_dtype,
+        threshold=float(threshold),
+    )
+    return CSRArray(
+        data,
+        indices,
+        indptr,
+        shape=(int(dense.shape[0]), int(dense.shape[1])),
+        sorted_indices=True,
+        has_canonical_format=True,
     )
 
 

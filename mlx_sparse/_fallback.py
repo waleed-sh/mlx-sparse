@@ -295,3 +295,36 @@ def sum_csr_duplicates(
         to_mx(indices_arr, dtype=indices.dtype),
         to_mx(out_indptr, dtype=indptr.dtype),
     )
+
+
+def fromdense(
+    dense: mx.array,
+    *,
+    index_dtype,
+    threshold: float,
+):
+    dense_np = to_numpy(dense)
+    if index_dtype == mx.int32:
+        index_np_dtype = np.int32
+    elif index_dtype == mx.int64:
+        index_np_dtype = np.int64
+    else:
+        raise TypeError(f"index_dtype must be mx.int32 or mx.int64, got {index_dtype}.")
+
+    if threshold == 0:
+        mask = dense_np != 0
+    else:
+        mask = np.abs(dense_np) > threshold
+    row, col = np.nonzero(mask)
+    data = dense_np[row, col]
+
+    indptr = np.zeros(dense_np.shape[0] + 1, dtype=index_np_dtype)
+    if row.size:
+        counts = np.bincount(row.astype(np.int64), minlength=dense_np.shape[0])
+        indptr[1:] = np.cumsum(counts, dtype=index_np_dtype)
+
+    return (
+        to_mx(data, dtype=dense.dtype),
+        to_mx(col.astype(index_np_dtype, copy=False), dtype=index_dtype),
+        to_mx(indptr, dtype=index_dtype),
+    )

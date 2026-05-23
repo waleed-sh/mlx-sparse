@@ -18,7 +18,6 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
-import mlx_sparse._fallback as _fallback
 import mlx_sparse._native as _native
 from mlx_sparse._typing import Shape2D, ValidationMode
 from mlx_sparse._validation import (
@@ -178,7 +177,7 @@ class CSRArray:
             ``has_canonical_format=True``.
         """
         sorted_self = self.sort_indices()
-        data, indices, indptr = _fallback.sum_csr_duplicates(
+        data, indices, indptr = _native.csr_sum_duplicates(
             sorted_self.data,
             sorted_self.indices,
             sorted_self.indptr,

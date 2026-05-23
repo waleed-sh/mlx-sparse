@@ -93,6 +93,47 @@ def test_coo_conversion_matches_dense_on_available_devices():
 
 
 @pytest.mark.gpu
+def test_fromdense_and_sum_duplicates_match_on_available_devices():
+    mx = pytest.importorskip("mlx.core")
+    dense_np = np.array(
+        [[0.0, 2.0, 1e-4], [3.0, 0.0, -4.0], [0.0, 5e-4, 0.0]],
+        dtype=np.float32,
+    )
+    reference = None
+
+    for _, device in _available_devices(mx):
+        mx.set_default_device(device)
+        from_dense = ms.fromdense(mx.array(dense_np), threshold=1e-3)
+        duplicate = ms.csr_array(
+            (
+                mx.array(np.array([1.0, -2.0, 3.0, 4.0], dtype=np.float32)),
+                mx.array(np.array([2, 0, 2, 0], dtype=np.int32)),
+                mx.array(np.array([0, 4], dtype=np.int32)),
+            ),
+            shape=(1, 3),
+        ).canonicalize()
+        result = {
+            "fromdense": np.array(from_dense.todense()),
+            "duplicate_data": np.array(duplicate.data),
+            "duplicate_indices": np.array(duplicate.indices),
+            "duplicate_indptr": np.array(duplicate.indptr),
+        }
+        if reference is None:
+            reference = result
+            continue
+        np.testing.assert_allclose(result["fromdense"], reference["fromdense"])
+        np.testing.assert_allclose(
+            result["duplicate_data"], reference["duplicate_data"]
+        )
+        np.testing.assert_array_equal(
+            result["duplicate_indices"], reference["duplicate_indices"]
+        )
+        np.testing.assert_array_equal(
+            result["duplicate_indptr"], reference["duplicate_indptr"]
+        )
+
+
+@pytest.mark.gpu
 def test_sparse_linalg_native_ops_match_on_available_devices():
     mx = pytest.importorskip("mlx.core")
     reference = None
