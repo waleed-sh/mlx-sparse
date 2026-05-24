@@ -19,6 +19,7 @@ import numpy as np
 
 import mlx_sparse._native as _native
 from mlx_sparse._coo import COOArray
+from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._host import to_numpy
 from mlx_sparse._validation import ensure_mx_array
@@ -29,22 +30,25 @@ def _as_csr(A) -> CSRArray:
         return A.canonicalize()
     if isinstance(A, COOArray):
         return A.tocsr(canonical=True)
-    # Accept LinearOperator when it wraps a CSRArray (created via aslinearoperator).
-    # The _sparse_array attribute holds the backing CSR for fast native dispatch.
+    if isinstance(A, CSCArray):
+        return A.tocsr(canonical=True)
+    # Accept LinearOperator when it wraps a sparse array (created via
+    # aslinearoperator). The _sparse_array attribute is normalized to CSR for
+    # fast native solver dispatch.
     from mlx_sparse.linalg._interface import LinearOperator
 
     if isinstance(A, LinearOperator):
         if A._sparse_array is not None:
-            return A._sparse_array.canonicalize()
+            return _as_csr(A._sparse_array)
         raise TypeError(
             "Iterative solvers accept LinearOperator only when it wraps a "
-            "CSRArray (use aslinearoperator(csr_array)). "
+            "CSRArray, COOArray, or CSCArray (use aslinearoperator(sparse_array)). "
             "For fully matrix-free operators, implement a Python-level "
             "iterative solver loop."
         )
     raise TypeError(
-        "sparse iterative solvers expect CSRArray, COOArray, or a "
-        "CSR-backed LinearOperator. Use mlx.linalg for dense arrays."
+        "sparse iterative solvers expect CSRArray, COOArray, CSCArray, or a "
+        "sparse-backed LinearOperator. Use mlx.linalg for dense arrays."
     )
 
 
@@ -124,9 +128,10 @@ def cg(
         integer happen on the host.
 
     Args:
-        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray` that is symmetric positive-definite.
-            A CSR-backed :class:`LinearOperator` is also accepted.
+        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray` that
+            is symmetric positive-definite.  A sparse-backed
+            :class:`LinearOperator` is also accepted.
         b: Right-hand side vector of shape ``(n,)``.  Must be a rank-1
             ``mlx.core.array`` or anything convertible to one.
         x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector
@@ -226,9 +231,10 @@ def gmres(
         coefficients back before updating the solution.
 
     Args:
-        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray`.  A CSR-backed
-            :class:`LinearOperator` is also accepted.  Need not be symmetric.
+        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.  A
+            sparse-backed :class:`LinearOperator` is also accepted.  Need not be
+            symmetric.
         b: Right-hand side vector of shape ``(n,)``.
         x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector.
         rtol: Relative tolerance for the residual stopping criterion.
@@ -308,8 +314,9 @@ def minres(
         the solution.
 
     Args:
-        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray` that is real and symmetric.
+        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray` that
+            is real and symmetric.
         b: Right-hand side vector of shape ``(n,)``.
         x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector.
         rtol: Relative tolerance for the residual stopping criterion.

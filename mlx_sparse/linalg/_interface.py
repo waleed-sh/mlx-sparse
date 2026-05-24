@@ -14,22 +14,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import mlx.core as mx
 
 from mlx_sparse._coo import COOArray
+from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import normalize_shape
 from mlx_sparse.linalg._utils import ensure_array
 
-from .._typing import Matmat, Matvec
+Matvec = Callable[[mx.array], mx.array]
+Matmat = Callable[[mx.array], mx.array]
 
 
 class LinearOperator:
     """Sparse/matrix-free operator interface.
 
     This class stores callables only. It does not densify an operator or provide
-    dense fallbacks. Sparse arrays are wrapped with native CSR matvec/matmat
-    kernels through :func:`aslinearoperator`.
+    dense fallbacks. Sparse arrays are normalized to canonical CSR and wrapped
+    with native CSR matvec/matmat kernels through :func:`aslinearoperator`.
     """
 
     __slots__ = (
@@ -202,8 +206,12 @@ class LinearOperator:
         )
 
 
-def _sparse_operator(array: CSRArray | COOArray) -> LinearOperator:
-    csr = array.tocsr(canonical=True) if isinstance(array, COOArray) else array
+def _sparse_operator(array: CSRArray | COOArray | CSCArray) -> LinearOperator:
+    csr = (
+        array.canonicalize()
+        if isinstance(array, CSRArray)
+        else array.tocsr(canonical=True)
+    )
     adjoint = csr.H
     return LinearOperator(
         shape=csr.shape,
@@ -227,7 +235,8 @@ def aslinearoperator(A) -> LinearOperator:
         A: The object to wrap.  Accepted types:
 
             * :class:`LinearOperator`: returned unchanged.
-            * :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`:
+            * :class:`~mlx_sparse.CSRArray`, :class:`~mlx_sparse.COOArray`, or
+              :class:`~mlx_sparse.CSCArray`: converted once to canonical CSR and
               wrapped with native CSR matvec/matmat/rmatvec kernels.
             * SciPy sparse matrix (``scipy.sparse``): converted to CSR via
               :func:`~mlx_sparse.from_scipy` then wrapped.
@@ -243,7 +252,7 @@ def aslinearoperator(A) -> LinearOperator:
 
     if isinstance(A, LinearOperator):
         return A
-    if isinstance(A, CSRArray | COOArray):
+    if isinstance(A, CSRArray | COOArray | CSCArray):
         return _sparse_operator(A)
     if isinstance(A, tuple) and len(A) >= 2:
         shape, matvec = A[:2]
@@ -258,11 +267,6 @@ def aslinearoperator(A) -> LinearOperator:
 
         return _sparse_operator(from_scipy(A))
     raise TypeError(
-        "aslinearoperator accepts LinearOperator, CSRArray, COOArray, SciPy "
-        "sparse matrices, or (shape, matvec[, matmat]) tuples."
+        "aslinearoperator accepts LinearOperator, CSRArray, COOArray, CSCArray, "
+        "SciPy sparse matrices, or (shape, matvec[, matmat]) tuples."
     )
-
-
-def as_linear_operator(A) -> LinearOperator:
-    """Alias for :func:`mlx_sparse.linalg.aslinearoperator`."""
-    return aslinearoperator(A)

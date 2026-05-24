@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from mlx_sparse._coo import COOArray
+from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 
 
@@ -23,7 +24,11 @@ def _as_csr(A) -> CSRArray:
         return A
     if isinstance(A, COOArray):
         return A.tocsr(canonical=True)
-    raise TypeError(f"expected CSRArray or COOArray, got {type(A).__name__}.")
+    if isinstance(A, CSCArray):
+        return A.tocsr(canonical=True)
+    raise TypeError(
+        f"expected CSRArray, COOArray, or CSCArray, got {type(A).__name__}."
+    )
 
 
 def vdot(a, b):
@@ -34,10 +39,11 @@ def vdot(a, b):
     accumulation.  Equivalent to ``dot(conj(a), b)`` for real matrices.
 
     Args:
-        a: First sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray`.
+        a: First sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
         b: Second sparse matrix with the same shape as ``a``.  Must be a
-            :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`.
+            :class:`~mlx_sparse.CSRArray`, :class:`~mlx_sparse.COOArray`, or
+            :class:`~mlx_sparse.CSCArray`.
 
     Returns:
         A scalar ``mlx.core.array`` equal to ``sum(conj(a) * b)``.
@@ -56,10 +62,11 @@ def dot(a, b):
     element-wise accumulation.
 
     Args:
-        a: First sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray`.
+        a: First sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
         b: Second sparse matrix with the same shape as ``a``.  Must be a
-            :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`.
+            :class:`~mlx_sparse.CSRArray`, :class:`~mlx_sparse.COOArray`, or
+            :class:`~mlx_sparse.CSCArray`.
 
     Returns:
         A scalar ``mlx.core.array`` equal to ``sum(a * b)``.

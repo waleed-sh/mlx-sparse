@@ -43,6 +43,11 @@ New features
   @ dense`` and ``CSCArray @ dense`` now dispatch through format-specific
   C++/Metal primitives instead of converting through CSR.
 
+* Added CSC input support to sparse linalg entrypoints. CSC matrices are
+  converted once to canonical CSR at solver entry so existing CSR-native Krylov,
+  direct factorization, triangular solve, spectral, and sparse inner-product
+  kernels remain the execution path.
+
 Improvements
 ~~~~~~~~~~~~
 

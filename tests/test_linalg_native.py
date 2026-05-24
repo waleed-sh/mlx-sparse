@@ -114,6 +114,18 @@ def test_cg_gmres_minres_match_numpy_solve(mx, to_numpy):
         np.testing.assert_allclose(to_numpy(x), expected, rtol=5e-4, atol=5e-4)
 
 
+def test_csc_iterative_solvers_match_numpy_solve(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    a = _spd(mx).tocsc(canonical=True)
+    b = mx.array([1.0, 2.0], dtype=mx.float32)
+    expected = np.linalg.solve(to_numpy(a.todense()), to_numpy(b))
+    for solver in (linalg.cg, linalg.gmres, linalg.minres):
+        x, info = solver(a, b, rtol=1e-6, atol=1e-7, maxiter=20)
+        assert info == 0
+        np.testing.assert_allclose(to_numpy(x), expected, rtol=5e-4, atol=5e-4)
+
+
 def test_iterative_solvers_match_scipy_sparse(mx, scipy_sparse, to_numpy):
     if not extension_available():
         pytest.skip("native extension unavailable")
@@ -152,6 +164,29 @@ def test_sparse_cholesky_factor_and_solve(mx, to_numpy):
         np.linalg.solve(to_numpy(a.todense()), to_numpy(b)),
         rtol=5e-4,
         atol=5e-4,
+    )
+
+
+def test_csc_sparse_cholesky_and_lu_solve(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    spd = _spd(mx).tocsc(canonical=True)
+    b_spd = mx.array([1.0, 2.0], dtype=mx.float32)
+    chol = linalg.sparse_cholesky(spd)
+    np.testing.assert_allclose(
+        to_numpy(chol.solve(b_spd)),
+        np.linalg.solve(to_numpy(spd.todense()), to_numpy(b_spd)),
+        rtol=5e-4,
+        atol=5e-4,
+    )
+
+    general = _nonsymmetric(mx).tocsc(canonical=True)
+    b = mx.array([1.0, -2.0, 0.5], dtype=mx.float32)
+    np.testing.assert_allclose(
+        to_numpy(linalg.spsolve(general, b)),
+        np.linalg.solve(to_numpy(general.todense()), to_numpy(b)),
+        rtol=1e-4,
+        atol=1e-4,
     )
 
 
@@ -199,6 +234,26 @@ def test_eigsh_eigs_svds_match_dense_references(mx, to_numpy):
     np.testing.assert_allclose(to_numpy(s)[0], expected_s, rtol=5e-2, atol=5e-2)
     assert to_numpy(u).shape == (3, 1)
     assert to_numpy(vh).shape == (1, 3)
+
+
+def test_csc_spectral_routines_match_dense_references(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    a = _spd(mx).tocsc(canonical=True)
+    vals = linalg.eigsh(a, k=1, which="LM", ncv=2, return_eigenvectors=False)
+    expected_vals, _ = np.linalg.eigh(to_numpy(a.todense()))
+    np.testing.assert_allclose(
+        np.sort(to_numpy(vals)), np.sort(expected_vals)[-1:], rtol=5e-3, atol=5e-3
+    )
+
+    general = _nonsymmetric(mx).tocsc(canonical=True)
+    evals = linalg.eigs(general, k=1, which="LM", ncv=3, return_eigenvectors=False)
+    expected_general = np.linalg.eigvals(to_numpy(general.todense()))
+    assert np.min(np.abs(expected_general - to_numpy(evals)[0])) < 2e-1
+
+    s = linalg.svds(general, k=1, which="LM", ncv=3, return_singular_vectors=False)
+    expected_s = np.linalg.svd(to_numpy(general.todense()), compute_uv=False)[0]
+    np.testing.assert_allclose(to_numpy(s)[0], expected_s, rtol=5e-2, atol=5e-2)
 
 
 def test_spectral_routines_match_scipy_sparse(mx, scipy_sparse, to_numpy):

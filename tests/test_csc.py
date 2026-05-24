@@ -287,8 +287,11 @@ def test_csc_conjugate_transpose_and_sparse_matmul_paths(mx):
         to_numpy(csc @ mx.array(np.eye(2, dtype=np.complex64))),
         to_numpy(csc.todense()),
     )
-    with pytest.raises(TypeError, match="aslinearoperator"):
-        ms.linalg.aslinearoperator(csc)
+    op = ms.linalg.aslinearoperator(csc)
+    np.testing.assert_allclose(
+        to_numpy(op @ mx.array(np.array([1.0, -2.0], dtype=np.complex64))),
+        to_numpy(csc.todense()) @ np.array([1.0, -2.0], dtype=np.complex64),
+    )
 
 
 def test_csc_fallback_wrappers(monkeypatch, mx):

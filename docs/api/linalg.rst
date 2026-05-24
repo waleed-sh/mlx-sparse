@@ -4,13 +4,16 @@ Sparse linalg API
 .. module:: mlx_sparse.linalg
 
 The linalg namespace contains sparse-native solvers and factorizations. Public
-functions accept ``CSRArray`` and ``COOArray`` inputs, dense arrays are not
-silently converted because dense linear algebra belongs in ``mlx.linalg``.
+functions accept ``CSRArray``, ``COOArray``, and ``CSCArray`` inputs; dense
+arrays are not silently converted because dense linear algebra belongs in
+``mlx.linalg``. COO and CSC inputs are normalized once to canonical CSR at
+solver entry so the native CSR solver kernels remain the execution path.
 
 .. warning::
 
    Some solvers are not fully supported on GPU, and either have a CPU only version or require CPU
    operations in the solve process. Please see the below
+
 
 **GPU coverage summary**: call ``ms.use_gpu()`` to enable Metal dispatch. Current solver GPU support:
 

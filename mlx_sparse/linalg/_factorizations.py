@@ -20,6 +20,7 @@ import mlx.core as mx
 
 import mlx_sparse._native as _native
 from mlx_sparse._coo import COOArray
+from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import ensure_mx_array
 
@@ -29,8 +30,10 @@ def _as_csr(A) -> CSRArray:
         return A.canonicalize()
     if isinstance(A, COOArray):
         return A.tocsr(canonical=True)
+    if isinstance(A, CSCArray):
+        return A.tocsr(canonical=True)
     raise TypeError(
-        "sparse factorization expects CSRArray or COOArray. "
+        "sparse factorization expects CSRArray, COOArray, or CSCArray. "
         "Dense MLX arrays belong in mlx.linalg, not mlx_sparse.linalg."
     )
 
@@ -179,7 +182,8 @@ def sparse_cholesky(A, *, upper: bool = False) -> SparseCholesky:
     """Compute the sparse Cholesky factorization ``A = L @ L.T``.
 
     Performs a left-looking sparse Cholesky factorization on a real symmetric
-    positive-definite (SPD) matrix stored in CSR or COO format.  The resulting
+    positive-definite (SPD) matrix stored in CSR, COO, or CSC format.  COO/CSC
+    inputs are converted once to canonical CSR before factorization.  The resulting
     lower-triangular factor ``L`` is returned as a :class:`SparseCholesky`
     object whose :meth:`~SparseCholesky.solve` method applies both triangular
     solves in sequence.
@@ -190,10 +194,10 @@ def sparse_cholesky(A, *, upper: bool = False) -> SparseCholesky:
         triangular-solve kernels to the GPU when GPU execution is selected.
 
     Args:
-        A: The matrix to factorize.  Must be a :class:`~mlx_sparse.CSRArray`
-            or :class:`~mlx_sparse.COOArray` that is real, symmetric, and
-            positive-definite.  Float16 and bfloat16 inputs are promoted to
-            float32 automatically.
+        A: The matrix to factorize.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray` that
+            is real, symmetric, and positive-definite.  Float16 and bfloat16
+            inputs are promoted to float32 automatically.
         upper: Not yet supported.  Must be ``False`` (the default).
 
     Returns:
@@ -255,8 +259,9 @@ def cholesky(A, *, upper: bool = False) -> SparseCholesky:
         triangular-solve kernels when GPU execution is selected.
 
     Args:
-        A: SPD matrix in :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray` format.
+        A: SPD matrix in :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`
+            format.
         upper: Not yet supported.  Must be ``False`` (the default).
 
     Returns:
@@ -269,8 +274,9 @@ def sparse_lu(A) -> SparseLU:
     """Compute the sparse LU factorization ``P @ A = L @ U``.
 
     Performs a sparse LU factorization with partial pivoting on a general
-    (possibly non-symmetric) real square matrix stored in CSR or COO format.
-    The row permutation ``P``, unit lower-triangular factor ``L``, and
+    (possibly non-symmetric) real square matrix stored in CSR, COO, or CSC
+    format.  COO/CSC inputs are converted once to canonical CSR before
+    factorization.  The row permutation ``P``, unit lower-triangular factor ``L``, and
     upper-triangular factor ``U`` are returned as a :class:`SparseLU` object
     whose :meth:`~SparseLU.solve` method applies the full solve sequence.
 
@@ -280,9 +286,10 @@ def sparse_lu(A) -> SparseLU:
         triangular-solve kernels to the GPU when GPU execution is selected.
 
     Args:
-        A: The matrix to factorize.  Must be a :class:`~mlx_sparse.CSRArray`
-            or :class:`~mlx_sparse.COOArray` that is real and non-singular.
-            Float16 and bfloat16 inputs are promoted to float32 automatically.
+        A: The matrix to factorize.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray` that
+            is real and non-singular.  Float16 and bfloat16 inputs are promoted
+            to float32 automatically.
 
     Returns:
         A :class:`SparseLU` dataclass with fields ``perm`` (row permutation
@@ -347,13 +354,14 @@ def splu(A) -> SparseLU:
     return values are identical to :func:`sparse_lu`.
 
     GPU note:
-        The factorization step runs on the CPU. The returned factor uses GPU
+        The factorization step runs on the CPU.  The returned factor uses GPU
         permutation and triangular-solve kernels when GPU execution is
         selected.
 
     Args:
-        A: Matrix to factorize in :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray` format.
+        A: Matrix to factorize in :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`
+            format.
 
     Returns:
         A :class:`SparseLU` dataclass with fields ``perm``, ``L``, and ``U``.
@@ -378,8 +386,9 @@ def spsolve(A, b) -> mx.array:
         is selected.
 
     Args:
-        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray` or
-            :class:`~mlx_sparse.COOArray` that is real and non-singular.
+        A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray` that
+            is real and non-singular.
         b: Right-hand side vector of shape ``(n,)``.
 
     Returns:

@@ -18,6 +18,7 @@ import mlx.core as mx
 
 import mlx_sparse._native as _native
 from mlx_sparse._coo import COOArray
+from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 
 
@@ -26,9 +27,11 @@ def _as_csr(A) -> CSRArray:
         return A.canonicalize()
     if isinstance(A, COOArray):
         return A.tocsr(canonical=True)
+    if isinstance(A, CSCArray):
+        return A.tocsr(canonical=True)
     raise TypeError(
-        "sparse eigen routines expect CSRArray or COOArray. Dense arrays belong "
-        "in mlx.linalg."
+        "sparse eigen routines expect CSRArray, COOArray, or CSCArray. Dense "
+        "arrays belong in mlx.linalg."
     )
 
 
@@ -72,14 +75,14 @@ def lanczos(
 
     GPU note:
         When GPU execution is selected, the Lanczos recurrence runs in a
-        Metal kernel. Sparse matrix-vector products, orthogonalisation,
+        Metal kernel.  Sparse matrix-vector products, orthogonalisation,
         tridiagonal coefficients, and basis writes stay on the GPU.  Python
         argument validation and returned array handling happen on the host.
 
     Args:
-        A: Symmetric sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray`
-            or :class:`~mlx_sparse.COOArray`.  Float16 and bfloat16 inputs
-            are promoted to float32.
+        A: Symmetric sparse matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
+            Float16 and bfloat16 inputs are promoted to float32.
         k: Number of Lanczos steps.  Must satisfy ``0 < k <= A.shape[0]``.
         v0: Not yet supported.  Pass ``None`` (the default).
         reorthogonalize: Whether to apply full reorthogonalisation at each
@@ -140,14 +143,15 @@ def eigsh(
 
     GPU note:
         When GPU execution is selected, Lanczos tridiagonalisation uses the
-        native Lanczos kernel. The small tridiagonal eigensolve, Ritz pair
+        native Lanczos kernel.  The small tridiagonal eigensolve, Ritz pair
         selection, and eigenvector back transformation run on the CPU after
         the basis and coefficients are copied back to host memory.
 
     Args:
         A: Real symmetric sparse matrix.  Must be a
-            :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`.
-            Float16 and bfloat16 inputs are promoted to float32.
+            :class:`~mlx_sparse.CSRArray`, :class:`~mlx_sparse.COOArray`, or
+            :class:`~mlx_sparse.CSCArray`.  Float16 and bfloat16 inputs are
+            promoted to float32.
         k: Number of eigenpairs to compute.  Must satisfy
             ``0 < k < A.shape[0]``.  Defaults to ``6``.
         which: Which eigenpairs to return.  Accepted values:
@@ -226,14 +230,14 @@ def eigs(
 
     GPU note:
         When GPU execution is selected, Arnoldi factorisation uses the native
-        Arnoldi kernel. The small Hessenberg eigensolve, Ritz value
+        Arnoldi kernel.  The small Hessenberg eigensolve, Ritz value
         selection, and output vector assembly run on the CPU after the basis
         and Hessenberg matrix are copied back to host memory.
 
     Args:
-        A: Sparse square matrix.  Must be a :class:`~mlx_sparse.CSRArray`
-            or :class:`~mlx_sparse.COOArray`.  Float16 and bfloat16 inputs
-            are promoted to float32.
+        A: Sparse square matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
+            Float16 and bfloat16 inputs are promoted to float32.
         k: Number of eigenpairs to compute.  Must satisfy
             ``0 < k < A.shape[0]``.  Defaults to ``6``.
         which: Which eigenpairs to return.  Accepted values:
@@ -310,8 +314,9 @@ def svds(
 
     Args:
         A: Sparse matrix of shape ``(m, n)``.  Must be a
-            :class:`~mlx_sparse.CSRArray` or :class:`~mlx_sparse.COOArray`.
-            Float16 and bfloat16 inputs are promoted to float32.
+            :class:`~mlx_sparse.CSRArray`, :class:`~mlx_sparse.COOArray`, or
+            :class:`~mlx_sparse.CSCArray`.  Float16 and bfloat16 inputs are
+            promoted to float32.
         k: Number of singular triplets to compute.  Must satisfy
             ``0 < k < min(A.shape)``.  Defaults to ``6``.
         which: Which singular values to return.  Accepted values:

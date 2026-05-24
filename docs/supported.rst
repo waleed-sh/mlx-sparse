@@ -264,9 +264,11 @@ Sparse linear algebra
 Linalg GPU coverage notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sparse linalg entrypoints remain CSR/COO-only in this release. CSC solver
-support is intentionally deferred until the solver kernels and symbolic
-factorization paths are designed around CSC rather than hidden CSR conversion.
+Sparse linalg entrypoints accept CSR, COO, and CSC inputs. CSR is the execution
+format, COO and CSC inputs are converted once to canonical CSR at solver entry.
+This keeps the existing Metal Krylov, triangular solve, and permutation kernels
+active without doing repeated CSC scatter-add matvecs inside solver iterations.
+Native CSC-specific direct factorization remains future work.
 
 The table above uses a simplified "CPU + GPU" label. The precise breakdown
 is:

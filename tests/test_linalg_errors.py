@@ -52,6 +52,10 @@ def _coo_2x2():
     )
 
 
+def _csc_2x2():
+    return _coo_2x2().tocsc(canonical=True)
+
+
 def _float16_csr():
     """2×2 CSRArray with float16 data."""
     return ms.csr_array(
@@ -79,6 +83,14 @@ class TestIterativeAsCsr:
         coo = _coo_2x2()
         result = _as_csr(coo)
         assert isinstance(result, ms.CSRArray)
+
+    def test_csc_converts(self):
+        from mlx_sparse.linalg._iterative import _as_csr
+
+        csc = _csc_2x2()
+        result = _as_csr(csc)
+        assert isinstance(result, ms.CSRArray)
+        assert result.has_canonical_format
 
     def test_dense_raises(self):
         from mlx_sparse.linalg._iterative import _as_csr
@@ -283,6 +295,15 @@ class TestSolverAPIErrors:
         x, info = linalg.cg(coo, b, rtol=1e-6, maxiter=50)
         assert info == 0
 
+    def test_cg_accepts_csc_input(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
+        csc = _csc_2x2()
+        b = mx.array([1.0, 2.0], dtype=mx.float32)
+        x, info = linalg.cg(csc, b, rtol=1e-6, maxiter=50)
+        assert info == 0
+        mx.eval(x)
+
     def test_cg_with_x0(self):
         if not extension_available():
             pytest.skip("native extension unavailable")
@@ -315,6 +336,14 @@ class TestEigenAsCsr:
         coo = _coo_2x2()
         result = _as_csr(coo)
         assert isinstance(result, ms.CSRArray)
+
+    def test_csc_converts(self):
+        from mlx_sparse.linalg._eigen import _as_csr
+
+        csc = _csc_2x2()
+        result = _as_csr(csc)
+        assert isinstance(result, ms.CSRArray)
+        assert result.has_canonical_format
 
     def test_dense_raises(self):
         from mlx_sparse.linalg._eigen import _as_csr
@@ -563,6 +592,14 @@ class TestFactorizationsAsCsr:
         result = _as_csr(coo)
         assert isinstance(result, ms.CSRArray)
 
+    def test_csc_converts(self):
+        from mlx_sparse.linalg._factorizations import _as_csr
+
+        csc = _csc_2x2()
+        result = _as_csr(csc)
+        assert isinstance(result, ms.CSRArray)
+        assert result.has_canonical_format
+
     def test_dense_raises(self):
         from mlx_sparse.linalg._factorizations import _as_csr
 
@@ -666,6 +703,18 @@ class TestSparseCholeskyExtended:
         expected = np.linalg.solve(A_dense, [1.0, 2.0])
         np.testing.assert_allclose(np.array(x), expected, rtol=1e-4)
 
+    def test_csc_input(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
+        csc = _csc_2x2()
+        chol = linalg.sparse_cholesky(csc)
+        b = mx.array([1.0, 2.0], dtype=mx.float32)
+        x = chol.solve(b)
+        mx.eval(x)
+        A_dense = np.array([[4.0, 1.0], [1.0, 3.0]])
+        expected = np.linalg.solve(A_dense, [1.0, 2.0])
+        np.testing.assert_allclose(np.array(x), expected, rtol=1e-4)
+
 
 class TestSparseLUExtended:
     def test_shape_property(self):
@@ -713,6 +762,18 @@ class TestSparseLUExtended:
         expected = np.linalg.solve(A_dense, [1.0, 2.0])
         np.testing.assert_allclose(np.array(x), expected, rtol=1e-4)
 
+    def test_splu_accepts_csc_input(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
+        csc = _csc_2x2()
+        lu = linalg.splu(csc)
+        b = mx.array([1.0, 2.0], dtype=mx.float32)
+        x = lu.solve(b)
+        mx.eval(x)
+        A_dense = np.array([[4.0, 1.0], [1.0, 3.0]])
+        expected = np.linalg.solve(A_dense, [1.0, 2.0])
+        np.testing.assert_allclose(np.array(x), expected, rtol=1e-4)
+
 
 class TestSparseOpsExtended:
     def test_vdot_with_coo(self):
@@ -736,6 +797,19 @@ class TestSparseOpsExtended:
         A = np.array([[4.0, 1.0], [1.0, 3.0]])
         expected = float(np.sum(A * A))
         np.testing.assert_allclose(float(np.array(result)), expected, rtol=1e-5)
+
+    def test_dot_and_vdot_with_csc(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
+        csr = _spd_2x2(mx)
+        csc = _csc_2x2()
+        dot_result = linalg.dot(csr, csc)
+        vdot_result = linalg.vdot(csc, csr)
+        mx.eval(dot_result, vdot_result)
+        A = np.array([[4.0, 1.0], [1.0, 3.0]])
+        expected = float(np.sum(A * A))
+        np.testing.assert_allclose(float(np.array(dot_result)), expected, rtol=1e-5)
+        np.testing.assert_allclose(float(np.array(vdot_result)), expected, rtol=1e-5)
 
     def test_vdot_bad_type_raises(self):
         csr = _spd_2x2(mx)

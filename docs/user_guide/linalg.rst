@@ -10,6 +10,10 @@ Design contract
 
 * ``CSRArray`` is the primary execution format.
 * ``COOArray`` inputs are canonicalized to CSR before dispatch.
+* ``CSCArray`` inputs are converted once to canonical CSR before dispatch.
+  This is intentional for the current solver layer: Krylov iterations and
+  triangular solves are row-output workloads, so the existing CSR kernels avoid
+  repeated CSC scatter-add work inside every iteration.
 * Dense MLX arrays are rejected by sparse linalg APIs.
 * Python owns validation and object packaging only, numerical kernels live in
   the native extension.
@@ -29,6 +33,9 @@ Sparse direct factorizations
 ``A = L @ L.T`` for positive-definite real matrices. ``sparse_lu(A)`` computes
 ``P @ A = L @ U`` with sparse CSR factors and row pivoting. ``spsolve(A, b)``
 uses sparse LU and sparse triangular solves.
+
+Direct factorization still produces CSR factors. CSC input support is an input
+format convenience, not a CSC-native supernodal factorization path.
 
 Spectral routines
 -----------------

@@ -342,6 +342,19 @@ class TestAsLinearOperator:
         mx.eval(y)
         np.testing.assert_allclose(np.array(y), [2.0, 3.0], rtol=1e-5)
 
+    def test_from_csc_array_converts_once_to_csr_backing(self):
+        csr = _make_2x2_csr()
+        csc = csr.tocsc(canonical=True)
+        op = aslinearoperator(csc)
+
+        assert isinstance(op, LinearOperator)
+        assert isinstance(op._sparse_array, ms.CSRArray)
+        assert op._sparse_array.has_canonical_format
+        x = mx.array([1.0, 0.0], dtype=mx.float32)
+        y = op @ x
+        mx.eval(y)
+        np.testing.assert_allclose(np.array(y), [2.0, 1.0], rtol=1e-5)
+
     def test_from_tuple_shape_matvec(self):
         fn = lambda x: 2.0 * x
         op = aslinearoperator(((3, 3), fn))
@@ -389,5 +402,5 @@ class TestIterativeAsCsrLinearOperatorBranches:
     def test_matrix_free_linear_operator_is_rejected_by_native_iterative_helpers(self):
         op = LinearOperator((2, 2), matvec=lambda x: x)
 
-        with pytest.raises(TypeError, match="CSRArray"):
+        with pytest.raises(TypeError, match="sparse"):
             _as_csr(op)

@@ -49,9 +49,9 @@ import mlx_sparse as ms
 
 ms.use_gpu()
 
-data = mx.array(np.array([2.0, -1.0, 4.0], dtype=np.float32))
-row = mx.array(np.array([0, 0, 1], dtype=np.int32))
-col = mx.array(np.array([0, 2, 1], dtype=np.int32))
+data = [2.0, -1.0, 4.0]
+row = [0, 0, 1]
+col = [0, 2, 1]
 
 a = ms.coo_array((data, (row, col)), shape=(2, 3)).tocsr(canonical=True)
 x = mx.array(np.array([3.0, 10.0, 7.0], dtype=np.float32))
@@ -63,9 +63,9 @@ at = a.T
 b = mx.array(np.array([1.0, 2.0], dtype=np.float32))
 spd = ms.csr_array(
     (
-        mx.array([4.0, 1.0, 1.0, 3.0], dtype=mx.float32),
-        mx.array([0, 1, 0, 1], dtype=mx.int32),
-        mx.array([0, 2, 4], dtype=mx.int32),
+        [4.0, 1.0, 1.0, 3.0],
+        [0, 1, 0, 1],
+        [0, 2, 4],
     ),
     shape=(2, 2),
     canonical=True,
