@@ -124,14 +124,38 @@ The kernel notes below use a few implementation terms:
 * Batched dense right-hand sides use dedicated native kernels rather than
   flattening through Python.
 * The public helpers accept leading batch dimensions and flatten them only for
-  dispatch; the kernels still see contiguous batches, rows, and RHS columns.
+  dispatch, the kernels still see contiguous batches, rows, and RHS columns.
 * As with the rank-1/rank-2 kernels, short rows use scalar output kernels and
   long rows use threadgroup reductions.
+
+**Metal COO dense products**
+
+* COO products use explicit ``(row, col)`` coordinates and scatter each stored
+  contribution into the dense output.
+
+* ``float32`` matvec/matmul and batched products use ``atomic_float`` updates.
+  This gives high parallelism over nonzeros and RHS columns without converting
+  the structure.
+
+* ``float16``, ``bfloat16``, and ``complex64`` stay native but use a serial
+  scatter kernel on GPU because Metal does not provide compatible atomic add
+  operations for those storage types.
+
+**Metal CSC dense products**
+
+* Forward CSC products walk compressed columns and scatter into output rows.
+  ``float32`` uses atomic scatter-add, other value dtypes use native serial
+  scatter for correctness.
+
+* CSC transpose products are reductions over compressed columns, so they do
+  not need output atomics. Matrix transpose products compute one
+  ``(column, rhs_column)`` dot product per output element.
 
 **Metal csr_transpose**
 
 * The CPU path uses a counting transpose: count destination-row sizes, prefix
   sum to build ``out_indptr``, then fill outputs in source-row order.
+
 * The Metal path counts destination rows in parallel, builds ``out_indptr``,
   then fills each destination row deterministically. This preserves sorted row
   indices in the transposed CSR output.
@@ -140,8 +164,10 @@ The kernel notes below use a few implementation terms:
 
 * ``float32`` transpose matvec uses a parallel scatter-add kernel with
   ``atomic_float`` output updates.
+
 * ``float32`` transpose matmul uses one thread per source row and RHS column,
   again with atomic adds into the transposed output.
+
 * Non-``float32`` transpose products lower through native ``csr_transpose``
   followed by native ``csr_matvec`` / ``csr_matmul``. This is still entirely
   native C++/Metal and avoids NumPy. It is intentional because Metal does not
@@ -153,10 +179,25 @@ The kernel notes below use a few implementation terms:
 * Native sparse-sparse multiplication uses a symbolic pass to determine each
   output row's column set, a prefix sum to allocate compact output buffers, and
   a numeric pass to accumulate values.
+
 * The default implementation performs the structural assembly on the host
   because the output size is data-dependent. A staged Metal implementation is
   available behind ``ms.config.EXPERIMENTAL_METAL_SPGEMM`` for experimentation,
   but the optimized host path remains the default on the current benchmark set.
+
+**COO x COO and CSC x CSC**
+
+* COO sparse-sparse multiplication groups explicit coordinate rows, performs a
+  symbolic count for each output row, allocates compact coordinate buffers, then
+  fills sorted ``(row, col)`` entries and prunes exact zero cancellations.
+
+* CSC sparse-sparse multiplication is column-native: each output column walks
+  the right-hand compressed column and gathers matching left-hand compressed
+  columns. The result is canonical CSC with sorted row indices per column.
+
+* These paths are native C++ host implementations today. They intentionally do
+  not route through CSR, format-specific Metal sparse-sparse kernels remain a
+  future tuning target because the output structure is dynamic.
 
 **CPU backends**
 

@@ -29,10 +29,19 @@ New features
 * Added native CSR x CSR multiplication with a symbolic pass, prefix-sum
   output allocation, and numeric fill pass returning canonical CSR output.
 
+* Added native COO x COO and CSC x CSC sparse-sparse multiplication. The new
+  paths use format-specific symbolic/count passes, prefix allocation, sorted
+  numeric fill, and zero pruning without routing through CSR.
+
 * Added first-class ``CSCArray`` support with explicit constructors,
   validation, repr/metadata flags, COO/CSR conversion paths, dense
   materialization, sorting, duplicate summation, canonicalization, and native
   ``csc_matvec`` / ``csc_matvec_transpose`` entrypoints.
+
+* Added native COO and CSC sparse-dense matrix products for dense vector,
+  dense matrix, batched vector, and batched matrix right-hand sides. ``COOArray
+  @ dense`` and ``CSCArray @ dense`` now dispatch through format-specific
+  C++/Metal primitives instead of converting through CSR.
 
 Improvements
 ~~~~~~~~~~~~
@@ -55,10 +64,19 @@ Improvements
 * Extended JVP/VJP coverage through the new batched sparse-dense primitives,
   including sparse-value and dense-RHS gradients.
 
-* Added dedicated CSC native kernels for the
+* Extended JVP/VJP coverage to COO and CSC sparse-dense products, including
+  batched dense RHS gradients and fixed-output sparse-value VJP kernels.
+
+* Added dedicated CSC native kernels instead of hidden CSR routing for the
   first CSC surface: column-major COO conversion, CSR/CSC conversion,
   dense materialization, per-column sorting, duplicate summation, forward
   matvec scatter-add, and transpose matvec segmented reductions.
+
+* Added dedicated COO and CSC dense-RHS Metal kernels. COO uses coordinate
+  scatter, CSC uses compressed-column scatter for forward products and
+  compressed-column reductions for transpose products. ``float32`` scatter
+  paths use ``atomic_float`` and non-``float32`` scatter paths remain native
+  through serial GPU kernels where Metal lacks compatible atomic add support.
 
 * Broadened native correctness and regression tests against dense MLX and
   SciPy references, including GPU dtype coverage, complex gradients,
@@ -90,9 +108,10 @@ Documentation
 * Added the :doc:`api/configuration` reference page.
 
 * Updated operation, autodiff, device-execution, supported-feature, and
-  performance documentation to explain batched sparse-dense dispatch, atomic
-  scatter-add kernels, native transpose-product lowering, symbolic/numeric
-  CSR x CSR assembly, and dynamic-output synchronization points.
+  performance documentation to explain COO/CSR/CSC batched sparse-dense
+  dispatch, atomic scatter-add kernels, native transpose-product lowering,
+  symbolic/numeric sparse-sparse assembly, and dynamic-output synchronization
+  points.
 
 * Added CSC container, conversion, and native matvec documentation plus a CSC
   notebook covering SciPy interop and CSR/CSC conversion semantics.
@@ -130,7 +149,7 @@ New features
   object accepted throughout the linalg sub-package.  The operator exposes
   :attr:`~mlx_sparse.linalg.LinearOperator.T` (transpose) and
   :attr:`~mlx_sparse.linalg.LinearOperator.H` (Hermitian / conjugate
-  transpose) properties; both propagate the backing
+  transpose) properties, both propagate the backing
   :class:`~mlx_sparse.CSRArray` when available so the native C++/Metal code
   paths remain active.  :func:`mlx_sparse.linalg.aslinearoperator` converts
   a :class:`~mlx_sparse.CSRArray`, :class:`~mlx_sparse.COOArray`, SciPy

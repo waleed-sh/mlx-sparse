@@ -2,28 +2,31 @@ Autodiff
 ========
 
 mlx-sparse integrates with MLX's automatic differentiation system (``mx.grad``,
-``mx.vjp``, ``mx.jvp``) for CSR sparse-dense products. The differentiable
-numerical inputs are the sparse value buffer (``data``) and the dense right-hand
-side. Structural buffers (``indices`` and ``indptr``) are integer topology and
-are intentionally non-differentiable.
+``mx.vjp``, ``mx.jvp``) for COO, CSR, and CSC sparse-dense products. The
+differentiable numerical inputs are the sparse value buffer (``data``) and the
+dense right-hand side. Structural buffers (``row`` / ``col`` / ``indices`` /
+``indptr``) are integer topology and are intentionally non-differentiable.
 
 What is differentiable
 ----------------------
 
 **Implemented and tested:**
 
-* JVP and VJP for sparse values ``data`` in ``A @ x`` and ``A @ X``.
+* JVP and VJP for sparse values ``data`` in ``A @ x`` and ``A @ X`` for COO,
+  CSR, and CSC.
 * JVP and VJP for the dense vector ``x`` in ``A @ x``.
 * JVP and VJP for the dense matrix ``X`` in ``A @ X``.
-* JVP and VJP for explicit batched sparse-dense products,
-  :func:`mlx_sparse.csr_batched_matvec` and
-  :func:`mlx_sparse.csr_batched_matmul`.
+* JVP and VJP for explicit batched sparse-dense products:
+  ``coo_*``, ``csr_*``, and ``csc_*`` batched matvec/matmul helpers.
 * Real dtypes and ``complex64`` on CPU and Metal GPU.
 
 **Not implemented:**
 
 * Gradients with respect to ``indices`` or ``indptr``. They are discrete
   structure, not differentiable values.
+* Autodiff through sparse-sparse ``matmat``. Its output structure is
+  data-dependent and returned as a sparse container, so the differentiable API
+  is restricted to fixed-output sparse-dense products.
 
 Dense-RHS VJP
 -------------
@@ -38,10 +41,9 @@ to ``x`` is:
 where :math:`A^H` is the Hermitian adjoint. For real dtypes this is simply
 ``A.T``. For ``complex64`` the VJP conjugates ``data`` before dispatching the
 transpose primitive, matching MLX's complex VJP convention for dense matmul.
-For ``float32`` on Metal this is implemented as a parallel scatter-add kernel
-using ``atomic_float`` output updates. Other GPU value dtypes lower through
-native ``csr_transpose`` and ``csr_matvec`` so the implementation stays native
-without relying on unsupported complex or low-precision atomic adds.
+CSR uses native transpose-product kernels, COO reuses the coordinate product
+with swapped ``row``/``col`` buffers, CSC uses its compressed-column transpose
+reduction path. These are native paths, not hidden dense materializations.
 
 For the matmul case ``Y = A @ X``, the VJP with respect to ``X`` is:
 
@@ -49,9 +51,12 @@ For the matmul case ``Y = A @ X``, the VJP with respect to ``X`` is:
 
    \overline{X} = A^H \overline{Y}
 
-which dispatches to the transpose matmul primitive. The ``float32`` Metal path
-uses atomic scatter-add over source rows and RHS columns. Other value dtypes
-lower through native ``csr_transpose`` followed by ``csr_matmul``.
+which dispatches to the format-native transpose matmul primitive. CSR and CSC
+have dedicated compressed transpose products, COO reuses its coordinate kernel
+with swapped topology. The ``float32`` Metal scatter paths use
+``atomic_float`` output updates where the format requires scatter. Other value
+dtypes stay native but use serial scatter where Metal lacks compatible atomic
+adds.
 
 Both operations have CPU and Metal implementations for all supported value
 dtypes.
@@ -60,7 +65,10 @@ Sparse-value VJP
 ----------------
 
 For the matvec case, each stored value ``data[p]`` belongs to exactly one row
-``r`` and column ``c = indices[p]``. The VJP with respect to that value is:
+``r`` and column ``c``. For CSR, ``r`` is implicit in ``indptr`` and
+``c = indices[p]``. For CSC, ``c`` is implicit in ``indptr`` and
+``r = indices[p]``. For COO, both coordinates are explicit. The VJP with
+respect to that value is:
 
 .. math::
 
@@ -93,14 +101,13 @@ have the same device and dtype coverage as the forward operation.
 Batched RHS
 -----------
 
-For batched vector RHS ``X`` with shape ``(..., n_cols)``,
-:func:`mlx_sparse.csr_batched_matvec` computes ``A @ X[b]`` for every leading
-batch element and returns ``(..., n_rows)``. For batched matrix RHS
-``(..., n_cols, k)``, :func:`mlx_sparse.csr_batched_matmul` returns
-``(..., n_rows, k)``. Their JVP and VJP rules flatten the leading batch
-dimensions only inside the native primitive, then reshape the gradients back to
-the user's batch shape. Sparse-value VJPs reuse the same fixed-output
-``csr_matmul_data_vjp`` kernel over the flattened RHS/cotangent columns, and
+For batched vector RHS ``X`` with shape ``(..., n_cols)``, the explicit
+batched matvec helpers compute ``A @ X[b]`` for every leading batch element
+and return ``(..., n_rows)``. For batched matrix RHS ``(..., n_cols, k)``, the
+batched matmul helpers return ``(..., n_rows, k)``. Their JVP and VJP rules
+flatten the leading batch dimensions only inside the native primitive, then
+reshape the gradients back to the user's batch shape. Sparse-value VJPs reuse
+fixed-output data-VJP kernels over the flattened RHS/cotangent columns, and
 dense-RHS VJPs reuse the native transpose-product path.
 
 Using ``mx.grad``
@@ -170,8 +177,9 @@ gradient:
 Complex autodiff
 ----------------
 
-``complex64`` forward and autodiff paths are implemented for CSR matvec and
-matmul. The VJP rules use Hermitian adjoints: dense-RHS gradients conjugate
-sparse values, and sparse-value gradients conjugate the dense RHS. The test
-suite compares complex sparse gradients, ``mx.vjp``, and ``mx.jvp`` directly
-against equivalent dense MLX matmul computations.
+``complex64`` forward and autodiff paths are implemented for COO, CSR, and CSC
+matvec and dense-matrix matmul. The VJP rules use Hermitian adjoints:
+dense-RHS gradients conjugate sparse values, and sparse-value gradients
+conjugate the dense RHS. The test suite compares complex sparse gradients,
+``mx.vjp``, and ``mx.jvp`` directly against equivalent dense MLX matmul
+computations.

@@ -33,6 +33,7 @@ CSRArray
    .. autosummary::
 
       ~CSRArray.todense
+      ~CSRArray.tocsc
       ~CSRArray.sort_indices
       ~CSRArray.sum_duplicates
       ~CSRArray.canonicalize
@@ -40,12 +41,46 @@ CSRArray
       ~CSRArray.conj
       ~CSRArray.conjugate
 
+CSCArray
+--------
+
+.. autoclass:: CSCArray
+   :members:
+   :undoc-members: False
+   :special-members: __matmul__
+   :show-inheritance:
+
+   .. rubric:: Properties
+
+   .. autosummary::
+
+      ~CSCArray.nnz
+      ~CSCArray.dtype
+      ~CSCArray.index_dtype
+      ~CSCArray.ndim
+      ~CSCArray.T
+      ~CSCArray.H
+
+   .. rubric:: Methods
+
+   .. autosummary::
+
+      ~CSCArray.todense
+      ~CSCArray.tocsr
+      ~CSCArray.sort_indices
+      ~CSCArray.sum_duplicates
+      ~CSCArray.canonicalize
+      ~CSCArray.transpose
+      ~CSCArray.conj
+      ~CSCArray.conjugate
+
 COOArray
 --------
 
 .. autoclass:: COOArray
    :members:
    :undoc-members: False
+   :special-members: __matmul__
    :show-inheritance:
 
    .. rubric:: Properties
@@ -62,6 +97,7 @@ COOArray
    .. autosummary::
 
       ~COOArray.tocsr
+      ~COOArray.tocsc
       ~COOArray.todense
 
 Utility functions

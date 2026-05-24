@@ -110,9 +110,14 @@ Every Metal GPU kernel is compiled for all four value dtypes (``float32``,
 
 * ``csr_matvec``
 * ``csr_matmul``
+* ``coo_matvec`` / ``coo_matmul`` and batched variants
+* ``csc_matvec`` / ``csc_matmul`` and batched variants
 * ``coo_tocsr``
+* ``coo_tocsc``
 * ``csr_todense``
+* ``csc_todense``
 * ``csr_sort_indices``
+* ``csc_sort_indices``
 * ``csr_transpose``
 
 Dynamic-output helpers such as ``canonicalize()``, ``fromdense()``, and

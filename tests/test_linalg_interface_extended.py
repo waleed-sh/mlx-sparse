@@ -25,6 +25,7 @@ from mlx_sparse.linalg._interface import LinearOperator, aslinearoperator
 from mlx_sparse.linalg._iterative import _as_csr
 from mlx_sparse.linalg._utils import ensure_array
 
+
 class TestEnsureArray:
     def test_passthrough_mx_array_no_dtype(self):
         x = mx.array([1.0, 2.0], dtype=mx.float32)
@@ -278,7 +279,6 @@ class TestLinearOperatorAdjoints:
         assert op.H._sparse_array is not None
         assert op.T.shape == (2, 2)
         assert op.H.shape == (2, 2)
-
 
 
 class TestLinearOperatorMatmul:

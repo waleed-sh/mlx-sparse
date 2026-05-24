@@ -42,8 +42,8 @@ mlx-sparse follows this model for fixed-output numerical kernels:
   nodes to the MLX graph and do not materialize values immediately.
 * **Dynamic-output structural operations must discover output sizes.**
   ``fromdense()``, ``sum_duplicates()`` / ``canonicalize()``, and
-  sparse-sparse ``CSR @ CSR`` run native counting or symbolic work first, then
-  synchronize compact counts or structure so final CSR buffers can be
+  sparse-sparse ``matmat`` run native counting or symbolic work first, then
+  synchronize compact counts or structure so final sparse buffers can be
   allocated.
 * **Full validation (``validate="full"``) also reads values.** It must inspect
   ``indptr`` and ``indices`` to check bounds, so it calls ``mx.eval`` on those
@@ -80,6 +80,12 @@ Which operations run on GPU
    * - ``csr_matmul`` (all value dtypes, int32 and int64)
      - Yes
      - Yes
+   * - ``coo_matvec`` / ``coo_matmul`` (all value dtypes, int32 and int64)
+     - Yes
+     - Yes
+   * - ``csc_matvec`` / ``csc_matmul`` (all value dtypes, int32 and int64)
+     - Yes
+     - Yes
    * - ``coo_tocsr`` (all value dtypes, int32 and int64)
      - Yes
      - Yes
@@ -94,15 +100,18 @@ Which operations run on GPU
      - Yes
    * - ``csr_sum_duplicates`` / ``canonicalize``
      - Yes
-     - Yes (staged count/prefix/fill; synchronizes row counts)
+     - Yes (staged count/prefix/fill, synchronizes row counts)
    * - ``fromdense``
      - Yes
-     - Yes (staged count/prefix/fill; synchronizes row counts)
+     - Yes (staged count/prefix/fill, synchronizes row counts)
    * - Sparse-sparse ``CSR @ CSR``
      - Yes
-     - Experimental via ``EXPERIMENTAL_METAL_SPGEMM``; host native path is
+     - Experimental via ``EXPERIMENTAL_METAL_SPGEMM``, host native path is
        default.
-   * - Batched ``csr_matvec`` / ``csr_matmul``
+   * - Sparse-sparse ``COO @ COO`` / ``CSC @ CSC``
+     - Yes
+     - Not yet. Native host symbolic/numeric paths are used.
+   * - Batched sparse-dense products for COO, CSR, and CSC
      - Yes
      - Yes
    * - Autodiff (JVP / VJP, sparse values and dense RHS)
@@ -111,9 +120,12 @@ Which operations run on GPU
 
 When a GPU primitive encounters an unsupported configuration, it raises a
 ``RuntimeError`` with a clear message. Some public operations intentionally
-lower to other native primitives on GPU; for example complex transpose matvec
-uses ``csr_transpose`` followed by ``csr_matvec`` rather than a direct complex
-atomic scatter kernel.
+lower to other native primitives on GPU, for example some non-``float32`` CSR
+transpose products use ``csr_transpose`` followed by the ordinary product
+rather than a direct complex or low-precision atomic scatter kernel. COO and
+CSC scatter products keep native GPU coverage, ``float32`` uses atomic
+scatter-add, while other value dtypes use native serial scatter where Metal
+lacks compatible atomic adds.
 
 Typical workflow: construct on CPU, multiply on GPU
 ----------------------------------------------------
@@ -124,7 +136,7 @@ The most common pattern for large-scale workloads is:
    can run on CPU or GPU, but they may synchronize counts to allocate compact
    output buffers.
 2. Keep the resulting CSR buffers and dense RHS arrays on the target device.
-3. Run repeated ``csr_matvec`` / ``csr_matmul`` / batched products on GPU.
+3. Run repeated COO/CSR/CSC matvec, matmul, and batched products on GPU.
 
 .. code-block:: python
 

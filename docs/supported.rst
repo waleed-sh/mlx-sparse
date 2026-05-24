@@ -84,7 +84,7 @@ Constructors
      - Done
      - Converts existing sparse, SciPy sparse, dense MLX, NumPy, or Python
        rank-2 array-like inputs. Existing CSR/CSC inputs are preserved unless
-       a dtype cast is requested; dense and SciPy inputs default to CSR.
+       a dtype cast is requested, dense and SciPy inputs default to CSR.
 
 Conversions and structural operations
 --------------------------------------
@@ -154,7 +154,7 @@ Conversions and structural operations
      - Hermitian (conjugate) transpose.
    * - ``CSCArray.transpose()`` / ``.T`` / ``.H``
      - Done
-     - ``.T`` is a zero-copy CSRArray view of the transposed structure;
+     - ``.T`` is a zero-copy CSRArray view of the transposed structure,
        ``.H`` conjugates values first.
 
 Sparse-dense arithmetic
@@ -173,7 +173,7 @@ Sparse-dense arithmetic
        long rows on Metal.
    * - ``csc_matvec`` / ``csc_matvec_transpose``
      - Done
-     - Native CSC kernels. Forward matvec is column scatter-add; transpose
+     - Native CSC kernels. Forward matvec is column scatter-add, transpose
        matvec is segmented column reduction.
    * - ``csr_matmul`` (all value dtypes, int32 and int64)
      - Done
@@ -187,6 +187,14 @@ Sparse-dense arithmetic
      - Done
      - Native symbolic pass, prefix-sum allocation, and numeric pass returning
        canonical CSR. Dynamic output size requires host synchronization.
+   * - Sparse-sparse multiplication (``COOArray @ COOArray``)
+     - Done
+     - Native coordinate-row symbolic/count pass, prefix allocation, sorted
+       numeric fill, and zero pruning returning canonical COO.
+   * - Sparse-sparse multiplication (``CSCArray @ CSCArray``)
+     - Done
+     - Native compressed-column symbolic/count pass, prefix allocation, sorted
+       numeric fill, and zero pruning returning canonical CSC.
    * - Scalar multiply (``alpha * A``)
      - Not yet
      - Can be approximated with ``ms.csr_array((alpha * data, ...), ...)``.
@@ -215,7 +223,7 @@ Sparse linear algebra
      - Done
      - CPU + GPU
      - Each restart's Arnoldi step dispatches the ``csr_arnoldi`` Metal
-       kernel; convergence bookkeeping and the small least-squares solve
+       kernel, convergence bookkeeping and the small least-squares solve
        run on CPU.
    * - ``linalg.minres``
      - Done
@@ -328,6 +336,10 @@ Automatic differentiation
      - Done
      - Native batched matvec/matmul primitives support sparse-value and
        dense-RHS differentiation.
+   * - VJP/JVP through sparse-sparse ``matmat``
+     - Not planned for v0.1
+     - Output topology is data-dependent and returned as a sparse container.
+       Fixed-output sparse-dense products are the differentiable path.
    * - ``vmap`` over sparse matrices
      - Not planned
      - Batch of sparse matrices is an unusual use case. Deferred.
@@ -350,6 +362,16 @@ compact buffers.
    * - ``csr_matvec``
      - All value and index dtypes
      - Scalar row kernel plus threadgroup vector reduction for long rows
+   * - ``coo_matvec`` / ``coo_matmul``
+     - All value and index dtypes
+     - Native coordinate scatter products. ``float32`` uses atomic
+       scatter-add, other value dtypes use native serial scatter.
+   * - ``coo_batched_matvec`` / ``coo_batched_matmul``
+     - All value and index dtypes
+     - Native batched coordinate scatter kernels
+   * - ``coo_matmul_data_vjp``
+     - All value and index dtypes
+     - Fixed-output sparse-value VJP over explicit coordinates
    * - ``csr_batched_matvec``
      - All value and index dtypes
      - Native batched dense-vector RHS kernel
@@ -365,6 +387,17 @@ compact buffers.
      - Forward ``float32`` matvec uses atomic column scatter-add, other
        forward GPU dtypes use native serial scatter. Transpose matvec uses
        scalar or threadgroup vector column reductions.
+   * - ``csc_matmul`` / ``csc_matmul_transpose``
+     - All value and index dtypes
+     - Forward ``float32`` matmul uses atomic column scatter-add, other
+       forward GPU dtypes use native serial scatter. Transpose matmul uses
+       compressed-column dot products.
+   * - ``csc_batched_matvec`` / ``csc_batched_matmul``
+     - All value and index dtypes
+     - Native batched compressed-column dense RHS kernels
+   * - ``csc_matmul_data_vjp``
+     - All value and index dtypes
+     - Fixed-output sparse-value VJP over compressed columns
    * - ``csr_matmul``
      - All value and index dtypes
      - Scalar element kernel plus threadgroup vector reduction for long rows
@@ -440,17 +473,22 @@ compact buffers.
      - All value and index dtypes
      - Optimized host path by default, experimental staged Metal path behind
        ``EXPERIMENTAL_METAL_SPGEMM``
+   * - ``coo_matmat`` / ``csc_matmat``
+     - Native host path
+     - Dynamic-output symbolic/numeric sparse-sparse products for COO and CSC.
+       They do not route through CSR, Metal sparse-sparse kernels are not
+       enabled yet for these formats.
 
 Known limitations
 -----------------------------
 
 * GPU availability depends on the MLX and macOS Metal runtime.
 * Dynamic-output helpers (``fromdense()``, ``canonicalize()``, dense/SciPy
-  construction, and ``CSR @ CSR``) synchronize compact row counts or structure
-  to host before allocating final output buffers.
+  construction, and sparse-sparse ``matmat``) synchronize compact counts or
+  structure to host before allocating final output buffers.
 * CSC currently covers construction, conversion, canonicalization, dense
-  materialization, and dense-vector products. CSC dense-matrix matmul,
-  sparse-sparse matmul, and linalg solver integration are intentionally not
+  materialization, dense vector/matrix products including batched dense RHS,
+  and same-format sparse-sparse matmul. CSC linalg solver integration is not
   implicit yet.
 * Sparse solver, factorization, and spectral kernels are real-valued.
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before

@@ -26,11 +26,11 @@ sparse values and dense operands works with ``mx.grad`` on both CPU and GPU.
 
    ms.use_gpu()
 
-   # Assemble a sparse matrix in COO format, then convert to CSR.
+   # Assemble a sparse matrix directly in COO format.
    data = mx.array(np.array([2.0, -1.0, 4.0], dtype=np.float32))
    row = mx.array(np.array([0, 0, 1], dtype=np.int32))
    col = mx.array(np.array([0, 2, 1], dtype=np.int32))
-   A = ms.coo_array((data, (row, col)), shape=(2, 3)).tocsr(canonical=True)
+   A = ms.coo_array((data, (row, col)), shape=(2, 3))
 
    x = mx.array(np.array([3.0, 10.0, 7.0], dtype=np.float32))
    y = A @ x  # sparse-dense product, lazy
@@ -45,14 +45,15 @@ Key characteristics
   operations return new instances without in-place mutation.
 * **Lazy execution**: sparse operations add nodes to MLX's computation graph.
   No ``mx.eval`` is called inside any sparse operation.
-* **Metal GPU kernels**: CSR matvec/matmul and CSC vector products dispatch
+* **Metal GPU kernels**: COO, CSR, and CSC sparse-dense products dispatch
   through MLX's Metal backend for supported value and index dtypes. No separate
   command queue or synchronization point.
 * **CPU backends**: all operations have C++ CPU implementations. Conversions,
   transpose, and canonicalization run on CPU or GPU.
 * **Autodiff**: ``mx.grad`` / ``mx.vjp`` / ``mx.jvp`` work for sparse values
-  and dense operands of CSR matvec and matmul on both CPU and GPU, including
-  ``complex64``.
+  and dense operands of COO, CSR, and CSC sparse-dense products on both CPU and
+  GPU, including ``complex64`` where the corresponding forward primitive
+  supports it.
 * **Value dtypes**: ``float32``, ``float16``, ``bfloat16``, and ``complex64``
   on CPU and Metal GPU.
 * **Index dtypes**: ``int32`` and ``int64``. Mixed dtypes are rejected at

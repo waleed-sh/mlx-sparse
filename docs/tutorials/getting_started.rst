@@ -57,8 +57,10 @@ entries and contributes nothing to ``nnz``.
 Step 2: convert to CSR and canonicalize
 -----------------------------------------
 
-Before running products, convert to CSR. Pass ``canonical=True`` to sort
-column indices and sum duplicates in one call. For this matrix there are no
+COO can run native sparse-dense products directly. This tutorial converts to
+CSR here to show the compressed row layout and canonicalization path used by
+row-oriented products and solvers. Pass ``canonical=True`` to sort column
+indices and sum duplicates in one call. For this matrix there are no
 duplicates, so the nnz stays at 5.
 
 .. code-block:: python
