@@ -14,6 +14,8 @@
 
 #include "sparse/csc_matvec_transpose/csc_matvec_transpose.h"
 
+#include "sparse/csc_matmul_data_vjp/csc_matmul_data_vjp.h"
+#include "sparse/csc_matvec/csc_matvec.h"
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
@@ -45,6 +47,15 @@ public:
 
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "CSCMatVecTranspose"; }
 
@@ -129,6 +140,69 @@ void CSCMatVecTranspose::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_CSC_MATVEC_T_VALUE
 
   throw std::runtime_error("csc_matvec_transpose unsupported value dtype.");
+}
+
+std::vector<mx::array>
+CSCMatVecTranspose::jvp(const std::vector<mx::array> &primals,
+                        const std::vector<mx::array> &tangents,
+                        const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    if (argnums[i] == 0) {
+      terms.push_back(csc_matvec_transpose(tangents[i], primals[1], primals[2],
+                                           primals[3], n_rows_, n_cols_,
+                                           stream()));
+    } else if (argnums[i] == 3) {
+      terms.push_back(csc_matvec_transpose(primals[0], primals[1], primals[2],
+                                           tangents[i], n_rows_, n_cols_,
+                                           stream()));
+    } else {
+      throw std::runtime_error(
+          "CSCMatVecTranspose JVP is implemented only for data and dense RHS.");
+    }
+  }
+  if (terms.empty()) {
+    throw std::runtime_error(
+        "CSCMatVecTranspose JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array>
+CSCMatVecTranspose::vjp(const std::vector<mx::array> &primals,
+                        const std::vector<mx::array> &cotangents,
+                        const std::vector<int> &argnums,
+                        const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    if (argnum == 0) {
+      auto x = primals[3].dtype() == mx::complex64
+                   ? mx::conjugate(primals[3], stream())
+                   : primals[3];
+      auto rhs_matrix =
+          mx::reshape(cotangents[0], mx::Shape{n_cols_, 1}, stream());
+      auto cotangent_matrix = mx::reshape(x, mx::Shape{n_rows_, 1}, stream());
+      vjps.push_back(csc_matmul_data_vjp(primals[1], primals[2], rhs_matrix,
+                                         cotangent_matrix, n_rows_, n_cols_,
+                                         stream()));
+    } else if (argnum == 3) {
+      auto data = primals[0].dtype() == mx::complex64
+                      ? mx::conjugate(primals[0], stream())
+                      : primals[0];
+      vjps.push_back(csc_matvec(data, primals[1], primals[2], cotangents[0],
+                                n_rows_, n_cols_, stream()));
+    } else {
+      throw std::runtime_error(
+          "CSCMatVecTranspose VJP is implemented only for data and dense RHS.");
+    }
+  }
+  return vjps;
 }
 
 #ifdef _METAL_

@@ -1,0 +1,20 @@
+// Copyright (c) 2026 The mlx-sparse contributors - All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+
+#pragma once
+
+#include "mlx/array.h"
+#include "mlx/stream.h"
+#include "mlx/utils.h"
+
+namespace mlx_sparse {
+
+namespace mx = mlx::core;
+
+mx::array csc_matmul_data_vjp(const mx::array &indices, const mx::array &indptr,
+                              const mx::array &rhs, const mx::array &cotangent,
+                              int n_rows, int n_cols,
+                              mx::StreamOrDevice s = {});
+
+} // namespace mlx_sparse

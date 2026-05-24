@@ -17,8 +17,17 @@
 #include <nanobind/stl/tuple.h>
 
 #include "linalg/linalg.h"
+#include "sparse/coo_batched_matmul/coo_batched_matmul.h"
+#include "sparse/coo_matmat/coo_matmat.h"
+#include "sparse/coo_matmul/coo_matmul.h"
+#include "sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.h"
 #include "sparse/coo_tocsc/coo_tocsc.h"
 #include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/csc_batched_matmul/csc_batched_matmul.h"
+#include "sparse/csc_matmat/csc_matmat.h"
+#include "sparse/csc_matmul/csc_matmul.h"
+#include "sparse/csc_matmul_data_vjp/csc_matmul_data_vjp.h"
+#include "sparse/csc_matmul_transpose/csc_matmul_transpose.h"
 #include "sparse/csc_matvec/csc_matvec.h"
 #include "sparse/csc_matvec_transpose/csc_matvec_transpose.h"
 #include "sparse/csc_sort_indices/csc_sort_indices.h"
@@ -238,6 +247,16 @@ NB_MODULE(_ext, m) {
       "Multiply CSR buffers by a dense vector.");
 
   m.def(
+      "coo_matvec",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, const mlx_sparse::mx::array &x,
+         int n_rows, int n_cols) {
+        return mlx_sparse::coo_matvec(data, row, col, x, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "x"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply COO buffers by a dense vector.");
+
+  m.def(
       "csc_matvec",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -259,6 +278,29 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
       "Multiply CSR buffers by a batch of dense vectors.");
+
+  m.def(
+      "coo_batched_matvec",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::coo_batched_matvec(data, row, col, rhs, n_rows,
+                                              n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply COO buffers by a batch of dense vectors.");
+
+  m.def(
+      "csc_batched_matvec",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csc_batched_matvec(data, indices, indptr, rhs,
+                                              n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply CSC buffers by a batch of dense vectors.");
 
   m.def(
       "csr_matvec_transpose",
@@ -297,6 +339,28 @@ NB_MODULE(_ext, m) {
       "Multiply CSR buffers by a dense matrix.");
 
   m.def(
+      "coo_matmul",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::coo_matmul(data, row, col, rhs, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply COO buffers by a dense matrix.");
+
+  m.def(
+      "csc_matmul",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csc_matmul(data, indices, indptr, rhs, n_rows,
+                                      n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply CSC buffers by a dense matrix.");
+
+  m.def(
       "csr_batched_matmul",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -309,6 +373,29 @@ NB_MODULE(_ext, m) {
       "Multiply CSR buffers by a batch of dense matrices.");
 
   m.def(
+      "coo_batched_matmul",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::coo_batched_matmul(data, row, col, rhs, n_rows,
+                                              n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply COO buffers by a batch of dense matrices.");
+
+  m.def(
+      "csc_batched_matmul",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csc_batched_matmul(data, indices, indptr, rhs,
+                                              n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply CSC buffers by a batch of dense matrices.");
+
+  m.def(
       "csr_matmul_transpose",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -319,6 +406,76 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
       "Multiply the transpose of CSR buffers by a dense matrix.");
+
+  m.def(
+      "csc_matmul_transpose",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csc_matmul_transpose(data, indices, indptr, rhs,
+                                                n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply the transpose of CSC buffers by a dense matrix.");
+
+  m.def(
+      "coo_matmul_data_vjp",
+      [](const mlx_sparse::mx::array &row, const mlx_sparse::mx::array &col,
+         const mlx_sparse::mx::array &rhs,
+         const mlx_sparse::mx::array &cotangent, int n_rows, int n_cols) {
+        return mlx_sparse::coo_matmul_data_vjp(row, col, rhs, cotangent, n_rows,
+                                               n_cols);
+      },
+      "row"_a, "col"_a, "rhs"_a, "cotangent"_a, "n_rows"_a, "n_cols"_a,
+      "Compute COO sparse-value VJP for sparse-dense products.");
+
+  m.def(
+      "csc_matmul_data_vjp",
+      [](const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         const mlx_sparse::mx::array &cotangent, int n_rows, int n_cols) {
+        return mlx_sparse::csc_matmul_data_vjp(indices, indptr, rhs, cotangent,
+                                               n_rows, n_cols);
+      },
+      "indices"_a, "indptr"_a, "rhs"_a, "cotangent"_a, "n_rows"_a, "n_cols"_a,
+      "Compute CSC sparse-value VJP for sparse-dense products.");
+
+  m.def(
+      "coo_matmat",
+      [](const mlx_sparse::mx::array &lhs_data,
+         const mlx_sparse::mx::array &lhs_row,
+         const mlx_sparse::mx::array &lhs_col,
+         const mlx_sparse::mx::array &rhs_data,
+         const mlx_sparse::mx::array &rhs_row,
+         const mlx_sparse::mx::array &rhs_col, int lhs_n_rows, int lhs_n_cols,
+         int rhs_n_rows, int rhs_n_cols) {
+        return mlx_sparse::coo_matmat(lhs_data, lhs_row, lhs_col, rhs_data,
+                                      rhs_row, rhs_col, lhs_n_rows, lhs_n_cols,
+                                      rhs_n_rows, rhs_n_cols);
+      },
+      "lhs_data"_a, "lhs_row"_a, "lhs_col"_a, "rhs_data"_a, "rhs_row"_a,
+      "rhs_col"_a, "lhs_n_rows"_a, "lhs_n_cols"_a, "rhs_n_rows"_a,
+      "rhs_n_cols"_a,
+      "Multiply two COO matrices into a canonical COO representation.");
+
+  m.def(
+      "csc_matmat",
+      [](const mlx_sparse::mx::array &lhs_data,
+         const mlx_sparse::mx::array &lhs_indices,
+         const mlx_sparse::mx::array &lhs_indptr,
+         const mlx_sparse::mx::array &rhs_data,
+         const mlx_sparse::mx::array &rhs_indices,
+         const mlx_sparse::mx::array &rhs_indptr, int lhs_n_rows,
+         int lhs_n_cols, int rhs_n_rows, int rhs_n_cols) {
+        return mlx_sparse::csc_matmat(
+            lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices,
+            rhs_indptr, lhs_n_rows, lhs_n_cols, rhs_n_rows, rhs_n_cols);
+      },
+      "lhs_data"_a, "lhs_indices"_a, "lhs_indptr"_a, "rhs_data"_a,
+      "rhs_indices"_a, "rhs_indptr"_a, "lhs_n_rows"_a, "lhs_n_cols"_a,
+      "rhs_n_rows"_a, "rhs_n_cols"_a,
+      "Multiply two CSC matrices into a canonical CSC representation.");
 
   m.def(
       "csr_matmat",
