@@ -20,6 +20,7 @@ import mlx.core as mx
 import numpy as np
 
 import mlx_sparse._native as _native
+from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._host import to_mx, to_numpy
 from mlx_sparse._typing import INDEX_DTYPES, VALUE_DTYPES, Shape2D
@@ -460,7 +461,8 @@ def from_scipy(
     """Convert a SciPy sparse matrix or sparse array to mlx-sparse.
 
     Any SciPy sparse format is accepted. ``format="csr"`` returns a
-    :class:`~mlx_sparse.CSRArray`, ``format="coo"`` returns a
+    :class:`~mlx_sparse.CSRArray`, ``format="csc"`` returns a
+    :class:`~mlx_sparse.CSCArray`, and ``format="coo"`` returns a
     :class:`~mlx_sparse.COOArray`. The conversion preserves supported
     ``float32``, ``float16``, and ``complex64`` values. Other real floating
     dtypes, including SciPy's default ``float64``, are cast to ``float32``
@@ -468,7 +470,8 @@ def from_scipy(
 
     Args:
         matrix: A ``scipy.sparse`` matrix or array.
-        format: Output sparse format: ``"csr"`` (default) or ``"coo"``.
+        format: Output sparse format: ``"csr"`` (default), ``"csc"``, or
+            ``"coo"``.
         dtype: Optional MLX value dtype. Must be one of ``mx.float32``,
             ``mx.float16``, ``mx.bfloat16``, or ``mx.complex64``.
         index_dtype: Integer dtype for sparse indices. Must be ``mx.int32`` or
@@ -477,12 +480,12 @@ def from_scipy(
             before exporting buffers.
 
     Returns:
-        A ``CSRArray`` or ``COOArray``.
+        A ``CSRArray``, ``CSCArray``, or ``COOArray``.
 
     Raises:
         TypeError: If SciPy is not installed, ``matrix`` is not sparse, or a
             dtype is unsupported.
-        ValueError: If ``format`` is not ``"csr"`` or ``"coo"``.
+        ValueError: If ``format`` is not ``"csr"``, ``"csc"``, or ``"coo"``.
     """
     try:
         import scipy.sparse as sp
@@ -496,11 +499,38 @@ def from_scipy(
         )
 
     out_format = format.lower()
-    if out_format not in {"csr", "coo"}:
-        raise ValueError("format must be 'csr' or 'coo'.")
+    if out_format not in {"csr", "csc", "coo"}:
+        raise ValueError("format must be 'csr', 'csc', or 'coo'.")
 
     index_dtype = _normalize_index_dtype(index_dtype)
     index_np_dtype = _numpy_index_dtype(index_dtype)
+
+    if out_format == "csc":
+        csc = matrix.tocsc(copy=True)
+        if canonical:
+            csc.sum_duplicates()
+            csc.sort_indices()
+
+        value_dtype = (
+            _infer_value_dtype_from_numpy(np.asarray(csc.data))
+            if dtype is None
+            else _normalize_value_dtype(dtype)
+        )
+        value_np_dtype = _numpy_value_dtype(value_dtype)
+        shape = normalize_shape(csc.shape)
+
+        return CSCArray(
+            data=to_mx(np.asarray(csc.data, dtype=value_np_dtype), dtype=value_dtype),
+            indices=to_mx(
+                np.asarray(csc.indices, dtype=index_np_dtype), dtype=index_dtype
+            ),
+            indptr=to_mx(
+                np.asarray(csc.indptr, dtype=index_np_dtype), dtype=index_dtype
+            ),
+            shape=shape,
+            sorted_indices=bool(canonical),
+            has_canonical_format=bool(canonical),
+        )
 
     if canonical or out_format == "csr":
         csr = matrix.tocsr(copy=True)
@@ -550,10 +580,11 @@ def asarray(
     threshold: float = 0.0,
     dtype=None,
     index_dtype=mx.int32,
-) -> CSRArray:
-    """Convert common sparse or dense inputs to a CSRArray.
+) -> CSRArray | CSCArray:
+    """Convert common sparse or dense inputs to a sparse array.
 
-    Existing :class:`~mlx_sparse.CSRArray` instances are returned unchanged
+    Existing :class:`~mlx_sparse.CSRArray` and :class:`~mlx_sparse.CSCArray`
+    instances are returned unchanged
     unless ``dtype`` requests a value cast. :class:`~mlx_sparse.COOArray`
     instances are converted with ``tocsr(canonical=True)``. SciPy sparse
     matrices/arrays route through :func:`from_scipy`, dense MLX, NumPy, and
@@ -567,11 +598,23 @@ def asarray(
         index_dtype: Target index dtype for newly constructed sparse arrays.
 
     Returns:
-        A canonical ``CSRArray``.
+        Existing ``CSRArray`` or ``CSCArray`` inputs are preserved. Other
+        inputs return a canonical ``CSRArray``.
     """
     from mlx_sparse._coo import COOArray
 
     dtype = None if dtype is None else _normalize_value_dtype(dtype)
+    if isinstance(x, CSCArray):
+        if dtype is None or x.data.dtype == dtype:
+            return x
+        return CSCArray(
+            data=x.data.astype(dtype),
+            indices=x.indices,
+            indptr=x.indptr,
+            shape=x.shape,
+            sorted_indices=x.sorted_indices,
+            has_canonical_format=x.has_canonical_format,
+        )
     if isinstance(x, CSRArray):
         if dtype is None or x.data.dtype == dtype:
             return x

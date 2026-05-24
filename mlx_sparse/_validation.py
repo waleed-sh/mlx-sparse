@@ -102,6 +102,37 @@ def validate_csr_metadata(
         )
 
 
+def validate_csc_metadata(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> None:
+    check_rank1("CSCArray.data", data)
+    check_rank1("CSCArray.indices", indices)
+    check_rank1("CSCArray.indptr", indptr)
+    check_value_dtype("CSCArray.data", data)
+    check_index_dtype("CSCArray.indices", indices)
+    check_index_dtype("CSCArray.indptr", indptr)
+
+    if indices.dtype != indptr.dtype:
+        raise TypeError(
+            "CSCArray indices and indptr must have the same dtype, "
+            f"got {indices.dtype} and {indptr.dtype}."
+        )
+    if data.shape[0] != indices.shape[0]:
+        raise ValueError(
+            "CSCArray data and indices must have the same length, "
+            f"got {data.shape[0]} and {indices.shape[0]}."
+        )
+    expected_indptr = shape[1] + 1
+    if indptr.shape[0] != expected_indptr:
+        raise ValueError(
+            "CSCArray indptr must have shape (n_cols + 1,), "
+            f"got {indptr.shape} for n_cols={shape[1]}."
+        )
+
+
 def validate_csr_values(
     indices: mx.array,
     indptr: mx.array,
@@ -125,6 +156,32 @@ def validate_csr_values(
             raise ValueError(
                 "CSRArray indices must be in bounds for n_cols="
                 f"{shape[1]}, got min={min_index}, max={max_index}."
+            )
+
+
+def validate_csc_values(
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    nnz: int,
+) -> None:
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    if indptr_np[0] != 0:
+        raise ValueError(f"CSCArray indptr[0] must be 0, got {indptr_np[0]}.")
+    if indptr_np[-1] != nnz:
+        raise ValueError(
+            f"CSCArray indptr[-1] must equal nnz={nnz}, got {indptr_np[-1]}."
+        )
+    if (indptr_np[1:] < indptr_np[:-1]).any():
+        raise ValueError("CSCArray indptr must be monotonically nondecreasing.")
+    if indices_np.size:
+        min_index = int(indices_np.min())
+        max_index = int(indices_np.max())
+        if min_index < 0 or max_index >= shape[0]:
+            raise ValueError(
+                "CSCArray indices must be in bounds for n_rows="
+                f"{shape[0]}, got min={min_index}, max={max_index}."
             )
 
 
@@ -186,6 +243,45 @@ def validate_csr_matvec_inputs(data, indices, indptr, x, shape: Shape2D) -> None
     if data.dtype != x.dtype:
         raise TypeError(
             "csr_matvec requires sparse data and RHS to have the same dtype, "
+            f"got {data.dtype} and {x.dtype}."
+        )
+
+
+def validate_csc_matvec_inputs(data, indices, indptr, x, shape: Shape2D) -> None:
+    validate_csc_metadata(data, indices, indptr, shape)
+    if x.ndim != 1:
+        raise ValueError(f"csc_matvec expects a rank-1 RHS, got shape={x.shape}.")
+    if x.shape[0] != shape[1]:
+        raise ValueError(
+            f"csc_matvec RHS has length {x.shape[0]}, but sparse n_cols={shape[1]}."
+        )
+    check_value_dtype("csc_matvec data", data)
+    check_value_dtype("csc_matvec RHS", x)
+    if data.dtype != x.dtype:
+        raise TypeError(
+            "csc_matvec requires sparse data and RHS to have the same dtype, "
+            f"got {data.dtype} and {x.dtype}."
+        )
+
+
+def validate_csc_matvec_transpose_inputs(
+    data, indices, indptr, x, shape: Shape2D
+) -> None:
+    validate_csc_metadata(data, indices, indptr, shape)
+    if x.ndim != 1:
+        raise ValueError(
+            f"csc_matvec_transpose expects a rank-1 RHS, got shape={x.shape}."
+        )
+    if x.shape[0] != shape[0]:
+        raise ValueError(
+            "csc_matvec_transpose RHS has length "
+            f"{x.shape[0]}, but sparse n_rows={shape[0]}."
+        )
+    check_value_dtype("csc_matvec_transpose data", data)
+    check_value_dtype("csc_matvec_transpose RHS", x)
+    if data.dtype != x.dtype:
+        raise TypeError(
+            "csc_matvec_transpose requires sparse data and RHS to have the same dtype, "
             f"got {data.dtype} and {x.dtype}."
         )
 

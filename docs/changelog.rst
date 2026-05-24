@@ -29,6 +29,11 @@ New features
 * Added native CSR x CSR multiplication with a symbolic pass, prefix-sum
   output allocation, and numeric fill pass returning canonical CSR output.
 
+* Added first-class ``CSCArray`` support with explicit constructors,
+  validation, repr/metadata flags, COO/CSR conversion paths, dense
+  materialization, sorting, duplicate summation, canonicalization, and native
+  ``csc_matvec`` / ``csc_matvec_transpose`` entrypoints.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -49,6 +54,11 @@ Improvements
 
 * Extended JVP/VJP coverage through the new batched sparse-dense primitives,
   including sparse-value and dense-RHS gradients.
+
+* Added dedicated CSC native kernels for the
+  first CSC surface: column-major COO conversion, CSR/CSC conversion,
+  dense materialization, per-column sorting, duplicate summation, forward
+  matvec scatter-add, and transpose matvec segmented reductions.
 
 * Broadened native correctness and regression tests against dense MLX and
   SciPy references, including GPU dtype coverage, complex gradients,
@@ -83,6 +93,9 @@ Documentation
   performance documentation to explain batched sparse-dense dispatch, atomic
   scatter-add kernels, native transpose-product lowering, symbolic/numeric
   CSR x CSR assembly, and dynamic-output synchronization points.
+
+* Added CSC container, conversion, and native matvec documentation plus a CSC
+  notebook covering SciPy interop and CSR/CSC conversion semantics.
 
 
 mlx-sparse v0.0.2b0 (21.05.2026)

@@ -23,9 +23,10 @@ Sparse formats
      - Done
      - Immutable frozen dataclass. ``sorted_indices`` and
        ``has_canonical_format`` flags.
-   * - CSC format
-     - Planned
-     - Will be added when there is a workload that specifically benefits.
+   * - ``CSCArray`` container
+     - Done
+     - Immutable frozen dataclass. Column-compressed dual of CSR with
+       ``sorted_indices`` and ``has_canonical_format`` flags.
    * - Block CSR (BCSR)
      - Planned
      - Internal storage format for block-structured matrices.
@@ -53,6 +54,9 @@ Constructors
    * - ``csr_array((data, indices, indptr), shape)``
      - Done
      - Same input flexibility.
+   * - ``csc_array((data, indices, indptr), shape)``
+     - Done
+     - Explicit CSC buffers with metadata or full validation.
    * - ``eye(n, m, k)``
      - Done
      - Sparse identity or shifted-diagonal matrix. Returns canonical CSR.
@@ -69,17 +73,18 @@ Constructors
      - PEP 8 and NumPy-oriented aliases for dense-to-CSR conversion.
    * - ``from_scipy(matrix)``
      - Done
-     - Converts any SciPy sparse matrix/array to canonical CSR or COO.
+     - Converts any SciPy sparse matrix/array to canonical CSR, CSC, or COO.
    * - ``identity_like(x)``
      - Done
      - Extension smoke test / identity copy.
    * - ``issparse(x)``
      - Done
-     - Returns ``True`` for ``COOArray`` and ``CSRArray``.
+     - Returns ``True`` for ``COOArray``, ``CSRArray``, and ``CSCArray``.
    * - ``asarray(x)``
      - Done
      - Converts existing sparse, SciPy sparse, dense MLX, NumPy, or Python
-       rank-2 array-like inputs to CSR.
+       rank-2 array-like inputs. Existing CSR/CSC inputs are preserved unless
+       a dtype cast is requested; dense and SciPy inputs default to CSR.
 
 Conversions and structural operations
 --------------------------------------
@@ -98,9 +103,26 @@ Conversions and structural operations
    * - ``COOArray.tocsr(canonical=True)``
      - Done
      - Sorts and sums duplicates.
+   * - ``COOArray.tocsc()``
+     - Done
+     - Native ``coo_tocsc`` primitive (CPU and Metal). Sorts by column then
+       row. Preserves duplicates.
+   * - ``COOArray.tocsc(canonical=True)``
+     - Done
+     - Sorts row indices within columns and sums duplicates.
+   * - ``CSRArray.tocsc()``
+     - Done
+     - Native ``csr_tocsc`` conversion with count/prefix/fill structure build.
+   * - ``CSCArray.tocsr()``
+     - Done
+     - Native ``csc_tocsr`` conversion with count/prefix/fill structure build.
    * - ``CSRArray.todense()``
      - Done
      - Native primitive (CPU and Metal). Sums duplicate column entries.
+   * - ``CSCArray.todense()``
+     - Done
+     - Native column-wise materialization (CPU and Metal). Sums duplicate row
+       entries.
    * - ``COOArray.todense()``
      - Done
      - Via ``tocsr().todense()``.
@@ -117,6 +139,10 @@ Conversions and structural operations
    * - ``CSRArray.canonicalize()``
      - Done
      - Combines ``sort_indices`` and ``sum_duplicates``.
+   * - ``CSCArray`` canonicalization
+     - Done
+     - Native CSC sort, duplicate-sum, and canonicalization primitives over
+       compressed columns.
    * - ``CSRArray.transpose()`` / ``.T``
      - Done
      - Native primitive (CPU and Metal). Returns row-sorted CSRArray.
@@ -126,6 +152,10 @@ Conversions and structural operations
    * - ``CSRArray.H``
      - Done
      - Hermitian (conjugate) transpose.
+   * - ``CSCArray.transpose()`` / ``.T`` / ``.H``
+     - Done
+     - ``.T`` is a zero-copy CSRArray view of the transposed structure;
+       ``.H`` conjugates values first.
 
 Sparse-dense arithmetic
 ------------------------
@@ -141,6 +171,10 @@ Sparse-dense arithmetic
      - Done
      - CPU and Metal GPU. Scalar row kernel plus vector-reduction kernel for
        long rows on Metal.
+   * - ``csc_matvec`` / ``csc_matvec_transpose``
+     - Done
+     - Native CSC kernels. Forward matvec is column scatter-add; transpose
+       matvec is segmented column reduction.
    * - ``csr_matmul`` (all value dtypes, int32 and int64)
      - Done
      - CPU and Metal GPU. Scalar element kernel plus vector-reduction kernel
@@ -181,7 +215,7 @@ Sparse linear algebra
      - Done
      - CPU + GPU
      - Each restart's Arnoldi step dispatches the ``csr_arnoldi`` Metal
-       kernel, convergence bookkeeping and the small least-squares solve
+       kernel; convergence bookkeeping and the small least-squares solve
        run on CPU.
    * - ``linalg.minres``
      - Done
@@ -221,6 +255,10 @@ Sparse linear algebra
 
 Linalg GPU coverage notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sparse linalg entrypoints remain CSR/COO-only in this release. CSC solver
+support is intentionally deferred until the solver kernels and symbolic
+factorization paths are designed around CSC rather than hidden CSR conversion.
 
 The table above uses a simplified "CPU + GPU" label. The precise breakdown
 is:
@@ -322,6 +360,11 @@ compact buffers.
      - All value and index dtypes
      - ``float32`` uses atomic scatter-add, other GPU value dtypes lower
        through native transpose plus matvec
+   * - ``csc_matvec`` / ``csc_matvec_transpose``
+     - All value and index dtypes
+     - Forward ``float32`` matvec uses atomic column scatter-add, other
+       forward GPU dtypes use native serial scatter. Transpose matvec uses
+       scalar or threadgroup vector column reductions.
    * - ``csr_matmul``
      - All value and index dtypes
      - Scalar element kernel plus threadgroup vector reduction for long rows
@@ -341,12 +384,26 @@ compact buffers.
    * - ``coo_tocsr``
      - All value and index dtypes
      - Rank-based stable sort plus indptr build
+   * - ``coo_tocsc``
+     - All value and index dtypes
+     - Rank-based stable column-major sort plus indptr build
    * - ``csr_transpose``
      - All value and index dtypes
      - Parallel count/prefix plus deterministic fill
+   * - ``csr_tocsc`` / ``csc_tocsr``
+     - All value and index dtypes
+     - Native count/prefix/fill conversions. GPU fill uses atomic offsets and
+       does not promise sorted output, call ``canonicalize()`` when ordering
+       matters.
+   * - ``csc_todense``
+     - All value and index dtypes
+     - Parallel zero-fill plus column-wise materialization
    * - ``csr_sort_indices``
      - All value and index dtypes
      - Rank-based stable per-row sort
+   * - ``csc_sort_indices``
+     - All value and index dtypes
+     - Rank-based stable per-column sort
    * - ``csr_cg``
      - ``float32`` values, int32/int64 indices
      - Full CG iteration for ``linalg.cg``
@@ -372,6 +429,10 @@ compact buffers.
      - All value and index dtypes
      - Staged count/prefix/fill primitive, dynamic output size requires
        row-count synchronization
+   * - ``csc_sum_duplicates``
+     - All value and index dtypes
+     - Staged per-column count/prefix/fill primitive, dynamic output size
+       requires column-count synchronization
    * - ``csr_fromdense``
      - All value and index dtypes
      - Staged count/prefix/fill dense-to-CSR conversion
@@ -387,6 +448,10 @@ Known limitations
 * Dynamic-output helpers (``fromdense()``, ``canonicalize()``, dense/SciPy
   construction, and ``CSR @ CSR``) synchronize compact row counts or structure
   to host before allocating final output buffers.
+* CSC currently covers construction, conversion, canonicalization, dense
+  materialization, and dense-vector products. CSC dense-matrix matmul,
+  sparse-sparse matmul, and linalg solver integration are intentionally not
+  implicit yet.
 * Sparse solver, factorization, and spectral kernels are real-valued.
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.

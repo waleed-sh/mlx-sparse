@@ -151,6 +151,25 @@ class COOArray:
             return csr.canonicalize()
         return csr
 
+    def tocsc(self, *, canonical: bool = False):
+        """Convert to :class:`~mlx_sparse.CSCArray`."""
+        from mlx_sparse._csc import CSCArray
+
+        data, indices, indptr = _native.coo_tocsc(
+            self.data, self.row, self.col, self.shape
+        )
+        csc = CSCArray(
+            data=data,
+            indices=indices,
+            indptr=indptr,
+            shape=self.shape,
+            sorted_indices=True,
+            has_canonical_format=False,
+        )
+        if canonical:
+            return csc.canonicalize()
+        return csc
+
     def todense(self) -> mx.array:
         """Materialize as a dense MLX array.
 

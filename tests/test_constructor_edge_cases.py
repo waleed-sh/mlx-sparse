@@ -116,7 +116,7 @@ def test_from_scipy_error_paths_canonical_false_and_dtype_casts(mx, scipy_sparse
     with pytest.raises(TypeError, match="scipy.sparse"):
         ms.from_scipy(np.eye(2, dtype=np.float32))
     with pytest.raises(ValueError, match="format"):
-        ms.from_scipy(scipy_sparse.eye(2, dtype=np.float32), format="csc")
+        ms.from_scipy(scipy_sparse.eye(2, dtype=np.float32), format="bsr")
 
     sp16 = scipy_sparse.csr_matrix(np.array([[1.0, 0.0]], dtype=np.float32))
     csr16 = ms.from_scipy(sp16, dtype=mx.float16)

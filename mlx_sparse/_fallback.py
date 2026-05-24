@@ -43,6 +43,28 @@ def coo_to_csr(data: mx.array, row: mx.array, col: mx.array, shape: Shape2D):
     )
 
 
+def coo_to_csc(data: mx.array, row: mx.array, col: mx.array, shape: Shape2D):
+    data_np = to_numpy(data)
+    row_np = to_numpy(row)
+    col_np = to_numpy(col)
+
+    order = np.lexsort((np.arange(col_np.size), row_np, col_np))
+    sorted_col = col_np[order]
+    sorted_row = row_np[order]
+    sorted_data = data_np[order]
+
+    indptr = np.zeros(shape[1] + 1, dtype=col_np.dtype)
+    if sorted_col.size:
+        counts = np.bincount(sorted_col.astype(np.int64), minlength=shape[1])
+        indptr[1:] = np.cumsum(counts, dtype=indptr.dtype)
+
+    return (
+        to_mx(sorted_data, dtype=data.dtype),
+        to_mx(sorted_row.astype(row_np.dtype, copy=False), dtype=row.dtype),
+        to_mx(indptr, dtype=col.dtype),
+    )
+
+
 def csr_todense(
     data: mx.array,
     indices: mx.array,
@@ -57,6 +79,23 @@ def csr_todense(
         start = int(indptr_np[row])
         end = int(indptr_np[row + 1])
         np.add.at(dense[row], indices_np[start:end], data_np[start:end])
+    return to_mx(dense, dtype=data.dtype)
+
+
+def csc_todense(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    dense = np.zeros(shape, dtype=data_np.dtype)
+    for col in range(shape[1]):
+        start = int(indptr_np[col])
+        end = int(indptr_np[col + 1])
+        np.add.at(dense[:, col], indices_np[start:end], data_np[start:end])
     return to_mx(dense, dtype=data.dtype)
 
 
@@ -181,6 +220,25 @@ def csr_matvec(
     return to_mx(out, dtype=data.dtype)
 
 
+def csc_matvec(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    x: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    x_np = to_numpy(x)
+    out = np.zeros(shape[0], dtype=np.result_type(data_np.dtype, x_np.dtype))
+    for col in range(shape[1]):
+        start = int(indptr_np[col])
+        end = int(indptr_np[col + 1])
+        np.add.at(out, indices_np[start:end], data_np[start:end] * x_np[col])
+    return to_mx(out, dtype=data.dtype)
+
+
 def csr_matvec_transpose(
     data: mx.array,
     indices: mx.array,
@@ -197,6 +255,25 @@ def csr_matvec_transpose(
         start = int(indptr_np[row])
         end = int(indptr_np[row + 1])
         np.add.at(out, indices_np[start:end], data_np[start:end] * x_np[row])
+    return to_mx(out, dtype=data.dtype)
+
+
+def csc_matvec_transpose(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    x: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    x_np = to_numpy(x)
+    out = np.zeros(shape[1], dtype=np.result_type(data_np.dtype, x_np.dtype))
+    for col in range(shape[1]):
+        start = int(indptr_np[col])
+        end = int(indptr_np[col + 1])
+        out[col] = np.dot(data_np[start:end], x_np[indices_np[start:end]])
     return to_mx(out, dtype=data.dtype)
 
 
@@ -330,6 +407,50 @@ def csr_transpose(
     )
 
 
+def csr_to_csc(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+
+    row = np.empty(data_np.shape[0], dtype=indices_np.dtype)
+    for r in range(shape[0]):
+        row[indptr_np[r] : indptr_np[r + 1]] = r
+
+    return coo_to_csc(
+        to_mx(data_np, dtype=data.dtype),
+        to_mx(row, dtype=indices.dtype),
+        to_mx(indices_np.astype(indices_np.dtype, copy=False), dtype=indices.dtype),
+        shape,
+    )
+
+
+def csc_to_csr(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+
+    col = np.empty(data_np.shape[0], dtype=indices_np.dtype)
+    for c in range(shape[1]):
+        col[indptr_np[c] : indptr_np[c + 1]] = c
+
+    return coo_to_csr(
+        to_mx(data_np, dtype=data.dtype),
+        to_mx(indices_np.astype(indices_np.dtype, copy=False), dtype=indices.dtype),
+        to_mx(col, dtype=indices.dtype),
+        shape,
+    )
+
+
 def csr_conjugate(data: mx.array) -> mx.array:
     return mx.conjugate(data)
 
@@ -348,6 +469,30 @@ def sort_csr_indices(
     for row in range(indptr_np.size - 1):
         start = int(indptr_np[row])
         end = int(indptr_np[row + 1])
+        order = np.argsort(out_indices[start:end], kind="stable")
+        out_data[start:end] = out_data[start:end][order]
+        out_indices[start:end] = out_indices[start:end][order]
+    return (
+        to_mx(out_data, dtype=data.dtype),
+        to_mx(out_indices, dtype=indices.dtype),
+        indptr,
+    )
+
+
+def sort_csc_indices(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+):
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+
+    out_data = data_np.copy()
+    out_indices = indices_np.copy()
+    for col in range(indptr_np.size - 1):
+        start = int(indptr_np[col])
+        end = int(indptr_np[col + 1])
         order = np.argsort(out_indices[start:end], kind="stable")
         out_data[start:end] = out_data[start:end][order]
         out_indices[start:end] = out_indices[start:end][order]
@@ -384,6 +529,47 @@ def sum_csr_duplicates(
                 out_indices.append(col)
                 out_data.append(row_data[mask].sum())
         out_indptr[row + 1] = len(out_data)
+
+    if out_data:
+        data_arr = np.asarray(out_data, dtype=data_np.dtype)
+        indices_arr = np.asarray(out_indices, dtype=indices_np.dtype)
+    else:
+        data_arr = np.empty((0,), dtype=data_np.dtype)
+        indices_arr = np.empty((0,), dtype=indices_np.dtype)
+
+    return (
+        to_mx(data_arr, dtype=data.dtype),
+        to_mx(indices_arr, dtype=indices.dtype),
+        to_mx(out_indptr, dtype=indptr.dtype),
+    )
+
+
+def sum_csc_duplicates(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+):
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+
+    out_data = []
+    out_indices = []
+    out_indptr = np.zeros_like(indptr_np)
+
+    for col in range(indptr_np.size - 1):
+        start = int(indptr_np[col])
+        end = int(indptr_np[col + 1])
+        col_indices = indices_np[start:end]
+        col_data = data_np[start:end]
+        if col_indices.size:
+            unique, first = np.unique(col_indices, return_index=True)
+            order = np.argsort(first)
+            for row in unique[order]:
+                mask = col_indices == row
+                out_indices.append(row)
+                out_data.append(col_data[mask].sum())
+        out_indptr[col + 1] = len(out_data)
 
     if out_data:
         data_arr = np.asarray(out_data, dtype=data_np.dtype)

@@ -2,15 +2,14 @@ mlx-sparse
 ==========
 
 **mlx-sparse** is a sparse matrix library for Apple Silicon, built as a native
-MLX extension. It provides COO and CSR sparse containers backed by
+MLX extension. It provides COO, CSR, and CSC sparse containers backed by
 ``mlx.core.array``, with C++ MLX primitives for sparse-dense products on both
-CPU and Metal GPU. It also supports some linear algebra operations for sparse matrices.
+CPU and Metal GPU.
 
 .. note::
 
    GPU support in this version is Apple Silicon Metal only. CUDA is not
-   currently supported. Also, not all linalg operations are supported on Metal, see :ref:`gpu-supported-linalg`.
-
+   currently supported.
 
 The design follows MLX's operation/primitive split. Python containers own the
 user API, C++ primitives own graph construction and backend evaluation, and
@@ -42,20 +41,18 @@ sparse values and dense operands works with ``mx.grad`` on both CPU and GPU.
 Key characteristics
 -------------------
 
-* **COO and CSR containers**: immutable frozen dataclasses. Structural
+* **COO, CSR, and CSC containers**: immutable frozen dataclasses. Structural
   operations return new instances without in-place mutation.
 * **Lazy execution**: sparse operations add nodes to MLX's computation graph.
   No ``mx.eval`` is called inside any sparse operation.
-* **Metal GPU kernels**: ``csr_matvec`` and ``csr_matmul`` dispatch through
-  MLX's Metal backend for all supported value and index dtypes. No separate
+* **Metal GPU kernels**: CSR matvec/matmul and CSC vector products dispatch
+  through MLX's Metal backend for supported value and index dtypes. No separate
   command queue or synchronization point.
 * **CPU backends**: all operations have C++ CPU implementations. Conversions,
   transpose, and canonicalization run on CPU or GPU.
 * **Autodiff**: ``mx.grad`` / ``mx.vjp`` / ``mx.jvp`` work for sparse values
   and dense operands of CSR matvec and matmul on both CPU and GPU, including
   ``complex64``.
-* **Sparse linalg**: operations like ``eigsh``, ``eigs``, ``cholesky``, ``splu`` (sparse LU),
-  as well as SciPy like ``LinearOperator`` are available through ``mlx_sparse.linalg``.
 * **Value dtypes**: ``float32``, ``float16``, ``bfloat16``, and ``complex64``
   on CPU and Metal GPU.
 * **Index dtypes**: ``int32`` and ``int64``. Mixed dtypes are rejected at

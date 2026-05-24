@@ -26,9 +26,11 @@ and integration with third-party libraries.
    07_dtype_device
    08_canonicalization
    09_scipy_bridge
+   18_csc_format
    10_benchmarks
    11_graph_algorithms
    12_neural_layers
+   17_heat_equation_pde
 
 Sparse linear algebra
 ---------------------

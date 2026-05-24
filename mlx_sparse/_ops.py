@@ -20,9 +20,12 @@ from operator import mul
 import mlx.core as mx
 
 import mlx_sparse._native as _native
+from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import (
     ensure_mx_array,
+    validate_csc_matvec_inputs,
+    validate_csc_matvec_transpose_inputs,
     validate_csr_matmul_inputs,
     validate_csr_matvec_inputs,
     validate_csr_metadata,
@@ -56,8 +59,8 @@ def todense(array) -> mx.array:
     Duplicate entries are summed, consistent with ``canonicalize().todense()``.
 
     Args:
-        array: A :class:`~mlx_sparse.COOArray` or :class:`~mlx_sparse.CSRArray`
-            instance.
+        array: A :class:`~mlx_sparse.COOArray`, :class:`~mlx_sparse.CSRArray`,
+            or :class:`~mlx_sparse.CSCArray` instance.
 
     Returns:
         Dense array of shape ``(n_rows, n_cols)`` with the same dtype as
@@ -81,6 +84,12 @@ def _ensure_csr_array(name: str, a) -> CSRArray:
     if not isinstance(a, CSRArray):
         raise TypeError(f"{name} expects CSRArray, got {type(a).__name__}.")
     validate_csr_metadata(a.data, a.indices, a.indptr, a.shape)
+    return a
+
+
+def _ensure_csc_array(name: str, a) -> CSCArray:
+    if not isinstance(a, CSCArray):
+        raise TypeError(f"{name} expects CSCArray, got {type(a).__name__}.")
     return a
 
 
@@ -119,6 +128,22 @@ def csr_trace(a: CSRArray) -> mx.array:
     """Compute the trace of a CSR matrix."""
     a = _ensure_csr_array("csr_trace", a)
     return _native.csr_trace(a.data, a.indices, a.indptr, a.shape)
+
+
+def csc_matvec(a: CSCArray, x) -> mx.array:
+    """Multiply a CSC sparse matrix by a dense vector."""
+    a = _ensure_csc_array("csc_matvec", a)
+    x = ensure_mx_array(x)
+    validate_csc_matvec_inputs(a.data, a.indices, a.indptr, x, a.shape)
+    return _native.csc_matvec(a.data, a.indices, a.indptr, x, a.shape)
+
+
+def csc_matvec_transpose(a: CSCArray, x) -> mx.array:
+    """Multiply the transpose of a CSC sparse matrix by a dense vector."""
+    a = _ensure_csc_array("csc_matvec_transpose", a)
+    x = ensure_mx_array(x)
+    validate_csc_matvec_transpose_inputs(a.data, a.indices, a.indptr, x, a.shape)
+    return _native.csc_matvec_transpose(a.data, a.indices, a.indptr, x, a.shape)
 
 
 def csr_matvec(a: CSRArray, x) -> mx.array:

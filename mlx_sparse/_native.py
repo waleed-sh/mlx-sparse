@@ -50,6 +50,18 @@ def coo_tocsr(
     return ext.coo_tocsr(data, row, col, shape[0], shape[1])
 
 
+def coo_tocsc(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_to_csc(data, row, col, shape)
+    return ext.coo_tocsc(data, row, col, shape[0], shape[1])
+
+
 def csr_todense(
     data: mx.array,
     indices: mx.array,
@@ -60,6 +72,18 @@ def csr_todense(
     if ext is None:
         return _fallback.csr_todense(data, indices, indptr, shape)
     return ext.csr_todense(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_todense(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_todense(data, indices, indptr, shape)
+    return ext.csc_todense(data, indices, indptr, shape[0], shape[1])
 
 
 def csr_matvec(
@@ -73,6 +97,19 @@ def csr_matvec(
     if ext is None:
         return _fallback.csr_matvec(data, indices, indptr, x, shape)
     return ext.csr_matvec(data, indices, indptr, x, shape[0], shape[1])
+
+
+def csc_matvec(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    x: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_matvec(data, indices, indptr, x, shape)
+    return ext.csc_matvec(data, indices, indptr, x, shape[0], shape[1])
 
 
 def csr_batched_matvec(
@@ -100,6 +137,19 @@ def csr_matvec_transpose(
     if ext is None:
         return _fallback.csr_matvec_transpose(data, indices, indptr, x, shape)
     return ext.csr_matvec_transpose(data, indices, indptr, x, shape[0], shape[1])
+
+
+def csc_matvec_transpose(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    x: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_matvec_transpose(data, indices, indptr, x, shape)
+    return ext.csc_matvec_transpose(data, indices, indptr, x, shape[0], shape[1])
 
 
 def csr_matmul(
@@ -170,6 +220,30 @@ def csr_transpose(
     if ext is None:
         return _fallback.csr_transpose(data, indices, indptr, shape)
     return ext.csr_transpose(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_tocsc(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        return _fallback.csr_to_csc(data, indices, indptr, shape)
+    return ext.csr_tocsc(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_tocsr(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_to_csr(data, indices, indptr, shape)
+    return ext.csc_tocsr(data, indices, indptr, shape[0], shape[1])
 
 
 def csr_row_sums(
@@ -243,6 +317,17 @@ def csr_sort_indices(
     return ext.csr_sort_indices(data, indices, indptr)
 
 
+def csc_sort_indices(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+):
+    ext = extension()
+    if ext is None:
+        return _fallback.sort_csc_indices(data, indices, indptr)
+    return ext.csc_sort_indices(data, indices, indptr)
+
+
 def csr_sum_duplicates(
     data: mx.array,
     indices: mx.array,
@@ -252,6 +337,17 @@ def csr_sum_duplicates(
     if ext is None:
         return _fallback.sum_csr_duplicates(data, indices, indptr)
     return ext.csr_sum_duplicates(data, indices, indptr)
+
+
+def csc_sum_duplicates(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+):
+    ext = extension()
+    if ext is None:
+        return _fallback.sum_csc_duplicates(data, indices, indptr)
+    return ext.csc_sum_duplicates(data, indices, indptr)
 
 
 def csr_fromdense(

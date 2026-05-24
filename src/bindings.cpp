@@ -17,7 +17,14 @@
 #include <nanobind/stl/tuple.h>
 
 #include "linalg/linalg.h"
+#include "sparse/coo_tocsc/coo_tocsc.h"
 #include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/csc_matvec/csc_matvec.h"
+#include "sparse/csc_matvec_transpose/csc_matvec_transpose.h"
+#include "sparse/csc_sort_indices/csc_sort_indices.h"
+#include "sparse/csc_sum_duplicates/csc_sum_duplicates.h"
+#include "sparse/csc_tocsr/csc_tocsr.h"
+#include "sparse/csc_todense/csc_todense.h"
 #include "sparse/csr_batched_matmul/csr_batched_matmul.h"
 #include "sparse/csr_batched_matvec/csr_batched_matvec.h"
 #include "sparse/csr_col_sums/csr_col_sums.h"
@@ -31,6 +38,7 @@
 #include "sparse/csr_row_sums/csr_row_sums.h"
 #include "sparse/csr_sort_indices/csr_sort_indices.h"
 #include "sparse/csr_sum_duplicates/csr_sum_duplicates.h"
+#include "sparse/csr_tocsc/csr_tocsc.h"
 #include "sparse/csr_todense/csr_todense.h"
 #include "sparse/csr_trace/csr_trace.h"
 #include "sparse/csr_transpose/csr_transpose.h"
@@ -60,6 +68,16 @@ NB_MODULE(_ext, m) {
       "Convert COO buffers to row-sorted CSR buffers, preserving duplicates.");
 
   m.def(
+      "coo_tocsc",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_tocsc(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Convert COO buffers to column-sorted CSC buffers, preserving "
+      "duplicates.");
+
+  m.def(
       "csr_todense",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -68,6 +86,16 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
       "Materialize CSR buffers as a dense MLX array.");
+
+  m.def(
+      "csc_todense",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_todense(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Materialize CSC buffers as a dense MLX array.");
 
   m.def(
       "csr_sort_indices",
@@ -90,6 +118,26 @@ NB_MODULE(_ext, m) {
       "Sum adjacent duplicate CSR column entries in each sorted row.");
 
   m.def(
+      "csc_sort_indices",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr) {
+        return mlx_sparse::csc_sort_indices(data, indices, indptr);
+      },
+      "data"_a, "indices"_a, "indptr"_a,
+      "Sort CSC row indices independently within each column.");
+
+  m.def(
+      "csc_sum_duplicates",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr) {
+        return mlx_sparse::csc_sum_duplicates(data, indices, indptr);
+      },
+      "data"_a, "indices"_a, "indptr"_a,
+      "Sum adjacent duplicate CSC row entries in each sorted column.");
+
+  m.def(
       "csr_fromdense",
       [](const mlx_sparse::mx::array &dense, int index_dtype_bits,
          float threshold) {
@@ -107,6 +155,26 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
       "Transpose CSR buffers into a new row-sorted CSR representation.");
+
+  m.def(
+      "csr_tocsc",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_tocsc(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Convert CSR buffers into CSC buffers.");
+
+  m.def(
+      "csc_tocsr",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_tocsr(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Convert CSC buffers into CSR buffers.");
 
   m.def(
       "csr_row_sums",
@@ -170,6 +238,17 @@ NB_MODULE(_ext, m) {
       "Multiply CSR buffers by a dense vector.");
 
   m.def(
+      "csc_matvec",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &x,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csc_matvec(data, indices, indptr, x, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "x"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply CSC buffers by a dense vector.");
+
+  m.def(
       "csr_batched_matvec",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -192,6 +271,18 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "x"_a, "n_rows"_a, "n_cols"_a,
       "Multiply the transpose of CSR buffers by a dense vector.");
+
+  m.def(
+      "csc_matvec_transpose",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &x,
+         int n_rows, int n_cols) {
+        return mlx_sparse::csc_matvec_transpose(data, indices, indptr, x,
+                                                n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "x"_a, "n_rows"_a, "n_cols"_a,
+      "Multiply the transpose of CSC buffers by a dense vector.");
 
   m.def(
       "csr_matmul",

@@ -273,6 +273,45 @@ class CSRArray:
             has_canonical_format=self.has_canonical_format,
         )
 
+    def tocsc(self, *, canonical: bool | None = None):
+        """Convert to :class:`~mlx_sparse.CSCArray`.
+
+        Args:
+            canonical: If ``True``, canonicalize the returned CSC matrix. If
+                ``False`` or ``None`` (default), return the structural
+                conversion as produced by the native count/prefix/fill path.
+                The structural path preserves values but does not promise
+                sorted output metadata on every backend.
+        """
+        from mlx_sparse._csc import CSCArray
+
+        data, indices, indptr = _native.csr_tocsc(
+            self.data,
+            self.indices,
+            self.indptr,
+            self.shape,
+        )
+        out = CSCArray(
+            data=data,
+            indices=indices,
+            indptr=indptr,
+            shape=self.shape,
+            sorted_indices=False,
+            has_canonical_format=False,
+        )
+        if canonical is True:
+            return out.canonicalize()
+        if canonical is False:
+            return CSCArray(
+                data=out.data,
+                indices=out.indices,
+                indptr=out.indptr,
+                shape=out.shape,
+                sorted_indices=out.sorted_indices,
+                has_canonical_format=False,
+            )
+        return out
+
     @property
     def T(self) -> "CSRArray":
         """Transposed matrix. Alias for :meth:`transpose`."""

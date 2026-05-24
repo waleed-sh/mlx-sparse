@@ -14,9 +14,9 @@
 
 """Sparse array containers and primitives for MLX.
 
-mlx-sparse provides COO and CSR sparse matrix containers backed by MLX arrays,
-with native C++ primitives for sparse-dense products on Apple Silicon CPU and
-Metal GPU. The public API is intentionally small: construct sparse matrices
+mlx-sparse provides COO, CSR, and CSC sparse matrix containers backed by MLX
+arrays, with native C++ primitives for sparse-dense products on Apple Silicon
+CPU and Metal GPU. The public API is intentionally small: construct sparse matrices
 from MLX, NumPy, SciPy, or explicit sparse buffers, run sparse-dense products,
 differentiate through sparse values and dense operands, and convert back to
 dense when needed.
@@ -59,9 +59,12 @@ from mlx_sparse._construct import (
     fromdense,
 )
 from mlx_sparse._coo import COOArray, coo_array
+from mlx_sparse._csc import CSCArray, csc_array
 from mlx_sparse._csr import CSRArray, csr_array
 from mlx_sparse._device import use_cpu, use_device, use_gpu
 from mlx_sparse._ops import (
+    csc_matvec,
+    csc_matvec_transpose,
     csr_batched_matmul,
     csr_batched_matvec,
     csr_col_sums,
@@ -88,14 +91,16 @@ except ImportError:
 def issparse(x) -> bool:
     """Return ``True`` if ``x`` is a recognized mlx-sparse container.
 
-    Currently returns ``True`` for :class:`COOArray` and :class:`CSRArray`
+    Currently returns ``True`` for :class:`COOArray`, :class:`CSRArray`, and
+    :class:`CSCArray`
     instances. All other objects return ``False``.
 
     Args:
         x: Any Python object.
 
     Returns:
-        ``True`` if ``x`` is a :class:`COOArray` or :class:`CSRArray`.
+        ``True`` if ``x`` is a :class:`COOArray`, :class:`CSRArray`, or
+        :class:`CSCArray`.
 
     Example::
 
@@ -104,16 +109,20 @@ def issparse(x) -> bool:
         ms.issparse(my_csr)  # True
         ms.issparse(mx.ones((3, 4)))  # False
     """
-    return isinstance(x, (COOArray, CSRArray))
+    return isinstance(x, (COOArray, CSRArray, CSCArray))
 
 
 __all__ = [
     "COOArray",
+    "CSCArray",
     "CSRArray",
     "asarray",
     "coo_array",
     "config",
     "config_context",
+    "csc_array",
+    "csc_matvec",
+    "csc_matvec_transpose",
     "csr_array",
     "csr_batched_matmul",
     "csr_batched_matvec",
