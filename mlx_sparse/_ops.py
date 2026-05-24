@@ -20,10 +20,14 @@ from operator import mul
 import mlx.core as mx
 
 import mlx_sparse._native as _native
+from mlx_sparse._coo import COOArray
 from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import (
     ensure_mx_array,
+    validate_coo_matmul_inputs,
+    validate_coo_matvec_inputs,
+    validate_csc_matmul_inputs,
     validate_csc_matvec_inputs,
     validate_csc_matvec_transpose_inputs,
     validate_csr_matmul_inputs,
@@ -93,6 +97,12 @@ def _ensure_csc_array(name: str, a) -> CSCArray:
     return a
 
 
+def _ensure_coo_array(name: str, a) -> COOArray:
+    if not isinstance(a, COOArray):
+        raise TypeError(f"{name} expects COOArray, got {type(a).__name__}.")
+    return a
+
+
 def csr_row_sums(a: CSRArray) -> mx.array:
     """Reduce each row of a CSR matrix to the sum of its stored values."""
     a = _ensure_csr_array("csr_row_sums", a)
@@ -138,12 +148,72 @@ def csc_matvec(a: CSCArray, x) -> mx.array:
     return _native.csc_matvec(a.data, a.indices, a.indptr, x, a.shape)
 
 
+def coo_matvec(a: COOArray, x) -> mx.array:
+    """Multiply a COO sparse matrix by a dense vector."""
+    a = _ensure_coo_array("coo_matvec", a)
+    x = ensure_mx_array(x)
+    validate_coo_matvec_inputs(a.data, a.row, a.col, x, a.shape)
+    return _native.coo_matvec(a.data, a.row, a.col, x, a.shape)
+
+
 def csc_matvec_transpose(a: CSCArray, x) -> mx.array:
     """Multiply the transpose of a CSC sparse matrix by a dense vector."""
     a = _ensure_csc_array("csc_matvec_transpose", a)
     x = ensure_mx_array(x)
     validate_csc_matvec_transpose_inputs(a.data, a.indices, a.indptr, x, a.shape)
     return _native.csc_matvec_transpose(a.data, a.indices, a.indptr, x, a.shape)
+
+
+def coo_batched_matvec(a: COOArray, rhs) -> mx.array:
+    """Multiply a COO sparse matrix by a batch of dense vectors."""
+    a = _ensure_coo_array("coo_batched_matvec", a)
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim < 2:
+        raise ValueError(
+            f"coo_batched_matvec expects rank-2 or higher RHS, got {rhs.shape}."
+        )
+    if rhs.shape[-1] != a.shape[1]:
+        raise ValueError(
+            f"coo_batched_matvec RHS has vector dimension {rhs.shape[-1]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    if a.data.dtype != rhs.dtype:
+        raise TypeError(
+            "coo_batched_matvec requires sparse data and RHS to have the same dtype, "
+            f"got {a.data.dtype} and {rhs.dtype}."
+        )
+    batch_shape = tuple(int(dim) for dim in rhs.shape[:-1])
+    batch_size = _prod(batch_shape)
+    rhs_flat = mx.reshape(rhs, (batch_size, a.shape[1]))
+    out_flat = _native.coo_batched_matvec(a.data, a.row, a.col, rhs_flat, a.shape)
+    return mx.reshape(out_flat, (*batch_shape, a.shape[0]))
+
+
+def csc_batched_matvec(a: CSCArray, rhs) -> mx.array:
+    """Multiply a CSC sparse matrix by a batch of dense vectors."""
+    a = _ensure_csc_array("csc_batched_matvec", a)
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim < 2:
+        raise ValueError(
+            f"csc_batched_matvec expects rank-2 or higher RHS, got {rhs.shape}."
+        )
+    if rhs.shape[-1] != a.shape[1]:
+        raise ValueError(
+            f"csc_batched_matvec RHS has vector dimension {rhs.shape[-1]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    if a.data.dtype != rhs.dtype:
+        raise TypeError(
+            "csc_batched_matvec requires sparse data and RHS to have the same dtype, "
+            f"got {a.data.dtype} and {rhs.dtype}."
+        )
+    batch_shape = tuple(int(dim) for dim in rhs.shape[:-1])
+    batch_size = _prod(batch_shape)
+    rhs_flat = mx.reshape(rhs, (batch_size, a.shape[1]))
+    out_flat = _native.csc_batched_matvec(
+        a.data, a.indices, a.indptr, rhs_flat, a.shape
+    )
+    return mx.reshape(out_flat, (*batch_shape, a.shape[0]))
 
 
 def csr_matvec(a: CSRArray, x) -> mx.array:
@@ -279,9 +349,78 @@ def csr_matmat(a: CSRArray, rhs: CSRArray) -> CSRArray:
     )
 
 
+def coo_matmat(a: COOArray, rhs: COOArray) -> COOArray:
+    """Multiply two COO sparse matrices and return a canonical COO matrix.
+
+    The native implementation groups both operands by coordinate rows, performs
+    a symbolic row pass to size the result, then fills sorted output coordinates
+    without routing through CSR.
+    """
+    a = _ensure_coo_array("coo_matmat", a)
+    if not isinstance(rhs, COOArray):
+        raise TypeError(f"coo_matmat expects COOArray rhs, got {type(rhs).__name__}.")
+    if a.shape[1] != rhs.shape[0]:
+        raise ValueError(
+            f"COO sparse-sparse matmul dimension mismatch: {a.shape} @ {rhs.shape}."
+        )
+    if a.data.dtype != rhs.data.dtype:
+        raise TypeError(
+            "COO sparse-sparse matmul requires matching value dtypes, "
+            f"got {a.data.dtype} and {rhs.data.dtype}."
+        )
+    data, row, col = _native.coo_matmat(a, rhs)
+    return COOArray(
+        data=data,
+        row=row,
+        col=col,
+        shape=(a.shape[0], rhs.shape[1]),
+        has_canonical_format=True,
+    )
+
+
+def csc_matmat(a: CSCArray, rhs: CSCArray) -> CSCArray:
+    """Multiply two CSC sparse matrices and return a canonical CSC matrix.
+
+    The native implementation traverses right-hand columns and left-hand
+    compressed columns directly, producing sorted row indices per output column.
+    It does not convert to CSR internally.
+    """
+    a = _ensure_csc_array("csc_matmat", a)
+    if not isinstance(rhs, CSCArray):
+        raise TypeError(f"csc_matmat expects CSCArray rhs, got {type(rhs).__name__}.")
+    if a.shape[1] != rhs.shape[0]:
+        raise ValueError(
+            f"CSC sparse-sparse matmul dimension mismatch: {a.shape} @ {rhs.shape}."
+        )
+    if a.data.dtype != rhs.data.dtype:
+        raise TypeError(
+            "CSC sparse-sparse matmul requires matching value dtypes, "
+            f"got {a.data.dtype} and {rhs.data.dtype}."
+        )
+    data, indices, indptr = _native.csc_matmat(a, rhs)
+    return CSCArray(
+        data=data,
+        indices=indices,
+        indptr=indptr,
+        shape=(a.shape[0], rhs.shape[1]),
+        sorted_indices=True,
+        has_canonical_format=True,
+    )
+
+
 def _csr_matmul_rank2(a: CSRArray, rhs: mx.array) -> mx.array:
     validate_csr_matmul_inputs(a.data, a.indices, a.indptr, rhs, a.shape)
     return _native.csr_matmul(a.data, a.indices, a.indptr, rhs, a.shape)
+
+
+def _coo_matmul_rank2(a: COOArray, rhs: mx.array) -> mx.array:
+    validate_coo_matmul_inputs(a.data, a.row, a.col, rhs, a.shape)
+    return _native.coo_matmul(a.data, a.row, a.col, rhs, a.shape)
+
+
+def _csc_matmul_rank2(a: CSCArray, rhs: mx.array) -> mx.array:
+    validate_csc_matmul_inputs(a.data, a.indices, a.indptr, rhs, a.shape)
+    return _native.csc_matmul(a.data, a.indices, a.indptr, rhs, a.shape)
 
 
 def _csr_matmul_batched(a: CSRArray, rhs: mx.array) -> mx.array:
@@ -298,6 +437,100 @@ def _csr_matmul_batched(a: CSRArray, rhs: mx.array) -> mx.array:
         a.data, a.indices, a.indptr, rhs_flat, a.shape
     )
     return mx.reshape(out_flat, (*batch_shape, a.shape[0], rhs_cols))
+
+
+def _coo_matmul_batched(a: COOArray, rhs: mx.array) -> mx.array:
+    if a.data.dtype != rhs.dtype:
+        raise TypeError(
+            "coo_matmul requires sparse data and RHS to have the same dtype, "
+            f"got {a.data.dtype} and {rhs.dtype}."
+        )
+    batch_shape = tuple(int(dim) for dim in rhs.shape[:-2])
+    rhs_cols = int(rhs.shape[-1])
+    batch_size = _prod(batch_shape)
+    rhs_flat = mx.reshape(rhs, (batch_size, a.shape[1], rhs_cols))
+    out_flat = _native.coo_batched_matmul(a.data, a.row, a.col, rhs_flat, a.shape)
+    return mx.reshape(out_flat, (*batch_shape, a.shape[0], rhs_cols))
+
+
+def _csc_matmul_batched(a: CSCArray, rhs: mx.array) -> mx.array:
+    if a.data.dtype != rhs.dtype:
+        raise TypeError(
+            "csc_matmul requires sparse data and RHS to have the same dtype, "
+            f"got {a.data.dtype} and {rhs.dtype}."
+        )
+    batch_shape = tuple(int(dim) for dim in rhs.shape[:-2])
+    rhs_cols = int(rhs.shape[-1])
+    batch_size = _prod(batch_shape)
+    rhs_flat = mx.reshape(rhs, (batch_size, a.shape[1], rhs_cols))
+    out_flat = _native.csc_batched_matmul(
+        a.data, a.indices, a.indptr, rhs_flat, a.shape
+    )
+    return mx.reshape(out_flat, (*batch_shape, a.shape[0], rhs_cols))
+
+
+def coo_batched_matmul(a: COOArray, rhs) -> mx.array:
+    """Multiply a COO sparse matrix by a batch of dense matrices."""
+    a = _ensure_coo_array("coo_batched_matmul", a)
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim < 3:
+        raise ValueError(
+            f"coo_batched_matmul expects rank-3 or higher RHS, got {rhs.shape}."
+        )
+    if rhs.shape[-2] != a.shape[1]:
+        raise ValueError(
+            f"coo_batched_matmul RHS has sparse dimension {rhs.shape[-2]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    return _coo_matmul_batched(a, rhs)
+
+
+def csc_batched_matmul(a: CSCArray, rhs) -> mx.array:
+    """Multiply a CSC sparse matrix by a batch of dense matrices."""
+    a = _ensure_csc_array("csc_batched_matmul", a)
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim < 3:
+        raise ValueError(
+            f"csc_batched_matmul expects rank-3 or higher RHS, got {rhs.shape}."
+        )
+    if rhs.shape[-2] != a.shape[1]:
+        raise ValueError(
+            f"csc_batched_matmul RHS has sparse dimension {rhs.shape[-2]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    return _csc_matmul_batched(a, rhs)
+
+
+def coo_matmul(a: COOArray, rhs) -> mx.array:
+    """Multiply a COO sparse matrix by a dense matrix or batched matrices."""
+    a = _ensure_coo_array("coo_matmul", a)
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim == 2:
+        return _coo_matmul_rank2(a, rhs)
+    if rhs.ndim < 2:
+        raise ValueError(f"coo_matmul expects rank-2 or higher RHS, got {rhs.shape}.")
+    if rhs.shape[-2] != a.shape[1]:
+        raise ValueError(
+            f"coo_matmul RHS has sparse dimension {rhs.shape[-2]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    return _coo_matmul_batched(a, rhs)
+
+
+def csc_matmul(a: CSCArray, rhs) -> mx.array:
+    """Multiply a CSC sparse matrix by a dense matrix or batched matrices."""
+    a = _ensure_csc_array("csc_matmul", a)
+    rhs = ensure_mx_array(rhs)
+    if rhs.ndim == 2:
+        return _csc_matmul_rank2(a, rhs)
+    if rhs.ndim < 2:
+        raise ValueError(f"csc_matmul expects rank-2 or higher RHS, got {rhs.shape}.")
+    if rhs.shape[-2] != a.shape[1]:
+        raise ValueError(
+            f"csc_matmul RHS has sparse dimension {rhs.shape[-2]}, "
+            f"but sparse n_cols={a.shape[1]}."
+        )
+    return _csc_matmul_batched(a, rhs)
 
 
 def csr_batched_matmul(a: CSRArray, rhs) -> mx.array:

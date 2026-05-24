@@ -286,6 +286,23 @@ def validate_csc_matvec_transpose_inputs(
         )
 
 
+def validate_coo_matvec_inputs(data, row, col, x, shape: Shape2D) -> None:
+    validate_coo_metadata(data, row, col, shape)
+    if x.ndim != 1:
+        raise ValueError(f"coo_matvec expects a rank-1 RHS, got shape={x.shape}.")
+    if x.shape[0] != shape[1]:
+        raise ValueError(
+            f"coo_matvec RHS has length {x.shape[0]}, but sparse n_cols={shape[1]}."
+        )
+    check_value_dtype("coo_matvec data", data)
+    check_value_dtype("coo_matvec RHS", x)
+    if data.dtype != x.dtype:
+        raise TypeError(
+            "coo_matvec requires sparse data and RHS to have the same dtype, "
+            f"got {data.dtype} and {x.dtype}."
+        )
+
+
 def validate_csr_matmul_inputs(data, indices, indptr, rhs, shape: Shape2D) -> None:
     validate_csr_metadata(data, indices, indptr, shape)
     if rhs.ndim != 2:
@@ -300,5 +317,41 @@ def validate_csr_matmul_inputs(data, indices, indptr, rhs, shape: Shape2D) -> No
     if data.dtype != rhs.dtype:
         raise TypeError(
             "csr_matmul requires sparse data and RHS to have the same dtype, "
+            f"got {data.dtype} and {rhs.dtype}."
+        )
+
+
+def validate_csc_matmul_inputs(data, indices, indptr, rhs, shape: Shape2D) -> None:
+    validate_csc_metadata(data, indices, indptr, shape)
+    if rhs.ndim != 2:
+        raise ValueError(f"csc_matmul expects a rank-2 RHS, got shape={rhs.shape}.")
+    if rhs.shape[0] != shape[1]:
+        raise ValueError(
+            f"csc_matmul RHS has leading dimension {rhs.shape[0]}, "
+            f"but sparse n_cols={shape[1]}."
+        )
+    check_value_dtype("csc_matmul data", data)
+    check_value_dtype("csc_matmul RHS", rhs)
+    if data.dtype != rhs.dtype:
+        raise TypeError(
+            "csc_matmul requires sparse data and RHS to have the same dtype, "
+            f"got {data.dtype} and {rhs.dtype}."
+        )
+
+
+def validate_coo_matmul_inputs(data, row, col, rhs, shape: Shape2D) -> None:
+    validate_coo_metadata(data, row, col, shape)
+    if rhs.ndim != 2:
+        raise ValueError(f"coo_matmul expects a rank-2 RHS, got shape={rhs.shape}.")
+    if rhs.shape[0] != shape[1]:
+        raise ValueError(
+            f"coo_matmul RHS has leading dimension {rhs.shape[0]}, "
+            f"but sparse n_cols={shape[1]}."
+        )
+    check_value_dtype("coo_matmul data", data)
+    check_value_dtype("coo_matmul RHS", rhs)
+    if data.dtype != rhs.dtype:
+        raise TypeError(
+            "coo_matmul requires sparse data and RHS to have the same dtype, "
             f"got {data.dtype} and {rhs.dtype}."
         )

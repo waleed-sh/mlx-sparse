@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import importlib
+from types import SimpleNamespace
 
 
 def test_public_package_imports_without_build_side_effects():
@@ -23,6 +24,11 @@ def test_public_package_imports_without_build_side_effects():
     assert "CSRArray" in module.__all__
     assert "CSCArray" in module.__all__
     assert "COOArray" in module.__all__
+    assert "coo_matmat" in module.__all__
+    assert "coo_matmul" in module.__all__
+    assert "coo_matvec" in module.__all__
+    assert "csc_matmat" in module.__all__
+    assert "csc_matmul" in module.__all__
     assert "csc_matvec" in module.__all__
     assert "csr_matmul" in module.__all__
     assert "use_gpu" in module.__all__
@@ -45,8 +51,20 @@ def test_native_extension_imports_after_editable_build():
     assert hasattr(ext, "csc_tocsr")
     assert hasattr(ext, "csc_sort_indices")
     assert hasattr(ext, "csc_sum_duplicates")
+    assert hasattr(ext, "coo_matvec")
+    assert hasattr(ext, "coo_matmat")
+    assert hasattr(ext, "coo_matmul")
+    assert hasattr(ext, "coo_batched_matvec")
+    assert hasattr(ext, "coo_batched_matmul")
     assert hasattr(ext, "csc_matvec")
+    assert hasattr(ext, "csc_matmat")
+    assert hasattr(ext, "csc_matmul")
+    assert hasattr(ext, "csc_batched_matvec")
+    assert hasattr(ext, "csc_batched_matmul")
     assert hasattr(ext, "csc_matvec_transpose")
+    assert hasattr(ext, "csc_matmul_transpose")
+    assert hasattr(ext, "coo_matmul_data_vjp")
+    assert hasattr(ext, "csc_matmul_data_vjp")
 
 
 def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
@@ -82,17 +100,53 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
             seen.append(("csc_matvec", kwargs))
             return "csc_matvec"
 
+        def coo_matvec(self, *args, **kwargs):
+            seen.append(("coo_matvec", kwargs))
+            return "coo_matvec"
+
         def csr_batched_matvec(self, *args, **kwargs):
             seen.append(("csr_batched_matvec", kwargs))
             return "batched_matvec"
+
+        def coo_batched_matvec(self, *args, **kwargs):
+            seen.append(("coo_batched_matvec", kwargs))
+            return "coo_batched_matvec"
+
+        def csc_batched_matvec(self, *args, **kwargs):
+            seen.append(("csc_batched_matvec", kwargs))
+            return "csc_batched_matvec"
 
         def csr_matmul(self, *args, **kwargs):
             seen.append(("csr_matmul", kwargs))
             return "matmul"
 
+        def coo_matmul(self, *args, **kwargs):
+            seen.append(("coo_matmul", kwargs))
+            return "coo_matmul"
+
+        def csc_matmul(self, *args, **kwargs):
+            seen.append(("csc_matmul", kwargs))
+            return "csc_matmul"
+
+        def coo_matmat(self, *args, **kwargs):
+            seen.append(("coo_matmat", kwargs))
+            return "coo_matmat"
+
+        def csc_matmat(self, *args, **kwargs):
+            seen.append(("csc_matmat", kwargs))
+            return "csc_matmat"
+
         def csr_batched_matmul(self, *args, **kwargs):
             seen.append(("csr_batched_matmul", kwargs))
             return "batched_matmul"
+
+        def coo_batched_matmul(self, *args, **kwargs):
+            seen.append(("coo_batched_matmul", kwargs))
+            return "coo_batched_matmul"
+
+        def csc_batched_matmul(self, *args, **kwargs):
+            seen.append(("csc_batched_matmul", kwargs))
+            return "csc_batched_matmul"
 
         def csr_transpose(self, *args, **kwargs):
             seen.append(("csr_transpose", kwargs))
@@ -109,6 +163,10 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
         def csc_matvec_transpose(self, *args, **kwargs):
             seen.append(("csc_matvec_transpose", kwargs))
             return "csc_matvec_transpose"
+
+        def csc_matmul_transpose(self, *args, **kwargs):
+            seen.append(("csc_matmul_transpose", kwargs))
+            return "csc_matmul_transpose"
 
         def csr_sort_indices(self, *args, **kwargs):
             seen.append(("csr_sort_indices", kwargs))
@@ -131,14 +189,39 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert native.csc_todense("data", "indices", "indptr", (1, 2)) == "dense_csc"
     assert native.csr_matvec("data", "indices", "indptr", "x", (1, 2)) == "matvec"
     assert native.csc_matvec("data", "indices", "indptr", "x", (1, 2)) == "csc_matvec"
+    assert native.coo_matvec("data", "row", "col", "x", (1, 2)) == "coo_matvec"
     assert (
         native.csr_batched_matvec("data", "indices", "indptr", "x", (1, 2))
         == "batched_matvec"
     )
+    assert (
+        native.coo_batched_matvec("data", "row", "col", "x", (1, 2))
+        == "coo_batched_matvec"
+    )
+    assert (
+        native.csc_batched_matvec("data", "indices", "indptr", "x", (1, 2))
+        == "csc_batched_matvec"
+    )
     assert native.csr_matmul("data", "indices", "indptr", "x", (1, 2)) == "matmul"
+    assert native.coo_matmul("data", "row", "col", "x", (1, 2)) == "coo_matmul"
+    assert native.csc_matmul("data", "indices", "indptr", "x", (1, 2)) == "csc_matmul"
+    coo_lhs = SimpleNamespace(data="ld", row="lr", col="lc", shape=(1, 2))
+    coo_rhs = SimpleNamespace(data="rd", row="rr", col="rc", shape=(2, 3))
+    csc_lhs = SimpleNamespace(data="ld", indices="li", indptr="lp", shape=(1, 2))
+    csc_rhs = SimpleNamespace(data="rd", indices="ri", indptr="rp", shape=(2, 3))
+    assert native.coo_matmat(coo_lhs, coo_rhs) == "coo_matmat"
+    assert native.csc_matmat(csc_lhs, csc_rhs) == "csc_matmat"
     assert (
         native.csr_batched_matmul("data", "indices", "indptr", "x", (1, 2))
         == "batched_matmul"
+    )
+    assert (
+        native.coo_batched_matmul("data", "row", "col", "x", (1, 2))
+        == "coo_batched_matmul"
+    )
+    assert (
+        native.csc_batched_matmul("data", "indices", "indptr", "x", (1, 2))
+        == "csc_batched_matmul"
     )
     assert native.csr_transpose("data", "indices", "indptr", (1, 2)) == "transpose"
     assert native.csr_tocsc("data", "indices", "indptr", (1, 2)) == "tocsc"
@@ -146,6 +229,10 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert (
         native.csc_matvec_transpose("data", "indices", "indptr", "x", (1, 2))
         == "csc_matvec_transpose"
+    )
+    assert (
+        native.csc_matmul_transpose("data", "indices", "indptr", "x", (1, 2))
+        == "csc_matmul_transpose"
     )
     assert native.csr_sort_indices("data", "indices", "indptr") == "sort"
     assert native.csc_sort_indices("data", "indices", "indptr") == "sort_csc"

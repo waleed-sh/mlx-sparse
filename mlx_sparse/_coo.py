@@ -45,8 +45,9 @@ class COOArray:
     straightforward to assemble matrices from element lists, graph adjacency
     lists, finite-element stencils, or Hamiltonians.
 
-    For repeated sparse-dense products, convert to CSR with :meth:`tocsr`
-    after construction.
+    COO supports native sparse-dense products directly. For heavily repeated
+    row-oriented workloads, CSR may still be preferable after construction
+    because its compressed row layout avoids coordinate scatter.
 
     **Format invariants** (checked by ``validate="metadata"`` by default):
 
@@ -181,6 +182,26 @@ class COOArray:
             ``self.data``.
         """
         return self.tocsr(canonical=False).todense()
+
+    def __matmul__(self, rhs):
+        """Matrix multiplication via the ``@`` operator."""
+        from mlx_sparse._csc import CSCArray
+        from mlx_sparse._ops import coo_matmat, coo_matmul, coo_matvec
+
+        if isinstance(rhs, COOArray):
+            return coo_matmat(self, rhs)
+        if isinstance(rhs, (CSRArray, CSCArray)):
+            raise NotImplementedError(
+                "Mixed-format COO sparse-sparse matmul is not implemented. "
+                "Convert explicitly if another format is acceptable for your workload."
+            )
+
+        rhs = ensure_mx_array(rhs)
+        if rhs.ndim == 1:
+            return coo_matvec(self, rhs)
+        if rhs.ndim >= 2:
+            return coo_matmul(self, rhs)
+        raise ValueError(f"COO matmul expects rank-1 or higher RHS, got {rhs.shape}.")
 
 
 def coo_array(

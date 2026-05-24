@@ -112,6 +112,19 @@ def csc_matvec(
     return ext.csc_matvec(data, indices, indptr, x, shape[0], shape[1])
 
 
+def coo_matvec(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    x: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_matvec(data, row, col, x, shape)
+    return ext.coo_matvec(data, row, col, x, shape[0], shape[1])
+
+
 def csr_batched_matvec(
     data: mx.array,
     indices: mx.array,
@@ -124,6 +137,34 @@ def csr_batched_matvec(
         dense = _fallback.csr_todense(data, indices, indptr, shape)
         return rhs @ mx.transpose(dense)
     return ext.csr_batched_matvec(data, indices, indptr, rhs, shape[0], shape[1])
+
+
+def coo_batched_matvec(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        dense = _fallback.coo_todense(data, row, col, shape)
+        return rhs @ mx.transpose(dense)
+    return ext.coo_batched_matvec(data, row, col, rhs, shape[0], shape[1])
+
+
+def csc_batched_matvec(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        dense = _fallback.csc_todense(data, indices, indptr, shape)
+        return rhs @ mx.transpose(dense)
+    return ext.csc_batched_matvec(data, indices, indptr, rhs, shape[0], shape[1])
 
 
 def csr_matvec_transpose(
@@ -165,6 +206,32 @@ def csr_matmul(
     return ext.csr_matmul(data, indices, indptr, rhs, shape[0], shape[1])
 
 
+def coo_matmul(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_matmul(data, row, col, rhs, shape)
+    return ext.coo_matmul(data, row, col, rhs, shape[0], shape[1])
+
+
+def csc_matmul(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_matmul(data, indices, indptr, rhs, shape)
+    return ext.csc_matmul(data, indices, indptr, rhs, shape[0], shape[1])
+
+
 def csr_batched_matmul(
     data: mx.array,
     indices: mx.array,
@@ -177,6 +244,34 @@ def csr_batched_matmul(
         dense = _fallback.csr_todense(data, indices, indptr, shape)
         return mx.matmul(dense[None, :, :], rhs)
     return ext.csr_batched_matmul(data, indices, indptr, rhs, shape[0], shape[1])
+
+
+def coo_batched_matmul(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        dense = _fallback.coo_todense(data, row, col, shape)
+        return mx.matmul(dense[None, :, :], rhs)
+    return ext.coo_batched_matmul(data, row, col, rhs, shape[0], shape[1])
+
+
+def csc_batched_matmul(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        dense = _fallback.csc_todense(data, indices, indptr, shape)
+        return mx.matmul(dense[None, :, :], rhs)
+    return ext.csc_batched_matmul(data, indices, indptr, rhs, shape[0], shape[1])
 
 
 def csr_matmul_transpose(
@@ -192,11 +287,60 @@ def csr_matmul_transpose(
     return ext.csr_matmul_transpose(data, indices, indptr, rhs, shape[0], shape[1])
 
 
+def csc_matmul_transpose(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_matmul_transpose(data, indices, indptr, rhs, shape)
+    return ext.csc_matmul_transpose(data, indices, indptr, rhs, shape[0], shape[1])
+
+
 def csr_matmat(lhs, rhs):
     ext = extension()
     if ext is None:
         return _fallback.csr_matmat(lhs, rhs)
     return ext.csr_matmat(
+        lhs.data,
+        lhs.indices,
+        lhs.indptr,
+        rhs.data,
+        rhs.indices,
+        rhs.indptr,
+        lhs.shape[0],
+        lhs.shape[1],
+        rhs.shape[0],
+        rhs.shape[1],
+    )
+
+
+def coo_matmat(lhs, rhs):
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_matmat(lhs, rhs)
+    return ext.coo_matmat(
+        lhs.data,
+        lhs.row,
+        lhs.col,
+        rhs.data,
+        rhs.row,
+        rhs.col,
+        lhs.shape[0],
+        lhs.shape[1],
+        rhs.shape[0],
+        rhs.shape[1],
+    )
+
+
+def csc_matmat(lhs, rhs):
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_matmat(lhs, rhs)
+    return ext.csc_matmat(
         lhs.data,
         lhs.indices,
         lhs.indptr,

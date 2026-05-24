@@ -221,22 +221,21 @@ class CSCArray:
     def __matmul__(self, rhs):
         """Matrix multiplication via the ``@`` operator."""
         from mlx_sparse._coo import COOArray
-        from mlx_sparse._ops import csc_matvec
+        from mlx_sparse._ops import csc_matmat, csc_matmul, csc_matvec
 
-        if isinstance(rhs, CSCArray | CSRArray | COOArray):
+        if isinstance(rhs, CSCArray):
+            return csc_matmat(self, rhs)
+        if isinstance(rhs, CSRArray | COOArray):
             raise NotImplementedError(
-                "CSC sparse-sparse matmul is not implemented yet. Convert "
-                "explicitly if CSR semantics are acceptable for your workload."
+                "Mixed-format CSC sparse-sparse matmul is not implemented. "
+                "Convert explicitly if another format is acceptable for your workload."
             )
 
         rhs = ensure_mx_array(rhs)
         if rhs.ndim == 1:
             return csc_matvec(self, rhs)
         if rhs.ndim >= 2:
-            raise NotImplementedError(
-                "CSC dense-matrix matmul is not implemented yet; this first CSC "
-                "step provides native dense-vector matvec only."
-            )
+            return csc_matmul(self, rhs)
         raise ValueError(f"CSC matmul expects rank-1 or higher RHS, got {rhs.shape}.")
 
 

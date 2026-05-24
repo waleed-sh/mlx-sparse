@@ -99,6 +99,20 @@ def csc_todense(
     return to_mx(dense, dtype=data.dtype)
 
 
+def coo_todense(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    row_np = to_numpy(row)
+    col_np = to_numpy(col)
+    dense = np.zeros(shape, dtype=data_np.dtype)
+    np.add.at(dense, (row_np, col_np), data_np)
+    return to_mx(dense, dtype=data.dtype)
+
+
 def _reduction_accum_dtype(data: mx.array, data_np: np.ndarray):
     if data.dtype in {mx.float16, mx.bfloat16}:
         return np.float32
@@ -239,6 +253,22 @@ def csc_matvec(
     return to_mx(out, dtype=data.dtype)
 
 
+def coo_matvec(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    x: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    row_np = to_numpy(row)
+    col_np = to_numpy(col)
+    x_np = to_numpy(x)
+    out = np.zeros(shape[0], dtype=np.result_type(data_np.dtype, x_np.dtype))
+    np.add.at(out, row_np, data_np * x_np[col_np])
+    return to_mx(out, dtype=data.dtype)
+
+
 def csr_matvec_transpose(
     data: mx.array,
     indices: mx.array,
@@ -297,6 +327,49 @@ def csr_matmul(
         end = int(indptr_np[row + 1])
         for p in range(start, end):
             out[row] += data_np[p] * rhs_np[indices_np[p]]
+    return to_mx(out, dtype=data.dtype)
+
+
+def csc_matmul(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    rhs_np = to_numpy(rhs)
+    out = np.zeros(
+        (shape[0], rhs_np.shape[1]),
+        dtype=np.result_type(data_np.dtype, rhs_np.dtype),
+    )
+    for col in range(shape[1]):
+        start = int(indptr_np[col])
+        end = int(indptr_np[col + 1])
+        for p in range(start, end):
+            out[indices_np[p]] += data_np[p] * rhs_np[col]
+    return to_mx(out, dtype=data.dtype)
+
+
+def coo_matmul(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    row_np = to_numpy(row)
+    col_np = to_numpy(col)
+    rhs_np = to_numpy(rhs)
+    out = np.zeros(
+        (shape[0], rhs_np.shape[1]),
+        dtype=np.result_type(data_np.dtype, rhs_np.dtype),
+    )
+    for p, (r, c) in enumerate(zip(row_np, col_np, strict=True)):
+        out[r] += data_np[p] * rhs_np[c]
     return to_mx(out, dtype=data.dtype)
 
 
@@ -362,6 +435,126 @@ def csr_matmat(lhs, rhs):
     )
 
 
+def coo_matmat(lhs, rhs):
+    if lhs.shape[1] != rhs.shape[0]:
+        raise ValueError(
+            "COO sparse-sparse matmul dimension mismatch: "
+            f"{lhs.shape} @ {rhs.shape}."
+        )
+    if lhs.data.dtype != rhs.data.dtype:
+        raise TypeError(
+            "COO sparse-sparse matmul requires matching value dtypes, "
+            f"got {lhs.data.dtype} and {rhs.data.dtype}."
+        )
+
+    lhs_data = to_numpy(lhs.data)
+    lhs_row = to_numpy(lhs.row)
+    lhs_col = to_numpy(lhs.col)
+    rhs_data = to_numpy(rhs.data)
+    rhs_row = to_numpy(rhs.row)
+    rhs_col = to_numpy(rhs.col)
+
+    rhs_by_row = [[] for _ in range(rhs.shape[0])]
+    for pos, row in enumerate(rhs_row):
+        rhs_by_row[int(row)].append(pos)
+
+    lhs_by_row = [[] for _ in range(lhs.shape[0])]
+    for pos, row in enumerate(lhs_row):
+        lhs_by_row[int(row)].append(pos)
+
+    index_dtype = np.promote_types(lhs_row.dtype, rhs_row.dtype)
+    out_data = []
+    out_row = []
+    out_col = []
+    for row in range(lhs.shape[0]):
+        accum = {}
+        for lhs_pos in lhs_by_row[row]:
+            rhs_k = int(lhs_col[lhs_pos])
+            lhs_value = lhs_data[lhs_pos]
+            for rhs_pos in rhs_by_row[rhs_k]:
+                col = int(rhs_col[rhs_pos])
+                accum[col] = accum.get(col, 0) + lhs_value * rhs_data[rhs_pos]
+        for col in sorted(accum):
+            value = accum[col]
+            if value != 0:
+                out_data.append(value)
+                out_row.append(row)
+                out_col.append(col)
+
+    if out_data:
+        data_arr = np.asarray(out_data, dtype=lhs_data.dtype)
+        row_arr = np.asarray(out_row, dtype=index_dtype)
+        col_arr = np.asarray(out_col, dtype=index_dtype)
+    else:
+        data_arr = np.empty((0,), dtype=lhs_data.dtype)
+        row_arr = np.empty((0,), dtype=index_dtype)
+        col_arr = np.empty((0,), dtype=index_dtype)
+
+    out_dtype = lhs.row.dtype if lhs.index_dtype == rhs.index_dtype else mx.int64
+    return (
+        to_mx(data_arr, dtype=lhs.data.dtype),
+        to_mx(row_arr, dtype=out_dtype),
+        to_mx(col_arr, dtype=out_dtype),
+    )
+
+
+def csc_matmat(lhs, rhs):
+    if lhs.shape[1] != rhs.shape[0]:
+        raise ValueError(
+            "CSC sparse-sparse matmul dimension mismatch: "
+            f"{lhs.shape} @ {rhs.shape}."
+        )
+    if lhs.data.dtype != rhs.data.dtype:
+        raise TypeError(
+            "CSC sparse-sparse matmul requires matching value dtypes, "
+            f"got {lhs.data.dtype} and {rhs.data.dtype}."
+        )
+
+    lhs_data = to_numpy(lhs.data)
+    lhs_indices = to_numpy(lhs.indices)
+    lhs_indptr = to_numpy(lhs.indptr)
+    rhs_data = to_numpy(rhs.data)
+    rhs_indices = to_numpy(rhs.indices)
+    rhs_indptr = to_numpy(rhs.indptr)
+
+    index_dtype = np.promote_types(lhs_indices.dtype, rhs_indices.dtype)
+    out_data = []
+    out_indices = []
+    out_indptr = np.zeros(rhs.shape[1] + 1, dtype=index_dtype)
+
+    for col in range(rhs.shape[1]):
+        accum = {}
+        for rhs_pos in range(int(rhs_indptr[col]), int(rhs_indptr[col + 1])):
+            lhs_col = int(rhs_indices[rhs_pos])
+            rhs_value = rhs_data[rhs_pos]
+            for lhs_pos in range(
+                int(lhs_indptr[lhs_col]), int(lhs_indptr[lhs_col + 1])
+            ):
+                row = int(lhs_indices[lhs_pos])
+                accum[row] = accum.get(row, 0) + lhs_data[lhs_pos] * rhs_value
+
+        for row in sorted(accum):
+            value = accum[row]
+            if value != 0:
+                out_indices.append(row)
+                out_data.append(value)
+        out_indptr[col + 1] = len(out_data)
+
+    if out_data:
+        data_arr = np.asarray(out_data, dtype=lhs_data.dtype)
+        indices_arr = np.asarray(out_indices, dtype=index_dtype)
+    else:
+        data_arr = np.empty((0,), dtype=lhs_data.dtype)
+        indices_arr = np.empty((0,), dtype=index_dtype)
+
+    out_dtype = lhs.indices.dtype if lhs.index_dtype == rhs.index_dtype else mx.int64
+    return (
+        to_mx(data_arr, dtype=lhs.data.dtype),
+        to_mx(indices_arr, dtype=out_dtype),
+        to_mx(out_indptr, dtype=out_dtype),
+    )
+
+
 def csr_matmul_transpose(
     data: mx.array,
     indices: mx.array,
@@ -382,6 +575,29 @@ def csr_matmul_transpose(
         end = int(indptr_np[row + 1])
         for p in range(start, end):
             out[indices_np[p]] += data_np[p] * rhs_np[row]
+    return to_mx(out, dtype=data.dtype)
+
+
+def csc_matmul_transpose(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    data_np = to_numpy(data)
+    indices_np = to_numpy(indices)
+    indptr_np = to_numpy(indptr)
+    rhs_np = to_numpy(rhs)
+    out = np.zeros(
+        (shape[1], rhs_np.shape[1]),
+        dtype=np.result_type(data_np.dtype, rhs_np.dtype),
+    )
+    for col in range(shape[1]):
+        start = int(indptr_np[col])
+        end = int(indptr_np[col + 1])
+        for p in range(start, end):
+            out[col] += data_np[p] * rhs_np[indices_np[p]]
     return to_mx(out, dtype=data.dtype)
 
 

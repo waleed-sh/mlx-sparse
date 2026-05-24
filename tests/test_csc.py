@@ -261,7 +261,7 @@ def test_native_csc_matvec_and_transpose_match_dense_and_scipy(
     np.testing.assert_allclose(to_numpy(yt), expected_t, rtol=rtol, atol=atol)
 
 
-def test_csc_conjugate_transpose_and_unimplemented_matmul_paths(mx):
+def test_csc_conjugate_transpose_and_sparse_matmul_paths(mx):
     csc = ms.csc_array(
         (
             mx.array(np.array([1.0 + 2.0j, 3.0 - 1.0j], dtype=np.complex64)),
@@ -277,10 +277,16 @@ def test_csc_conjugate_transpose_and_unimplemented_matmul_paths(mx):
     )
 
     rhs = ms.eye(2, dtype=mx.complex64)
-    with pytest.raises(NotImplementedError, match="CSC sparse-sparse matmul"):
+    with pytest.raises(NotImplementedError, match="Mixed-format CSC"):
         csc @ rhs
-    with pytest.raises(NotImplementedError, match="CSC dense-matrix matmul"):
-        csc @ mx.array(np.eye(2, dtype=np.complex64))
+    csc_rhs = rhs.tocsc(canonical=True)
+    csc_out = csc @ csc_rhs
+    assert isinstance(csc_out, ms.CSCArray)
+    np.testing.assert_allclose(to_numpy(csc_out.todense()), to_numpy(csc.todense()))
+    np.testing.assert_allclose(
+        to_numpy(csc @ mx.array(np.eye(2, dtype=np.complex64))),
+        to_numpy(csc.todense()),
+    )
     with pytest.raises(TypeError, match="aslinearoperator"):
         ms.linalg.aslinearoperator(csc)
 
