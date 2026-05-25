@@ -57,21 +57,33 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.cpp
-	${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_batched_matmul/coo_batched_matmul.cpp
-	${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmat/coo_matmat.cpp
-	${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul/coo_matmul.cpp
-	${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.cpp
-	${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_batched_matmul/csc_batched_matmul.cpp
-	${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmat/csc_matmat.cpp
-	${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmul/csc_matmul.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_norms/coo_col_norms.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_sums/coo_col_sums.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_diagonal/coo_diagonal.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_batched_matmul/coo_batched_matmul.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmat/coo_matmat.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul/coo_matmul.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_norms/coo_row_norms.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_sums/coo_row_sums.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_trace/coo_trace.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_batched_matmul/csc_batched_matmul.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_col_norms/csc_col_norms.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_col_sums/csc_col_sums.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_diagonal/csc_diagonal.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmat/csc_matmat.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmul/csc_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmul_data_vjp/csc_matmul_data_vjp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmul_transpose/csc_matmul_transpose.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matvec/csc_matvec.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matvec_transpose/csc_matvec_transpose.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_row_norms/csc_row_norms.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_row_sums/csc_row_sums.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sort_indices/csc_sort_indices.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sum_duplicates/csc_sum_duplicates.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_tocsr/csc_tocsr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_todense/csc_todense.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_trace/csc_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matmul/csr_batched_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matvec/csr_batched_matvec.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_col_sums/csr_col_sums.cpp
@@ -120,21 +132,33 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.metal
-	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_batched_matmul/coo_batched_matmul.metal
-	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmat/coo_matmat.metal
-	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul/coo_matmul.metal
-	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_norms/coo_col_norms.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_sums/coo_col_sums.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_diagonal/coo_diagonal.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_batched_matmul/coo_batched_matmul.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmat/coo_matmat.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul/coo_matmul.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_norms/coo_row_norms.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_sums/coo_row_sums.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_trace/coo_trace.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_batched_matmul/csc_batched_matmul.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_col_norms/csc_col_norms.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_col_sums/csc_col_sums.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_diagonal/csc_diagonal.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmat/csc_matmat.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmul/csc_matmul.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmul_data_vjp/csc_matmul_data_vjp.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matmul_transpose/csc_matmul_transpose.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matvec/csc_matvec.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_matvec_transpose/csc_matvec_transpose.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_row_norms/csc_row_norms.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_row_sums/csc_row_sums.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sort_indices/csc_sort_indices.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sum_duplicates/csc_sum_duplicates.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_tocsr/csc_tocsr.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_todense/csc_todense.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_trace/csc_trace.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matmul/csr_batched_matmul.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_batched_matvec/csr_batched_matvec.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_col_sums/csr_col_sums.metal
@@ -167,7 +191,7 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
 
   add_dependencies(mlx_sparse_native mlx_sparse_metallib)
 else()
-  message(STATUS "Skipping mlx_sparse.metallib build; Metal compiler is unavailable.")
+  message(STATUS "Skipping mlx_sparse.metallib build. Metal compiler is unavailable.")
 endif()
 
 nanobind_add_module(

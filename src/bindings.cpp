@@ -18,22 +18,34 @@
 
 #include "linalg/linalg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
+#include "sparse/coo_col_norms/coo_col_norms.h"
+#include "sparse/coo_col_sums/coo_col_sums.h"
+#include "sparse/coo_diagonal/coo_diagonal.h"
 #include "sparse/coo_matmat/coo_matmat.h"
 #include "sparse/coo_matmul/coo_matmul.h"
 #include "sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.h"
+#include "sparse/coo_row_norms/coo_row_norms.h"
+#include "sparse/coo_row_sums/coo_row_sums.h"
 #include "sparse/coo_tocsc/coo_tocsc.h"
 #include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/coo_trace/coo_trace.h"
 #include "sparse/csc_batched_matmul/csc_batched_matmul.h"
+#include "sparse/csc_col_norms/csc_col_norms.h"
+#include "sparse/csc_col_sums/csc_col_sums.h"
+#include "sparse/csc_diagonal/csc_diagonal.h"
 #include "sparse/csc_matmat/csc_matmat.h"
 #include "sparse/csc_matmul/csc_matmul.h"
 #include "sparse/csc_matmul_data_vjp/csc_matmul_data_vjp.h"
 #include "sparse/csc_matmul_transpose/csc_matmul_transpose.h"
 #include "sparse/csc_matvec/csc_matvec.h"
 #include "sparse/csc_matvec_transpose/csc_matvec_transpose.h"
+#include "sparse/csc_row_norms/csc_row_norms.h"
+#include "sparse/csc_row_sums/csc_row_sums.h"
 #include "sparse/csc_sort_indices/csc_sort_indices.h"
 #include "sparse/csc_sum_duplicates/csc_sum_duplicates.h"
 #include "sparse/csc_tocsr/csc_tocsr.h"
 #include "sparse/csc_todense/csc_todense.h"
+#include "sparse/csc_trace/csc_trace.h"
 #include "sparse/csr_batched_matmul/csr_batched_matmul.h"
 #include "sparse/csr_batched_matvec/csr_batched_matvec.h"
 #include "sparse/csr_col_sums/csr_col_sums.h"
@@ -234,6 +246,120 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
       "Compute the trace of CSR buffers.");
+
+  m.def(
+      "coo_row_sums",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_row_sums(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Reduce each COO row to the sum of its stored values.");
+
+  m.def(
+      "coo_col_sums",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_col_sums(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Reduce each COO column to the sum of its stored values.");
+
+  m.def(
+      "coo_row_norms",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_row_norms(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the L2 norm of each canonical COO row.");
+
+  m.def(
+      "coo_col_norms",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_col_norms(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the L2 norm of each canonical COO column.");
+
+  m.def(
+      "coo_diagonal",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_diagonal(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Extract the summed diagonal of COO buffers.");
+
+  m.def(
+      "coo_trace",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_trace(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the trace of COO buffers.");
+
+  m.def(
+      "csc_row_sums",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_row_sums(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Reduce each CSC row to the sum of its stored values.");
+
+  m.def(
+      "csc_col_sums",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_col_sums(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Reduce each CSC column to the sum of its stored values.");
+
+  m.def(
+      "csc_row_norms",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_row_norms(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the L2 norm of each canonical CSC row.");
+
+  m.def(
+      "csc_col_norms",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_col_norms(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the L2 norm of each canonical CSC column.");
+
+  m.def(
+      "csc_diagonal",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_diagonal(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Extract the summed diagonal of CSC buffers.");
+
+  m.def(
+      "csc_trace",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_trace(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Compute the trace of CSC buffers.");
 
   m.def(
       "csr_matvec",
