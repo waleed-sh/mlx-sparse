@@ -7,9 +7,9 @@
 
 > **Warning: beta release**
 > This is an early beta. APIs may change, bugs are expected, and some features
-> are still incomplete. Feedback and issue reports are very welcome!
+> are still incomplete, especially GPU kernels for various operations. Feedback and issue reports are very welcome!
 > 
-> A lot of the linalg functionality is new and is currently being tested.
+> A lot of the functionality is new and is currently being tested.
 > We welcome any and all feedback! Not all solvers are GPU supported ([see here](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg.html#gpu-coverage)).
 
 > **Platform note**
