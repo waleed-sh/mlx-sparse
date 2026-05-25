@@ -214,6 +214,46 @@ def test_suitesparse_sparse_dense_products_match_scipy(
     )
 
 
+@pytest.mark.parametrize("name", ("well1033", "bcsstk03"))
+def test_suitesparse_coo_and_csc_native_products_match_scipy(mx, name):
+    scipy_csr = _read_suitesparse_matrix(name).astype(np.float32)
+    coo = ms.from_scipy(scipy_csr, format="coo", index_dtype=mx.int64)
+    csc = ms.from_scipy(scipy_csr, format="csc", index_dtype=mx.int64)
+
+    vector = np.cos(np.arange(scipy_csr.shape[1], dtype=np.float32) / 11.0)
+    dense_rhs = np.arange(scipy_csr.shape[1] * 4, dtype=np.float32).reshape(
+        -1, 4
+    ) / np.float32(23.0)
+    transpose_vector = np.sin(
+        np.arange(scipy_csr.shape[0], dtype=np.float32) / np.float32(13.0)
+    )
+
+    np.testing.assert_allclose(
+        to_numpy(coo @ mx.array(vector)),
+        scipy_csr @ vector,
+        rtol=2e-5,
+        atol=2e-5,
+    )
+    np.testing.assert_allclose(
+        to_numpy(csc @ mx.array(vector)),
+        scipy_csr @ vector,
+        rtol=2e-5,
+        atol=2e-5,
+    )
+    np.testing.assert_allclose(
+        to_numpy(csc @ mx.array(dense_rhs)),
+        scipy_csr @ dense_rhs,
+        rtol=2e-5,
+        atol=2e-5,
+    )
+    np.testing.assert_allclose(
+        to_numpy(csc.T @ mx.array(transpose_vector)),
+        scipy_csr.T @ transpose_vector,
+        rtol=2e-5,
+        atol=2e-5,
+    )
+
+
 @pytest.mark.parametrize("name", LEAST_SQUARES_MATRICES)
 def test_suitesparse_least_squares_rhs_normal_equation_parts_match_scipy(mx, name):
     scipy_csr = _read_suitesparse_matrix(name).astype(np.float32)
@@ -238,6 +278,27 @@ def test_suitesparse_normal_equation_sparse_sparse_product(mx, name):
     expected.sum_duplicates()
     expected.sort_indices()
 
+    assert out.has_canonical_format
+    assert out.sorted_indices
+    np.testing.assert_allclose(
+        to_numpy(out.todense()),
+        expected.toarray(),
+        rtol=2e-5,
+        atol=2e-5,
+    )
+
+
+def test_suitesparse_csc_normal_equation_sparse_sparse_product(mx):
+    scipy_csr = _read_suitesparse_matrix("well1033").astype(np.float32)
+
+    left = ms.from_scipy(scipy_csr.T, format="csc", index_dtype=mx.int64)
+    right = ms.from_scipy(scipy_csr, format="csc", index_dtype=mx.int64)
+    out = left @ right
+    expected = scipy_csr.T @ scipy_csr
+    expected.sum_duplicates()
+    expected.sort_indices()
+
+    assert isinstance(out, ms.CSCArray)
     assert out.has_canonical_format
     assert out.sorted_indices
     np.testing.assert_allclose(
@@ -317,6 +378,29 @@ def test_suitesparse_well1033_normal_equation_cg_and_gmres_solve(mx):
 
 
 @pytest.mark.native
+def test_suitesparse_well1033_normal_equation_accepts_csc_solver_input(mx):
+    _require_native_linalg()
+    design = _read_suitesparse_matrix("well1033").astype(np.float32)
+    rhs = _read_rhs("well1033")
+    normal = (design.T @ design).tocsr()
+    normal.sum_duplicates()
+    normal.sort_indices()
+    normal_rhs = design.T @ rhs
+    sparse_normal = ms.from_scipy(normal, format="csc", index_dtype=mx.int64)
+
+    x, info = linalg.cg(
+        sparse_normal,
+        mx.array(normal_rhs),
+        rtol=1e-5,
+        atol=1e-5,
+        maxiter=2000,
+    )
+
+    assert info == 0
+    assert _relative_residual(normal, to_numpy(x), normal_rhs) < 2e-5
+
+
+@pytest.mark.native
 def test_suitesparse_illc1033_normal_equation_solver_residual_is_bounded(mx):
     _require_native_linalg()
     design = _read_suitesparse_matrix("illc1033").astype(np.float32)
@@ -393,6 +477,23 @@ def test_suitesparse_bcsstk03_spd_solvers_and_eigenvalue(mx):
 
 
 @pytest.mark.native
+def test_suitesparse_bcsstk03_direct_factorizations_have_small_residual(mx):
+    _require_native_linalg()
+    scipy_spd = _read_suitesparse_matrix("bcsstk03").astype(np.float32)
+    sparse_spd = ms.from_scipy(scipy_spd, format="csc", index_dtype=mx.int64)
+    x_true = np.cos(np.arange(scipy_spd.shape[0], dtype=np.float32) / 9.0)
+    rhs = scipy_spd @ x_true
+
+    chol = linalg.sparse_cholesky(sparse_spd)
+    lu = linalg.sparse_lu(sparse_spd)
+    chol_x = to_numpy(chol.solve(mx.array(rhs)))
+    lu_x = to_numpy(lu.solve(mx.array(rhs)))
+
+    assert _relative_residual(scipy_spd, chol_x, rhs) < 5e-5
+    assert _relative_residual(scipy_spd, lu_x, rhs) < 5e-5
+
+
+@pytest.mark.native
 @pytest.mark.parametrize("name", LEAST_SQUARES_MATRICES)
 def test_suitesparse_lsq_svds_largest_singular_value_matches_scipy(mx, name):
     _require_native_linalg()
@@ -415,3 +516,37 @@ def test_suitesparse_lsq_svds_largest_singular_value_matches_scipy(mx, name):
     )
 
     np.testing.assert_allclose(to_numpy(got), expected, rtol=5e-3, atol=5e-3)
+
+
+@pytest.mark.native
+def test_suitesparse_rectangular_svds_vectors_satisfy_singular_equations(mx):
+    _require_native_linalg()
+    scipy_csr = _read_suitesparse_matrix("well1033").astype(np.float32)
+    sparse_csr = ms.from_scipy(scipy_csr, format="coo", index_dtype=mx.int64)
+
+    u, singular, vh = linalg.svds(
+        sparse_csr,
+        k=2,
+        which="LM",
+        ncv=40,
+        return_singular_vectors=True,
+    )
+    u_np = to_numpy(u)
+    singular_np = to_numpy(singular)
+    vh_np = to_numpy(vh)
+
+    for i, sigma in enumerate(singular_np):
+        right = vh_np[i]
+        left = u_np[:, i]
+        np.testing.assert_allclose(
+            scipy_csr @ right,
+            sigma * left,
+            rtol=2e-2,
+            atol=2e-2,
+        )
+        np.testing.assert_allclose(
+            scipy_csr.T @ left,
+            sigma * right,
+            rtol=2e-2,
+            atol=2e-2,
+        )
