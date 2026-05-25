@@ -183,6 +183,64 @@ class COOArray:
         """
         return self.tocsr(canonical=False).todense()
 
+    def row_sums(self) -> mx.array:
+        """Return the sum of stored values in each COO row."""
+        from mlx_sparse._ops import coo_row_sums
+
+        return coo_row_sums(self)
+
+    def col_sums(self) -> mx.array:
+        """Return the sum of stored values in each COO column."""
+        from mlx_sparse._ops import coo_col_sums
+
+        return coo_col_sums(self)
+
+    def column_sums(self) -> mx.array:
+        """Alias for :meth:`col_sums`."""
+        return self.col_sums()
+
+    def row_norms(self) -> mx.array:
+        """Return the dense-semantics L2 norm of each COO row as ``float32``."""
+        from mlx_sparse._ops import coo_row_norms
+
+        return coo_row_norms(self)
+
+    def col_norms(self) -> mx.array:
+        """Return the dense-semantics L2 norm of each COO column as ``float32``."""
+        from mlx_sparse._ops import coo_col_norms
+
+        return coo_col_norms(self)
+
+    def column_norms(self) -> mx.array:
+        """Alias for :meth:`col_norms`."""
+        return self.col_norms()
+
+    def diagonal(self) -> mx.array:
+        """Return the summed main diagonal."""
+        from mlx_sparse._ops import coo_diagonal
+
+        return coo_diagonal(self)
+
+    def trace(self) -> mx.array:
+        """Return the summed main diagonal as a scalar."""
+        from mlx_sparse._ops import coo_trace
+
+        return coo_trace(self)
+
+    def sum(self, axis=None) -> mx.array:
+        """Sum sparse values over all entries, rows, or columns.
+
+        ``axis=None`` returns a scalar, ``axis=1`` returns row sums, and
+        ``axis=0`` returns column sums.
+        """
+        if axis is None:
+            return mx.sum(self.row_sums())
+        if axis in (1, -1):
+            return self.row_sums()
+        if axis in (0, -2):
+            return self.col_sums()
+        raise ValueError(f"COOArray.sum axis must be None, 0, or 1; got {axis!r}.")
+
     def __matmul__(self, rhs):
         """Matrix multiplication via the ``@`` operator."""
         from mlx_sparse._csc import CSCArray

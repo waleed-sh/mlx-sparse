@@ -140,6 +140,110 @@ def csr_trace(a: CSRArray) -> mx.array:
     return _native.csr_trace(a.data, a.indices, a.indptr, a.shape)
 
 
+def coo_row_sums(a: COOArray) -> mx.array:
+    """Reduce each row of a COO matrix to the sum of its stored values."""
+    a = _ensure_coo_array("coo_row_sums", a)
+    return _native.coo_row_sums(a.data, a.row, a.col, a.shape)
+
+
+def coo_col_sums(a: COOArray) -> mx.array:
+    """Reduce each column of a COO matrix to the sum of its stored values."""
+    a = _ensure_coo_array("coo_col_sums", a)
+    return _native.coo_col_sums(a.data, a.row, a.col, a.shape)
+
+
+def coo_column_sums(a: COOArray) -> mx.array:
+    """Alias for :func:`coo_col_sums`."""
+    return coo_col_sums(a)
+
+
+def coo_row_norms(a: COOArray) -> mx.array:
+    """Compute the dense-semantics L2 norm of each COO row."""
+    a = _ensure_coo_array("coo_row_norms", a)
+    if not a.has_canonical_format:
+        return a.tocsr(canonical=True).row_norms()
+    return _native.coo_row_norms(a.data, a.row, a.col, a.shape, assume_canonical=True)
+
+
+def coo_col_norms(a: COOArray) -> mx.array:
+    """Compute the dense-semantics L2 norm of each COO column."""
+    a = _ensure_coo_array("coo_col_norms", a)
+    if not a.has_canonical_format:
+        return a.tocsc(canonical=True).col_norms()
+    return _native.coo_col_norms(a.data, a.row, a.col, a.shape, assume_canonical=True)
+
+
+def coo_column_norms(a: COOArray) -> mx.array:
+    """Alias for :func:`coo_col_norms`."""
+    return coo_col_norms(a)
+
+
+def coo_diagonal(a: COOArray) -> mx.array:
+    """Extract the summed diagonal of a COO matrix."""
+    a = _ensure_coo_array("coo_diagonal", a)
+    return _native.coo_diagonal(a.data, a.row, a.col, a.shape)
+
+
+def coo_trace(a: COOArray) -> mx.array:
+    """Compute the trace of a COO matrix."""
+    a = _ensure_coo_array("coo_trace", a)
+    return _native.coo_trace(a.data, a.row, a.col, a.shape)
+
+
+def csc_row_sums(a: CSCArray) -> mx.array:
+    """Reduce each row of a CSC matrix to the sum of its stored values."""
+    a = _ensure_csc_array("csc_row_sums", a)
+    return _native.csc_row_sums(a.data, a.indices, a.indptr, a.shape)
+
+
+def csc_col_sums(a: CSCArray) -> mx.array:
+    """Reduce each column of a CSC matrix to the sum of its stored values."""
+    a = _ensure_csc_array("csc_col_sums", a)
+    return _native.csc_col_sums(a.data, a.indices, a.indptr, a.shape)
+
+
+def csc_column_sums(a: CSCArray) -> mx.array:
+    """Alias for :func:`csc_col_sums`."""
+    return csc_col_sums(a)
+
+
+def csc_row_norms(a: CSCArray) -> mx.array:
+    """Compute the L2 norm of each CSC row."""
+    a = _ensure_csc_array("csc_row_norms", a)
+    if not a.has_canonical_format:
+        a = a.canonicalize()
+    return _native.csc_row_norms(
+        a.data, a.indices, a.indptr, a.shape, assume_canonical=True
+    )
+
+
+def csc_col_norms(a: CSCArray) -> mx.array:
+    """Compute the L2 norm of each CSC column."""
+    a = _ensure_csc_array("csc_col_norms", a)
+    if not a.has_canonical_format:
+        a = a.canonicalize()
+    return _native.csc_col_norms(
+        a.data, a.indices, a.indptr, a.shape, assume_canonical=True
+    )
+
+
+def csc_column_norms(a: CSCArray) -> mx.array:
+    """Alias for :func:`csc_col_norms`."""
+    return csc_col_norms(a)
+
+
+def csc_diagonal(a: CSCArray) -> mx.array:
+    """Extract the summed diagonal of a CSC matrix."""
+    a = _ensure_csc_array("csc_diagonal", a)
+    return _native.csc_diagonal(a.data, a.indices, a.indptr, a.shape)
+
+
+def csc_trace(a: CSCArray) -> mx.array:
+    """Compute the trace of a CSC matrix."""
+    a = _ensure_csc_array("csc_trace", a)
+    return _native.csc_trace(a.data, a.indices, a.indptr, a.shape)
+
+
 def csc_matvec(a: CSCArray, x) -> mx.array:
     """Multiply a CSC sparse matrix by a dense vector."""
     a = _ensure_csc_array("csc_matvec", a)

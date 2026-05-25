@@ -104,6 +104,64 @@ class CSCArray:
         """Materialize the sparse matrix as a dense MLX array."""
         return _native.csc_todense(self.data, self.indices, self.indptr, self.shape)
 
+    def row_sums(self) -> mx.array:
+        """Return the sum of stored values in each CSC row."""
+        from mlx_sparse._ops import csc_row_sums
+
+        return csc_row_sums(self)
+
+    def col_sums(self) -> mx.array:
+        """Return the sum of stored values in each CSC column."""
+        from mlx_sparse._ops import csc_col_sums
+
+        return csc_col_sums(self)
+
+    def column_sums(self) -> mx.array:
+        """Alias for :meth:`col_sums`."""
+        return self.col_sums()
+
+    def row_norms(self) -> mx.array:
+        """Return the dense-semantics L2 norm of each CSC row as ``float32``."""
+        from mlx_sparse._ops import csc_row_norms
+
+        return csc_row_norms(self)
+
+    def col_norms(self) -> mx.array:
+        """Return the dense-semantics L2 norm of each CSC column as ``float32``."""
+        from mlx_sparse._ops import csc_col_norms
+
+        return csc_col_norms(self)
+
+    def column_norms(self) -> mx.array:
+        """Alias for :meth:`col_norms`."""
+        return self.col_norms()
+
+    def diagonal(self) -> mx.array:
+        """Return the summed main diagonal."""
+        from mlx_sparse._ops import csc_diagonal
+
+        return csc_diagonal(self)
+
+    def trace(self) -> mx.array:
+        """Return the summed main diagonal as a scalar."""
+        from mlx_sparse._ops import csc_trace
+
+        return csc_trace(self)
+
+    def sum(self, axis=None) -> mx.array:
+        """Sum sparse values over all entries, rows, or columns.
+
+        ``axis=None`` returns a scalar, ``axis=1`` returns row sums, and
+        ``axis=0`` returns column sums.
+        """
+        if axis is None:
+            return mx.sum(self.col_sums())
+        if axis in (1, -1):
+            return self.row_sums()
+        if axis in (0, -2):
+            return self.col_sums()
+        raise ValueError(f"CSCArray.sum axis must be None, 0, or 1; got {axis!r}.")
+
     def tocsr(self, *, canonical: bool | None = None) -> CSRArray:
         """Convert to :class:`~mlx_sparse.CSRArray`.
 

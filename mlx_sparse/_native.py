@@ -450,6 +450,192 @@ def csr_trace(
     return ext.csr_trace(data, indices, indptr, shape[0], shape[1])
 
 
+def coo_row_sums(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_row_sums(data, row, col, shape)
+    return ext.coo_row_sums(data, row, col, shape[0], shape[1])
+
+
+def coo_col_sums(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_col_sums(data, row, col, shape)
+    return ext.coo_col_sums(data, row, col, shape[0], shape[1])
+
+
+def coo_row_norms(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+    *,
+    assume_canonical: bool = False,
+) -> mx.array:
+    if not assume_canonical:
+        csr_data, csr_indices, csr_indptr = coo_tocsr(data, row, col, shape)
+        csr_data, csr_indices, csr_indptr = csr_sum_duplicates(
+            csr_data, csr_indices, csr_indptr
+        )
+        return csr_row_norms(csr_data, csr_indices, csr_indptr, shape)
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_row_norms(data, row, col, shape)
+    return ext.coo_row_norms(data, row, col, shape[0], shape[1])
+
+
+def coo_col_norms(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+    *,
+    assume_canonical: bool = False,
+) -> mx.array:
+    if not assume_canonical:
+        csc_data, csc_indices, csc_indptr = coo_tocsc(data, row, col, shape)
+        csc_data, csc_indices, csc_indptr = csc_sum_duplicates(
+            csc_data, csc_indices, csc_indptr
+        )
+        return csc_col_norms(
+            csc_data, csc_indices, csc_indptr, shape, assume_canonical=True
+        )
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_col_norms(data, row, col, shape)
+    return ext.coo_col_norms(data, row, col, shape[0], shape[1])
+
+
+def coo_diagonal(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_diagonal(data, row, col, shape)
+    return ext.coo_diagonal(data, row, col, shape[0], shape[1])
+
+
+def coo_trace(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_trace(data, row, col, shape)
+    return ext.coo_trace(data, row, col, shape[0], shape[1])
+
+
+def csc_row_sums(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_row_sums(data, indices, indptr, shape)
+    return ext.csc_row_sums(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_col_sums(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_col_sums(data, indices, indptr, shape)
+    return ext.csc_col_sums(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_row_norms(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    assume_canonical: bool = False,
+) -> mx.array:
+    if not assume_canonical:
+        sorted_data, sorted_indices, sorted_indptr = csc_sort_indices(
+            data, indices, indptr
+        )
+        csc_data, csc_indices, csc_indptr = csc_sum_duplicates(
+            sorted_data, sorted_indices, sorted_indptr
+        )
+        return csc_row_norms(
+            csc_data, csc_indices, csc_indptr, shape, assume_canonical=True
+        )
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_row_norms(data, indices, indptr, shape)
+    return ext.csc_row_norms(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_col_norms(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    assume_canonical: bool = False,
+) -> mx.array:
+    if not assume_canonical:
+        sorted_data, sorted_indices, sorted_indptr = csc_sort_indices(
+            data, indices, indptr
+        )
+        csc_data, csc_indices, csc_indptr = csc_sum_duplicates(
+            sorted_data, sorted_indices, sorted_indptr
+        )
+        return csc_col_norms(
+            csc_data, csc_indices, csc_indptr, shape, assume_canonical=True
+        )
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_col_norms(data, indices, indptr, shape)
+    return ext.csc_col_norms(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_diagonal(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_diagonal(data, indices, indptr, shape)
+    return ext.csc_diagonal(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_trace(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.csc_trace(data, indices, indptr, shape)
+    return ext.csc_trace(data, indices, indptr, shape[0], shape[1])
+
+
 def csr_sort_indices(
     data: mx.array,
     indices: mx.array,
