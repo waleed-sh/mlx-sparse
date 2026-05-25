@@ -8,7 +8,7 @@ mlx-sparse v0.0.4b0 (Unreleased)
 
     This release will focus on improving the performance of the existing sparse linear algebra solvers, specifically for the
     CPU case, by providing Accelerate based solvers when appropriate and optimised versions of the current C++ native solvers
-    otherwise.
+    otherwise. See the roadmap `here <https://github.com/waleed-sh/mlx-sparse/issues/1>`_.
 
 New features
 ~~~~~~~~~~~~
@@ -186,7 +186,7 @@ mlx-sparse v0.0.2b0 (21.05.2026)
 .. note::
 
     This release focuses on providing basic sparse linear algebra operations via native C++ and Metal kernels. The
-    focus here is not performance but rather functionality first. See the roadmap `here <https://github.com/waleed-sh/mlx-sparse/issues/1>`_.
+    focus here is not performance but rather functionality first.
 
 New features
 ~~~~~~~~~~~~
