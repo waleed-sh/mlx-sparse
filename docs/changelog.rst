@@ -186,7 +186,7 @@ mlx-sparse v0.0.2b0 (21.05.2026)
 .. note::
 
     This release focuses on providing basic sparse linear algebra operations via native C++ and Metal kernels. The
-    focus here is not performance but rather functionality first.
+    focus here is not performance but rather functionality first. See the roadmap `here <https://github.com/waleed-sh/mlx-sparse/issues/1>`_.
 
 New features
 ~~~~~~~~~~~~
