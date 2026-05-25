@@ -19,11 +19,11 @@ row corresponding to grid point ``(i, j)`` has entries:
 
 .. code-block:: text
 
-   (idx(i,   j),   idx(i,   j))  ← self: coefficient +4
-   (idx(i-1, j),   idx(i,   j))  ← north neighbor: coefficient -1
-   (idx(i+1, j),   idx(i,   j))  ← south neighbor: coefficient -1
-   (idx(i,   j-1), idx(i,   j))  ← west neighbor: coefficient  -1
-   (idx(i,   j+1), idx(i,   j))  ← east neighbor: coefficient  -1
+   (idx(i,   j),   idx(i,   j))  <- self: coefficient +4
+   (idx(i-1, j),   idx(i,   j))  <- north neighbor: coefficient -1
+   (idx(i+1, j),   idx(i,   j))  <- south neighbor: coefficient -1
+   (idx(i,   j-1), idx(i,   j))  <- west neighbor: coefficient  -1
+   (idx(i,   j+1), idx(i,   j))  <- east neighbor: coefficient  -1
 
 Boundary neighbors that fall outside the grid are omitted. Corner points have
 2 neighbors, edge points have 3, and interior points have 4. This produces the

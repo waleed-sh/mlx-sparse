@@ -92,6 +92,36 @@ csc\_matmat
 
 .. autofunction:: csc_matmat
 
+Reductions
+----------
+
+All sparse containers expose reduction methods as well as module-level helper
+functions. ``row_sums`` / ``col_sums`` return the same dtype as the sparse
+values, ``row_norms`` / ``col_norms`` return ``float32``, and ``diagonal`` /
+``trace`` sum duplicate diagonal entries.
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 1
+
+   * - Format
+     - Functions
+   * - COO
+     - :func:`coo_row_sums`, :func:`coo_col_sums`,
+       :func:`coo_row_norms`, :func:`coo_col_norms`,
+       :func:`coo_diagonal`, :func:`coo_trace`
+   * - CSR
+     - :func:`csr_row_sums`, :func:`csr_col_sums`,
+       :func:`csr_row_norms`, :func:`csr_diagonal`, :func:`csr_trace`
+   * - CSC
+     - :func:`csc_row_sums`, :func:`csc_col_sums`,
+       :func:`csc_row_norms`, :func:`csc_col_norms`,
+       :func:`csc_diagonal`, :func:`csc_trace`
+
+COO and CSC reductions are native C++/Metal paths. Norm reductions use dense
+matrix semantics, so non-canonical COO/CSC inputs are canonicalized before
+norming to ensure duplicate coordinates are summed before the square is taken.
+
 todense
 -------
 

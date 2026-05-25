@@ -43,6 +43,10 @@ New features
   @ dense`` and ``CSCArray @ dense`` now dispatch through format-specific
   C++/Metal primitives instead of converting through CSR.
 
+* Added native COO and CSC reductions: row sums, column sums, row norms,
+  column norms, diagonal extraction, and trace. CSC column sums and column
+  norms are storage-aligned compressed-column reductions.
+
 * Added CSC input support to sparse linalg entrypoints. CSC matrices are
   converted once to canonical CSR at solver entry so existing CSR-native Krylov,
   direct factorization, triangular solve, spectral, and sparse inner-product
@@ -83,6 +87,12 @@ Improvements
   paths use ``atomic_float`` and non-``float32`` scatter paths remain native
   through serial GPU kernels where Metal lacks compatible atomic add support.
 
+* Added reduction-specific Metal kernels for COO and CSC. COO coordinate
+  scatter reductions use ``atomic_float`` where storage-compatible, COO/CSC
+  norm scatters accumulate squared magnitudes into ``float32`` atomics, and
+  CSC column reductions use scalar or threadgroup vector reductions over
+  contiguous compressed columns.
+
 * Broadened native correctness and regression tests against dense MLX and
   SciPy references, including GPU dtype coverage, complex gradients,
   pathological linalg cases, and performance regression checks.
@@ -117,6 +127,10 @@ Documentation
   dispatch, atomic scatter-add kernels, native transpose-product lowering,
   symbolic/numeric sparse-sparse assembly, and dynamic-output synchronization
   points.
+
+* Documented COO/CSC reduction semantics, including duplicate-aware norm
+  canonicalization and why CSC column reductions are the storage-aligned fast
+  path.
 
 * Added CSC container, conversion, and native matvec documentation plus a CSC
   notebook covering SciPy interop and CSR/CSC conversion semantics.

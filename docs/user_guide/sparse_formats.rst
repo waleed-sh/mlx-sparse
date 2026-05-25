@@ -170,6 +170,13 @@ atomic scatter and other value dtypes use a correctness-preserving native
 serial scatter path. Transpose products are the layout's fast path: each
 output column is an independent compressed-column dot product.
 
+CSC also has native reductions. ``col_sums`` and ``col_norms`` are especially
+efficient because each output column is already contiguous in memory. ``row_sums``
+and ``row_norms`` scatter contributions into row outputs; on Metal, ``float32``
+sum scatter uses atomics and norms accumulate squared magnitudes into
+``float32`` atomics for all supported value dtypes. ``diagonal`` and ``trace``
+walk compressed columns and sum duplicate diagonal entries.
+
 Same-format sparse-sparse products are also column-native. ``CSCArray @
 CSCArray`` dispatches to ``csc_matmat``, which walks each right-hand compressed
 column, gathers the needed left-hand compressed columns, and writes canonical
@@ -213,6 +220,12 @@ Canonicalization sorts indices within the compressed dimension
 stored index is a column, for CSC the compressed dimension is a column and the
 stored index is a row. The ``nnz`` after canonicalization may be smaller than
 before.
+
+Reduction norms follow dense matrix semantics. If a COO or CSC matrix is not
+canonical, ``row_norms`` and ``col_norms`` first sum duplicate coordinates via
+native canonicalization, then compute the norm. This matters because
+``sqrt(sum(abs(values) ** 2))`` over raw duplicate entries is not the norm of
+the represented dense matrix.
 
 Converting between formats
 --------------------------

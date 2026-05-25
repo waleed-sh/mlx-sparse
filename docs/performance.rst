@@ -151,6 +151,25 @@ The kernel notes below use a few implementation terms:
   not need output atomics. Matrix transpose products compute one
   ``(column, rhs_column)`` dot product per output element.
 
+**Metal COO / CSC reductions**
+
+* COO row/column sums, diagonal extraction, and trace operate directly on
+  explicit coordinates. ``float32`` scatter reductions use ``atomic_float``;
+  low-precision and complex sum scatters lower through native compressed
+  conversion plus storage-aligned reductions where Metal lacks compatible
+  storage atomics.
+
+* COO row/column norms and CSC row norms accumulate squared magnitudes into
+  ``float32`` outputs, so Metal can use ``atomic_float`` even for
+  ``float16``, ``bfloat16``, and ``complex64`` inputs. Public norm methods
+  canonicalize non-canonical COO/CSC inputs first so duplicates are summed
+  before squaring.
+
+* CSC column sums and column norms are storage-aligned. They use scalar
+  per-column kernels for short columns and threadgroup vector reductions for
+  long columns, matching the CSR row-reduction strategy but along the CSC
+  compressed dimension.
+
 **Metal csr_transpose**
 
 * The CPU path uses a counting transpose: count destination-row sizes, prefix

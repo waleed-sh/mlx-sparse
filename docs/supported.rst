@@ -202,6 +202,31 @@ Sparse-dense arithmetic
      - Not planned
      - Dynamic output size. May be added as a host-side utility.
 
+Sparse reductions
+-----------------
+
+.. list-table::
+   :widths: 35 15 50
+   :header-rows: 1
+
+   * - Feature
+     - Status
+     - Notes
+   * - COO reductions
+     - Done
+     - Native row/column sums, row/column L2 norms, diagonal extraction, and
+       trace. Sums and diagonal/trace operate directly on coordinates. Norms
+       canonicalize first when duplicates may be present so the result matches
+       dense semantics.
+   * - CSR reductions
+     - Done
+     - Native row/column sums, row norms, diagonal, and trace.
+   * - CSC reductions
+     - Done
+     - Native row/column sums, row/column L2 norms, diagonal, and trace.
+       Column sums and column norms are storage-aligned compressed-column
+       reductions and are the fast path for CSC.
+
 .. _gpu-supported-linalg:
 
 Sparse linear algebra
@@ -397,6 +422,12 @@ compact buffers.
    * - ``csc_batched_matvec`` / ``csc_batched_matmul``
      - All value and index dtypes
      - Native batched compressed-column dense RHS kernels
+   * - COO/CSC reductions
+     - All value and index dtypes
+     - Storage-aligned reductions use scalar or threadgroup vector kernels.
+       Scatter reductions use ``atomic_float`` where possible, norm scatter
+       accumulates into ``float32`` atomics, and low-precision/complex sum
+       scatters lower through native compressed conversion paths.
    * - ``csc_matmul_data_vjp``
      - All value and index dtypes
      - Fixed-output sparse-value VJP over compressed columns
@@ -489,9 +520,9 @@ Known limitations
   construction, and sparse-sparse ``matmat``) synchronize compact counts or
   structure to host before allocating final output buffers.
 * CSC currently covers construction, conversion, canonicalization, dense
-  materialization, dense vector/matrix products including batched dense RHS,
-  and same-format sparse-sparse matmul. CSC linalg solver integration is not
-  implicit yet.
+  materialization, reductions, dense vector/matrix products including batched
+  dense RHS, same-format sparse-sparse matmul, and one-time conversion at
+  linalg solver entry. CSC-specific direct factorizations remain future work.
 * Sparse solver, factorization, and spectral kernels are real-valued.
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.
