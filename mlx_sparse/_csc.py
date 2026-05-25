@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Number
 
 import mlx.core as mx
 
@@ -295,6 +296,33 @@ class CSCArray:
         if rhs.ndim >= 2:
             return csc_matmul(self, rhs)
         raise ValueError(f"CSC matmul expects rank-1 or higher RHS, got {rhs.shape}.")
+
+    def __rmul__(self, other):
+        """Multiply the current CSCArray by a number using the ``*`` operator.
+
+        This returns a new CSCArray with the data multiplied by the number, and
+        therefore does not in-place mutate the current CSCArray.
+
+        Args:
+            other: A valid number (complex or not).
+
+        Returns:
+            A new CSCArray with the data multiplied by the number.
+
+        Raises:
+            TypeError: If ``other`` is not an actual number.
+        """
+        if not isinstance(other, Number):
+            raise TypeError(f"Expected a number, got {type(other)!r}")
+
+        return CSCArray(
+            data=other * self.data,
+            indices=self.indices,
+            indptr=self.indptr,
+            shape=self.shape,
+            sorted_indices=self.sorted_indices,
+            has_canonical_format=self.has_canonical_format,
+        )
 
 
 def csc_array(

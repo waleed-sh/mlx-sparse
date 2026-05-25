@@ -1,6 +1,39 @@
 Changelog
 =========
 
+mlx-sparse v0.0.4b0 (Unreleased)
+----------------------------------
+
+New features
+~~~~~~~~~~~~
+
+* Support multiplying all sparse array types by numbers.
+
+Improvements
+~~~~~~~~~~~~
+
+* None.
+
+Backwards incompatible changes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* None.
+
+Deprecations
+~~~~~~~~~~~~
+
+* None.
+
+Bug fixes
+~~~~~~~~~
+
+* None.
+
+Documentation
+~~~~~~~~~~~~~
+
+* None.
+
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------
 
