@@ -6,6 +6,11 @@ MLX extension. It provides COO, CSR, and CSC sparse containers backed by
 ``mlx.core.array``, with C++ MLX primitives for sparse-dense products on both
 CPU and Metal GPU.
 
+.. warning::
+
+   As of now, ``mlx-sparse`` only supports macOS. Future support for Linux systems is being considered.
+   See a list of available functionality in :ref:`currently-supported`.
+
 .. note::
 
    GPU support in this version is Apple Silicon Metal only. CUDA is not

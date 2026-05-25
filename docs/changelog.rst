@@ -4,9 +4,11 @@ Changelog
 mlx-sparse v0.0.4b0 (Unreleased)
 ----------------------------------
 
-This release will focus on improving the performance of the existing sparse linear algebra solvers, specifically for the
-CPU case, by providing Accelerate based solvers when appropriate and optimised versions of the current C++ native solvers
-otherwise.
+.. note::
+
+    This release will focus on improving the performance of the existing sparse linear algebra solvers, specifically for the
+    CPU case, by providing Accelerate based solvers when appropriate and optimised versions of the current C++ native solvers
+    otherwise.
 
 New features
 ~~~~~~~~~~~~
@@ -41,8 +43,10 @@ Documentation
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------
 
-This release focuses on expanding the supported sparse formats to include COO and CSC arrays, with native C++/Metal
-kernels for basic operations.
+.. note::
+
+    This release focuses on expanding the supported sparse formats to include COO and CSC arrays, with native C++/Metal
+    kernels for basic operations.
 
 New features
 ~~~~~~~~~~~~
@@ -179,8 +183,10 @@ Documentation
 mlx-sparse v0.0.2b0 (21.05.2026)
 ----------------------------------
 
-This release focuses on providing basic sparse linear algebra operations via native C++ and Metal kernels. The
-focus here is not performance but rather functionality first.
+.. note::
+
+    This release focuses on providing basic sparse linear algebra operations via native C++ and Metal kernels. The
+    focus here is not performance but rather functionality first.
 
 New features
 ~~~~~~~~~~~~

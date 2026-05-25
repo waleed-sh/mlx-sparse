@@ -1,6 +1,11 @@
 Installation
 ============
 
+
+.. warning::
+
+   As of now, ``mlx-sparse`` only supports macOS. Future support for Linux systems is being considered.
+
 Installing from PyPI
 ---------------------
 

@@ -30,7 +30,6 @@ and integration with third-party libraries.
    10_benchmarks
    11_graph_algorithms
    12_neural_layers
-   17_heat_equation_pde
 
 Sparse linear algebra
 ---------------------

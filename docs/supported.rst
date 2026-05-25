@@ -1,8 +1,14 @@
+.. _currently-supported:
+
 Currently supported
 ====================
 
 This page is the authoritative record of what mlx-sparse implements, what is
 planned, and what is out of scope. Status is updated with each release.
+
+.. warning::
+
+   As of now, ``mlx-sparse`` only supports macOS. Future support for Linux systems is being considered.
 
 Current version: **development branch**
 
