@@ -50,6 +50,22 @@ def _assert_canonical_coo(coo):
         assert np.unique(pairs, axis=0).shape[0] == pairs.shape[0]
 
 
+def _assert_canonical_csc(csc):
+    data = to_numpy(csc.data)
+    indices = to_numpy(csc.indices)
+    indptr = to_numpy(csc.indptr)
+    assert csc.sorted_indices
+    assert csc.has_canonical_format
+    assert np.all(data != 0)
+    assert np.all(np.diff(indptr) >= 0)
+    for col in range(csc.shape[1]):
+        start, end = indptr[col], indptr[col + 1]
+        rows = indices[start:end]
+        if rows.size:
+            np.testing.assert_array_equal(rows, np.sort(rows))
+            assert np.unique(rows).size == rows.size
+
+
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
 @pytest.mark.parametrize(
     ("dtype", "rtol", "atol"),
@@ -411,4 +427,152 @@ def test_experimental_metal_coo_spgemm_matches_scipy(mx, scipy_sparse):
 
     assert isinstance(out, ms.COOArray)
     _assert_canonical_coo(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_csc_spgemm_duplicate_cancellation_and_rectangular_output(mx, scipy_sparse):
+    lhs_indices = np.array([1, 0, 0, 3, 1, 0, 2, 3], dtype=np.int32)
+    lhs_indptr = np.array([0, 1, 4, 5, 6, 8], dtype=np.int32)
+    lhs_data = np.array([3.0, 1.0, -1.0, 4.0, -2.0, 2.0, 5.0, -5.0], dtype=np.float32)
+    rhs_indices = np.array([1, 1, 2, 0, 4, 4, 3, 2, 3], dtype=np.int32)
+    rhs_indptr = np.array([0, 3, 6, 7, 9], dtype=np.int32)
+    rhs_data = np.array(
+        [7.0, -7.0, -3.0, 2.0, 1.0, -1.0, 2.0, 4.0, 0.0], dtype=np.float32
+    )
+
+    lhs = ms.csc_array(
+        (mx.array(lhs_data), mx.array(lhs_indices), mx.array(lhs_indptr)),
+        shape=(4, 5),
+        sorted_indices=False,
+    )
+    rhs = ms.csc_array(
+        (mx.array(rhs_data), mx.array(rhs_indices), mx.array(rhs_indptr)),
+        shape=(5, 4),
+        sorted_indices=False,
+    )
+
+    expected = (
+        scipy_sparse.csc_matrix((lhs_data, lhs_indices, lhs_indptr), shape=lhs.shape)
+        @ scipy_sparse.csc_matrix((rhs_data, rhs_indices, rhs_indptr), shape=rhs.shape)
+    ).toarray()
+    out = lhs @ rhs
+
+    assert isinstance(out, ms.CSCArray)
+    assert out.shape == (4, 4)
+    _assert_canonical_csc(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_csc_spgemm_empty_product_preserves_output_shape_and_dtype(mx):
+    lhs = ms.csc_array(
+        (
+            mx.array(np.array([2.0, -3.0], dtype=np.float32)),
+            mx.array(np.array([0, 2], dtype=np.int32)),
+            mx.array(np.array([0, 2, 2, 2, 2], dtype=np.int32)),
+        ),
+        shape=(3, 4),
+        sorted_indices=True,
+    )
+    rhs = ms.csc_array(
+        (
+            mx.array(np.array([4.0, 5.0], dtype=np.float32)),
+            mx.array(np.array([1, 3], dtype=np.int32)),
+            mx.array(np.array([0, 1, 2], dtype=np.int32)),
+        ),
+        shape=(4, 2),
+        sorted_indices=True,
+    )
+
+    out = lhs @ rhs
+
+    assert out.shape == (3, 2)
+    assert out.nnz == 0
+    assert out.dtype == lhs.dtype
+    assert out.index_dtype == lhs.index_dtype
+    assert out.sorted_indices
+    assert out.has_canonical_format
+    np.testing.assert_array_equal(
+        to_numpy(out.todense()), np.zeros((3, 2), dtype=np.float32)
+    )
+
+
+def test_native_csc_spgemm_mixed_index_dtypes_promotes_output_indices(mx, scipy_sparse):
+    lhs = ms.csc_array(
+        (
+            mx.array(np.array([1.0, 2.0, 3.0], dtype=np.float32)),
+            mx.array(np.array([0, 1, 1], dtype=np.int32)),
+            mx.array(np.array([0, 1, 2, 3], dtype=np.int32)),
+        ),
+        shape=(2, 3),
+        sorted_indices=True,
+    )
+    rhs = ms.csc_array(
+        (
+            mx.array(np.array([4.0, -1.0, 5.0], dtype=np.float32)),
+            mx.array(np.array([1, 0, 2], dtype=np.int64)),
+            mx.array(np.array([0, 1, 3], dtype=np.int64)),
+        ),
+        shape=(3, 2),
+        sorted_indices=True,
+    )
+
+    data, indices, indptr = native.csc_matmat(lhs, rhs)
+    expected = (
+        scipy_sparse.csc_matrix(
+            (
+                to_numpy(lhs.data),
+                to_numpy(lhs.indices).astype(np.int64),
+                to_numpy(lhs.indptr).astype(np.int64),
+            ),
+            shape=lhs.shape,
+        )
+        @ scipy_sparse.csc_matrix(
+            (to_numpy(rhs.data), to_numpy(rhs.indices), to_numpy(rhs.indptr)),
+            shape=rhs.shape,
+        )
+    ).toarray()
+    out = ms.CSCArray(
+        data,
+        indices,
+        indptr,
+        (2, 2),
+        sorted_indices=True,
+        has_canonical_format=True,
+    )
+
+    assert indices.dtype == mx.int64
+    assert indptr.dtype == mx.int64
+    _assert_canonical_csc(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.gpu
+def test_experimental_metal_csc_spgemm_matches_scipy(mx, scipy_sparse):
+    lhs_indices = np.array([0, 2, 1, 0, 2, 2, 2], dtype=np.int32)
+    lhs_indptr = np.array([0, 2, 3, 6, 7], dtype=np.int32)
+    lhs_data = np.array([1.0, -1.0, 3.0, -2.0, 2.5, -0.5, 4.0], dtype=np.float32)
+    rhs_indices = np.array([1, 0, 2, 2, 3], dtype=np.int32)
+    rhs_indptr = np.array([0, 1, 3, 5], dtype=np.int32)
+    rhs_data = np.array([-1.0, 2.0, 5.0, -5.0, 0.5], dtype=np.float32)
+
+    lhs = ms.csc_array(
+        (mx.array(lhs_data), mx.array(lhs_indices), mx.array(lhs_indptr)),
+        shape=(3, 4),
+        sorted_indices=False,
+    )
+    rhs = ms.csc_array(
+        (mx.array(rhs_data), mx.array(rhs_indices), mx.array(rhs_indptr)),
+        shape=(4, 3),
+        sorted_indices=False,
+    )
+
+    expected = (
+        scipy_sparse.csc_matrix((lhs_data, lhs_indices, lhs_indptr), shape=lhs.shape)
+        @ scipy_sparse.csc_matrix((rhs_data, rhs_indices, rhs_indptr), shape=rhs.shape)
+    ).toarray()
+    with ms.config.patch(EXPERIMENTAL_METAL_SPGEMM=True):
+        out = lhs @ rhs
+
+    assert isinstance(out, ms.CSCArray)
+    _assert_canonical_csc(out)
     np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)

@@ -33,6 +33,11 @@ Improvements
   and zero-prune kernels to return canonical COO output without calling CSR
   sparse-sparse multiplication.
 
+* Added an experimental staged Metal path for ``CSCArray @ CSCArray`` behind
+  ``ms.config.EXPERIMENTAL_METAL_SPGEMM``. The path stays column-native and
+  uses CSC-specific symbolic, numeric-fill, and zero-prune kernels to return
+  canonical CSC output without calling CSR sparse-sparse multiplication.
+
 Backwards incompatible changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -52,8 +57,8 @@ Documentation
 ~~~~~~~~~~~~~
 
 * Updated sparse format, supported-feature, and performance documentation to
-  describe the COO sparse-sparse execution paths and the experimental Metal
-  gate accurately.
+  describe the COO/CSC sparse-sparse execution paths and the experimental
+  Metal gate accurately.
 
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------

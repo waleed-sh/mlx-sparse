@@ -291,9 +291,11 @@ availability fallback, not a dtype-specific path in normal wheels.
   the right-hand compressed column and gathers matching left-hand compressed
   columns. The result is canonical CSC with sorted row indices per column.
 
-* CSC sparse-sparse multiplication is still a native C++ host implementation
-  today. Format-specific Metal CSC sparse-sparse kernels remain a future tuning
-  target because the output structure is dynamic.
+* The default CSC implementation remains the optimized native host path. An
+  experimental staged Metal CSC path is available behind
+  ``ms.config.EXPERIMENTAL_METAL_SPGEMM``. It runs CSC-specific symbolic,
+  numeric-fill, and prune kernels over compressed output columns. It does not
+  call CSR sparse-sparse multiplication.
 
 **CPU backends**
 

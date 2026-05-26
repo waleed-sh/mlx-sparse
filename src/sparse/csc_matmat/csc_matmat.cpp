@@ -16,17 +16,396 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#include "mlx/allocator.h"
+#include "mlx/backend/cpu/encoder.h"
+#include "mlx/ops.h"
+#include "mlx/primitives.h"
+#include "mlx/transforms.h"
+
+#ifdef _METAL_
+#include "mlx/backend/metal/device.h"
+#endif
 
 namespace mlx_sparse {
 
 namespace {
 
 template <typename T> bool nonzero(T value) { return value != T{}; }
+
+std::string csc_matmat_index_kernel_name(const std::string &prefix,
+                                         mx::Dtype lhs_index_dtype,
+                                         mx::Dtype rhs_index_dtype,
+                                         mx::Dtype out_index_dtype) {
+  return prefix + "_" + index_kernel_suffix(lhs_index_dtype) + "_" +
+         index_kernel_suffix(rhs_index_dtype) + "_" +
+         index_kernel_suffix(out_index_dtype);
+}
+
+std::string csc_matmat_numeric_kernel_name(mx::Dtype value_dtype,
+                                           mx::Dtype lhs_index_dtype,
+                                           mx::Dtype rhs_index_dtype,
+                                           mx::Dtype out_index_dtype) {
+  return "csc_matmat_numeric_" + value_kernel_suffix(value_dtype) + "_" +
+         index_kernel_suffix(lhs_index_dtype) + "_" +
+         index_kernel_suffix(rhs_index_dtype) + "_" +
+         index_kernel_suffix(out_index_dtype);
+}
+
+bool use_experimental_metal_spgemm() {
+  const char *flag = std::getenv("MLX_SPARSE_EXPERIMENTAL_METAL_SPGEMM");
+  return flag != nullptr && std::string(flag) == "1" &&
+         mx::default_device().type == mx::Device::gpu;
+}
+
+class CSCMatmatSymbolic : public mx::Primitive {
+public:
+  CSCMatmatSymbolic(mx::Stream stream, int lhs_n_rows, int lhs_n_cols,
+                    int rhs_n_cols)
+      : Primitive(stream), lhs_n_rows_(lhs_n_rows), lhs_n_cols_(lhs_n_cols),
+        rhs_n_cols_(rhs_n_cols) {}
+
+  void eval_cpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  void eval_gpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  const char *name() const override { return "CSCMatmatSymbolic"; }
+
+  bool is_equivalent(const mx::Primitive &other) const override {
+    const auto &rhs = static_cast<const CSCMatmatSymbolic &>(other);
+    return lhs_n_rows_ == rhs.lhs_n_rows_ && lhs_n_cols_ == rhs.lhs_n_cols_ &&
+           rhs_n_cols_ == rhs.rhs_n_cols_;
+  }
+
+private:
+  int lhs_n_rows_;
+  int lhs_n_cols_;
+  int rhs_n_cols_;
+};
+
+class CSCMatmatNumeric : public mx::Primitive {
+public:
+  CSCMatmatNumeric(mx::Stream stream, int lhs_n_rows, int lhs_n_cols,
+                   int rhs_n_cols)
+      : Primitive(stream), lhs_n_rows_(lhs_n_rows), lhs_n_cols_(lhs_n_cols),
+        rhs_n_cols_(rhs_n_cols) {}
+
+  void eval_cpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  void eval_gpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  const char *name() const override { return "CSCMatmatNumeric"; }
+
+  bool is_equivalent(const mx::Primitive &other) const override {
+    const auto &rhs = static_cast<const CSCMatmatNumeric &>(other);
+    return lhs_n_rows_ == rhs.lhs_n_rows_ && lhs_n_cols_ == rhs.lhs_n_cols_ &&
+           rhs_n_cols_ == rhs.rhs_n_cols_;
+  }
+
+private:
+  int lhs_n_rows_;
+  int lhs_n_cols_;
+  int rhs_n_cols_;
+};
+
+class CSCMatmatPruneCounts : public mx::Primitive {
+public:
+  explicit CSCMatmatPruneCounts(mx::Stream stream) : Primitive(stream) {}
+
+  void eval_cpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  void eval_gpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  const char *name() const override { return "CSCMatmatPruneCounts"; }
+
+  bool is_equivalent(const mx::Primitive &) const override { return true; }
+};
+
+class CSCMatmatPruneFill : public mx::Primitive {
+public:
+  explicit CSCMatmatPruneFill(mx::Stream stream) : Primitive(stream) {}
+
+  void eval_cpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  void eval_gpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  const char *name() const override { return "CSCMatmatPruneFill"; }
+
+  bool is_equivalent(const mx::Primitive &) const override { return true; }
+};
+
+template <typename LhsI, typename RhsI, typename OutI>
+void symbolic_cpu_impl(const mx::array &lhs_indices,
+                       const mx::array &lhs_indptr,
+                       const mx::array &rhs_indices,
+                       const mx::array &rhs_indptr, mx::array &counts,
+                       int lhs_n_rows, int lhs_n_cols, int rhs_n_cols,
+                       mx::Stream stream) {
+  counts.set_data(mx::allocator::malloc(counts.nbytes()));
+
+  auto &encoder = mx::cpu::get_command_encoder(stream);
+  encoder.set_input_array(lhs_indices);
+  encoder.set_input_array(lhs_indptr);
+  encoder.set_input_array(rhs_indices);
+  encoder.set_input_array(rhs_indptr);
+  encoder.set_output_array(counts);
+
+  encoder.dispatch([lhs_indices = mx::array::unsafe_weak_copy(lhs_indices),
+                    lhs_indptr = mx::array::unsafe_weak_copy(lhs_indptr),
+                    rhs_indices = mx::array::unsafe_weak_copy(rhs_indices),
+                    rhs_indptr = mx::array::unsafe_weak_copy(rhs_indptr),
+                    counts = mx::array::unsafe_weak_copy(counts), lhs_n_rows,
+                    lhs_n_cols, rhs_n_cols]() mutable {
+    const auto *lhs_indices_ptr = lhs_indices.data<LhsI>();
+    const auto *lhs_indptr_ptr = lhs_indptr.data<LhsI>();
+    const auto *rhs_indices_ptr = rhs_indices.data<RhsI>();
+    const auto *rhs_indptr_ptr = rhs_indptr.data<RhsI>();
+    auto *counts_ptr = counts.data<OutI>();
+
+    std::vector<int> marker(static_cast<size_t>(lhs_n_rows), -1);
+    for (int col = 0; col < rhs_n_cols; ++col) {
+      int col_count = 0;
+      for (RhsI rhs_pos = rhs_indptr_ptr[col];
+           rhs_pos < rhs_indptr_ptr[col + 1]; ++rhs_pos) {
+        const int lhs_col = static_cast<int>(rhs_indices_ptr[rhs_pos]);
+        if (lhs_col < 0 || lhs_col >= lhs_n_cols) {
+          throw std::invalid_argument(
+              "csc_matmat rhs indices contain an out-of-bounds row.");
+        }
+        for (LhsI lhs_pos = lhs_indptr_ptr[lhs_col];
+             lhs_pos < lhs_indptr_ptr[lhs_col + 1]; ++lhs_pos) {
+          const int row = static_cast<int>(lhs_indices_ptr[lhs_pos]);
+          if (row < 0 || row >= lhs_n_rows) {
+            throw std::invalid_argument(
+                "csc_matmat lhs indices contain an out-of-bounds row.");
+          }
+          if (marker[static_cast<size_t>(row)] != col) {
+            marker[static_cast<size_t>(row)] = col;
+            col_count += 1;
+          }
+        }
+      }
+      counts_ptr[col] = static_cast<OutI>(col_count);
+    }
+  });
+}
+
+template <typename T, typename LhsI, typename RhsI, typename OutI>
+void numeric_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
+                      const mx::array &lhs_indptr, const mx::array &rhs_data,
+                      const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                      const mx::array &out_indptr, mx::array &out_data,
+                      mx::array &out_indices, int lhs_n_rows, int lhs_n_cols,
+                      int rhs_n_cols, mx::Stream stream) {
+  out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
+  out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
+
+  auto &encoder = mx::cpu::get_command_encoder(stream);
+  encoder.set_input_array(lhs_data);
+  encoder.set_input_array(lhs_indices);
+  encoder.set_input_array(lhs_indptr);
+  encoder.set_input_array(rhs_data);
+  encoder.set_input_array(rhs_indices);
+  encoder.set_input_array(rhs_indptr);
+  encoder.set_input_array(out_indptr);
+  encoder.set_output_array(out_data);
+  encoder.set_output_array(out_indices);
+
+  encoder.dispatch([lhs_data = mx::array::unsafe_weak_copy(lhs_data),
+                    lhs_indices = mx::array::unsafe_weak_copy(lhs_indices),
+                    lhs_indptr = mx::array::unsafe_weak_copy(lhs_indptr),
+                    rhs_data = mx::array::unsafe_weak_copy(rhs_data),
+                    rhs_indices = mx::array::unsafe_weak_copy(rhs_indices),
+                    rhs_indptr = mx::array::unsafe_weak_copy(rhs_indptr),
+                    out_indptr = mx::array::unsafe_weak_copy(out_indptr),
+                    out_data = mx::array::unsafe_weak_copy(out_data),
+                    out_indices = mx::array::unsafe_weak_copy(out_indices),
+                    lhs_n_rows, lhs_n_cols, rhs_n_cols]() mutable {
+    using AccT = typename Accumulator<T>::Type;
+
+    const auto *lhs_data_ptr = lhs_data.data<T>();
+    const auto *lhs_indices_ptr = lhs_indices.data<LhsI>();
+    const auto *lhs_indptr_ptr = lhs_indptr.data<LhsI>();
+    const auto *rhs_data_ptr = rhs_data.data<T>();
+    const auto *rhs_indices_ptr = rhs_indices.data<RhsI>();
+    const auto *rhs_indptr_ptr = rhs_indptr.data<RhsI>();
+    const auto *out_indptr_ptr = out_indptr.data<OutI>();
+    auto *out_data_ptr = out_data.data<T>();
+    auto *out_indices_ptr = out_indices.data<OutI>();
+
+    std::vector<int> marker(static_cast<size_t>(lhs_n_rows), -1);
+    std::vector<AccT> accum(static_cast<size_t>(lhs_n_rows),
+                            Accumulator<T>::zero());
+    std::vector<int> rows;
+
+    for (int col = 0; col < rhs_n_cols; ++col) {
+      rows.clear();
+      for (RhsI rhs_pos = rhs_indptr_ptr[col];
+           rhs_pos < rhs_indptr_ptr[col + 1]; ++rhs_pos) {
+        const int lhs_col = static_cast<int>(rhs_indices_ptr[rhs_pos]);
+        if (lhs_col < 0 || lhs_col >= lhs_n_cols) {
+          throw std::invalid_argument(
+              "csc_matmat rhs indices contain an out-of-bounds row.");
+        }
+        const T rhs_value = rhs_data_ptr[rhs_pos];
+        for (LhsI lhs_pos = lhs_indptr_ptr[lhs_col];
+             lhs_pos < lhs_indptr_ptr[lhs_col + 1]; ++lhs_pos) {
+          const int row = static_cast<int>(lhs_indices_ptr[lhs_pos]);
+          if (row < 0 || row >= lhs_n_rows) {
+            throw std::invalid_argument(
+                "csc_matmat lhs indices contain an out-of-bounds row.");
+          }
+          const auto row_index = static_cast<size_t>(row);
+          if (marker[row_index] != col) {
+            marker[row_index] = col;
+            accum[row_index] = Accumulator<T>::zero();
+            rows.push_back(row);
+          }
+          accum[row_index] +=
+              multiply_accumulate<T>(lhs_data_ptr[lhs_pos], rhs_value);
+        }
+      }
+
+      std::sort(rows.begin(), rows.end());
+      OutI write = out_indptr_ptr[col];
+      for (int row : rows) {
+        const auto row_index = static_cast<size_t>(row);
+        out_indices_ptr[write] = static_cast<OutI>(row);
+        out_data_ptr[write] = Accumulator<T>::cast(accum[row_index]);
+        ++write;
+      }
+    }
+  });
+}
+
+template <typename T, typename I>
+void prune_counts_cpu_impl(const mx::array &data, const mx::array &indptr,
+                           mx::array &counts, mx::Stream stream) {
+  counts.set_data(mx::allocator::malloc(counts.nbytes()));
+
+  auto &encoder = mx::cpu::get_command_encoder(stream);
+  encoder.set_input_array(data);
+  encoder.set_input_array(indptr);
+  encoder.set_output_array(counts);
+
+  encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
+                    indptr = mx::array::unsafe_weak_copy(indptr),
+                    counts = mx::array::unsafe_weak_copy(counts)]() mutable {
+    const auto *data_ptr = data.data<T>();
+    const auto *indptr_ptr = indptr.data<I>();
+    auto *counts_ptr = counts.data<I>();
+    const int n_cols = static_cast<int>(indptr.size()) - 1;
+
+    for (int col = 0; col < n_cols; ++col) {
+      I count = I{0};
+      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+        if (nonzero(data_ptr[p])) {
+          count += I{1};
+        }
+      }
+      counts_ptr[col] = count;
+    }
+  });
+}
+
+template <typename T, typename I>
+void prune_fill_cpu_impl(const mx::array &data, const mx::array &indices,
+                         const mx::array &indptr, const mx::array &out_indptr,
+                         mx::array &out_data, mx::array &out_indices,
+                         mx::Stream stream) {
+  out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
+  out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
+
+  auto &encoder = mx::cpu::get_command_encoder(stream);
+  encoder.set_input_array(data);
+  encoder.set_input_array(indices);
+  encoder.set_input_array(indptr);
+  encoder.set_input_array(out_indptr);
+  encoder.set_output_array(out_data);
+  encoder.set_output_array(out_indices);
+
+  encoder.dispatch(
+      [data = mx::array::unsafe_weak_copy(data),
+       indices = mx::array::unsafe_weak_copy(indices),
+       indptr = mx::array::unsafe_weak_copy(indptr),
+       out_indptr = mx::array::unsafe_weak_copy(out_indptr),
+       out_data = mx::array::unsafe_weak_copy(out_data),
+       out_indices = mx::array::unsafe_weak_copy(out_indices)]() mutable {
+        const auto *data_ptr = data.data<T>();
+        const auto *indices_ptr = indices.data<I>();
+        const auto *indptr_ptr = indptr.data<I>();
+        const auto *out_indptr_ptr = out_indptr.data<I>();
+        auto *out_data_ptr = out_data.data<T>();
+        auto *out_indices_ptr = out_indices.data<I>();
+        const int n_cols = static_cast<int>(indptr.size()) - 1;
+
+        for (int col = 0; col < n_cols; ++col) {
+          I write = out_indptr_ptr[col];
+          for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+            const T value = data_ptr[p];
+            if (nonzero(value)) {
+              out_data_ptr[write] = value;
+              out_indices_ptr[write] = indices_ptr[p];
+              ++write;
+            }
+          }
+        }
+      });
+}
+
+template <typename I>
+std::pair<mx::array, int> build_indptr_from_counts(const mx::array &counts,
+                                                   int n_cols,
+                                                   mx::Dtype index_dtype) {
+  const auto *counts_ptr = counts.data<I>();
+  std::vector<I> out_indptr(static_cast<size_t>(n_cols) + 1, I{0});
+  int64_t total = 0;
+  for (int col = 0; col < n_cols; ++col) {
+    const auto count = static_cast<int64_t>(counts_ptr[col]);
+    if (count < 0) {
+      throw std::runtime_error("csc_matmat produced a negative column count.");
+    }
+    total += count;
+    if (total > std::numeric_limits<int>::max()) {
+      throw std::overflow_error(
+          "csc_matmat output nnz exceeds MLX shape limits.");
+    }
+    if (total > static_cast<int64_t>(std::numeric_limits<I>::max())) {
+      throw std::overflow_error(
+          "csc_matmat output nnz exceeds index dtype capacity.");
+    }
+    out_indptr[static_cast<size_t>(col) + 1] = static_cast<I>(total);
+  }
+
+  return {mx::array(out_indptr.begin(),
+                    mx::Shape{static_cast<int>(out_indptr.size())},
+                    index_dtype),
+          static_cast<int>(total)};
+}
+
+std::pair<mx::array, int> build_indptr_from_counts(const mx::array &counts,
+                                                   int n_cols,
+                                                   mx::Dtype index_dtype) {
+  if (index_dtype == mx::int32) {
+    return build_indptr_from_counts<int32_t>(counts, n_cols, index_dtype);
+  }
+  return build_indptr_from_counts<int64_t>(counts, n_cols, index_dtype);
+}
 
 template <typename I>
 int prefix_counts(const std::vector<I> &counts, std::vector<I> &indptr) {
@@ -242,6 +621,489 @@ dispatch_lhs(mx::array lhs_data, mx::array lhs_indices, mx::array lhs_indptr,
       lhs_n_rows, lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
 }
 
+mx::array symbolic_counts(const mx::array &lhs_indices,
+                          const mx::array &lhs_indptr,
+                          const mx::array &rhs_indices,
+                          const mx::array &rhs_indptr, int lhs_n_rows,
+                          int lhs_n_cols, int rhs_n_cols,
+                          mx::Dtype out_index_dtype, mx::Stream stream) {
+  auto primitive = std::make_shared<CSCMatmatSymbolic>(stream, lhs_n_rows,
+                                                       lhs_n_cols, rhs_n_cols);
+  return mx::array(mx::Shape{rhs_n_cols}, out_index_dtype, primitive,
+                   {lhs_indices, lhs_indptr, rhs_indices, rhs_indptr});
+}
+
+std::tuple<mx::array, mx::array>
+numeric_fill(const mx::array &lhs_data, const mx::array &lhs_indices,
+             const mx::array &lhs_indptr, const mx::array &rhs_data,
+             const mx::array &rhs_indices, const mx::array &rhs_indptr,
+             const mx::array &out_indptr, int out_nnz, int lhs_n_rows,
+             int lhs_n_cols, int rhs_n_cols, mx::Dtype out_index_dtype,
+             mx::Stream stream) {
+  auto primitive = std::make_shared<CSCMatmatNumeric>(stream, lhs_n_rows,
+                                                      lhs_n_cols, rhs_n_cols);
+  auto outputs =
+      mx::array::make_arrays({mx::Shape{out_nnz}, mx::Shape{out_nnz}},
+                             {lhs_data.dtype(), out_index_dtype}, primitive,
+                             {lhs_data, lhs_indices, lhs_indptr, rhs_data,
+                              rhs_indices, rhs_indptr, out_indptr});
+  return {outputs[0], outputs[1]};
+}
+
+mx::array prune_counts(const mx::array &data, const mx::array &indptr,
+                       int n_cols, mx::Stream stream) {
+  auto primitive = std::make_shared<CSCMatmatPruneCounts>(stream);
+  return mx::array(mx::Shape{n_cols}, indptr.dtype(), primitive,
+                   {data, indptr});
+}
+
+std::tuple<mx::array, mx::array> prune_fill(const mx::array &data,
+                                            const mx::array &indices,
+                                            const mx::array &indptr,
+                                            const mx::array &out_indptr,
+                                            int out_nnz, mx::Stream stream) {
+  auto primitive = std::make_shared<CSCMatmatPruneFill>(stream);
+  auto outputs = mx::array::make_arrays(
+      {mx::Shape{out_nnz}, mx::Shape{out_nnz}}, {data.dtype(), indices.dtype()},
+      primitive, {data, indices, indptr, out_indptr});
+  return {outputs[0], outputs[1]};
+}
+
+template <typename LhsI, typename RhsI>
+void dispatch_symbolic_out(const mx::array &lhs_indices,
+                           const mx::array &lhs_indptr,
+                           const mx::array &rhs_indices,
+                           const mx::array &rhs_indptr, mx::array &counts,
+                           int lhs_n_rows, int lhs_n_cols, int rhs_n_cols,
+                           mx::Stream stream) {
+  if (counts.dtype() == mx::int32) {
+    symbolic_cpu_impl<LhsI, RhsI, int32_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                           rhs_indptr, counts, lhs_n_rows,
+                                           lhs_n_cols, rhs_n_cols, stream);
+    return;
+  }
+  symbolic_cpu_impl<LhsI, RhsI, int64_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                         rhs_indptr, counts, lhs_n_rows,
+                                         lhs_n_cols, rhs_n_cols, stream);
+}
+
+template <typename LhsI>
+void dispatch_symbolic_rhs(const mx::array &lhs_indices,
+                           const mx::array &lhs_indptr,
+                           const mx::array &rhs_indices,
+                           const mx::array &rhs_indptr, mx::array &counts,
+                           int lhs_n_rows, int lhs_n_cols, int rhs_n_cols,
+                           mx::Stream stream) {
+  if (rhs_indices.dtype() == mx::int32) {
+    dispatch_symbolic_out<LhsI, int32_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                         rhs_indptr, counts, lhs_n_rows,
+                                         lhs_n_cols, rhs_n_cols, stream);
+    return;
+  }
+  dispatch_symbolic_out<LhsI, int64_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                       rhs_indptr, counts, lhs_n_rows,
+                                       lhs_n_cols, rhs_n_cols, stream);
+}
+
+template <typename T, typename LhsI, typename RhsI, typename OutI>
+void numeric_cpu_dispatch_out(
+    const mx::array &lhs_data, const mx::array &lhs_indices,
+    const mx::array &lhs_indptr, const mx::array &rhs_data,
+    const mx::array &rhs_indices, const mx::array &rhs_indptr,
+    const mx::array &out_indptr, mx::array &out_data, mx::array &out_indices,
+    int lhs_n_rows, int lhs_n_cols, int rhs_n_cols, mx::Stream stream) {
+  numeric_cpu_impl<T, LhsI, RhsI, OutI>(
+      lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
+      out_indptr, out_data, out_indices, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+      stream);
+}
+
+template <typename T, typename LhsI, typename RhsI>
+void numeric_cpu_dispatch_index(
+    const mx::array &lhs_data, const mx::array &lhs_indices,
+    const mx::array &lhs_indptr, const mx::array &rhs_data,
+    const mx::array &rhs_indices, const mx::array &rhs_indptr,
+    const mx::array &out_indptr, mx::array &out_data, mx::array &out_indices,
+    int lhs_n_rows, int lhs_n_cols, int rhs_n_cols, mx::Stream stream) {
+  if (out_indices.dtype() == mx::int32) {
+    numeric_cpu_dispatch_out<T, LhsI, RhsI, int32_t>(
+        lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
+        out_indptr, out_data, out_indices, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+        stream);
+    return;
+  }
+  numeric_cpu_dispatch_out<T, LhsI, RhsI, int64_t>(
+      lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
+      out_indptr, out_data, out_indices, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+      stream);
+}
+
+template <typename T, typename LhsI>
+void numeric_cpu_dispatch_rhs(
+    const mx::array &lhs_data, const mx::array &lhs_indices,
+    const mx::array &lhs_indptr, const mx::array &rhs_data,
+    const mx::array &rhs_indices, const mx::array &rhs_indptr,
+    const mx::array &out_indptr, mx::array &out_data, mx::array &out_indices,
+    int lhs_n_rows, int lhs_n_cols, int rhs_n_cols, mx::Stream stream) {
+  if (rhs_indices.dtype() == mx::int32) {
+    numeric_cpu_dispatch_index<T, LhsI, int32_t>(
+        lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
+        out_indptr, out_data, out_indices, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+        stream);
+    return;
+  }
+  numeric_cpu_dispatch_index<T, LhsI, int64_t>(
+      lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
+      out_indptr, out_data, out_indices, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+      stream);
+}
+
+template <typename T>
+void numeric_cpu_dispatch_lhs(
+    const mx::array &lhs_data, const mx::array &lhs_indices,
+    const mx::array &lhs_indptr, const mx::array &rhs_data,
+    const mx::array &rhs_indices, const mx::array &rhs_indptr,
+    const mx::array &out_indptr, mx::array &out_data, mx::array &out_indices,
+    int lhs_n_rows, int lhs_n_cols, int rhs_n_cols, mx::Stream stream) {
+  if (lhs_indices.dtype() == mx::int32) {
+    numeric_cpu_dispatch_rhs<T, int32_t>(
+        lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
+        out_indptr, out_data, out_indices, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+        stream);
+    return;
+  }
+  numeric_cpu_dispatch_rhs<T, int64_t>(
+      lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,
+      out_indptr, out_data, out_indices, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+      stream);
+}
+
+template <typename T>
+void dispatch_prune_counts(const mx::array &data, const mx::array &indptr,
+                           mx::array &counts, mx::Stream stream) {
+  if (indptr.dtype() == mx::int32) {
+    prune_counts_cpu_impl<T, int32_t>(data, indptr, counts, stream);
+    return;
+  }
+  prune_counts_cpu_impl<T, int64_t>(data, indptr, counts, stream);
+}
+
+template <typename T>
+void dispatch_prune_fill(const mx::array &data, const mx::array &indices,
+                         const mx::array &indptr, const mx::array &out_indptr,
+                         mx::array &out_data, mx::array &out_indices,
+                         mx::Stream stream) {
+  if (indices.dtype() == mx::int32) {
+    prune_fill_cpu_impl<T, int32_t>(data, indices, indptr, out_indptr, out_data,
+                                    out_indices, stream);
+    return;
+  }
+  prune_fill_cpu_impl<T, int64_t>(data, indices, indptr, out_indptr, out_data,
+                                  out_indices, stream);
+}
+
+void CSCMatmatSymbolic::eval_cpu(const std::vector<mx::array> &inputs,
+                                 std::vector<mx::array> &outputs) {
+  const auto &lhs_indices = inputs[0];
+  const auto &lhs_indptr = inputs[1];
+  const auto &rhs_indices = inputs[2];
+  const auto &rhs_indptr = inputs[3];
+  auto &counts = outputs[0];
+
+  if (lhs_indices.dtype() == mx::int32) {
+    dispatch_symbolic_rhs<int32_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                   rhs_indptr, counts, lhs_n_rows_, lhs_n_cols_,
+                                   rhs_n_cols_, stream());
+    return;
+  }
+  dispatch_symbolic_rhs<int64_t>(lhs_indices, lhs_indptr, rhs_indices,
+                                 rhs_indptr, counts, lhs_n_rows_, lhs_n_cols_,
+                                 rhs_n_cols_, stream());
+}
+
+#ifdef _METAL_
+void CSCMatmatSymbolic::eval_gpu(const std::vector<mx::array> &inputs,
+                                 std::vector<mx::array> &outputs) {
+  const auto &lhs_indices = inputs[0];
+  const auto &lhs_indptr = inputs[1];
+  const auto &rhs_indices = inputs[2];
+  const auto &rhs_indptr = inputs[3];
+  auto &counts = outputs[0];
+
+  counts.set_data(mx::allocator::malloc(counts.nbytes()));
+
+  auto &s = stream();
+  auto &device = mx::metal::device(s.device);
+  auto *lib = device.get_library("mlx_sparse", current_binary_dir());
+  auto *kernel = device.get_kernel(
+      csc_matmat_index_kernel_name("csc_matmat_symbolic", lhs_indices.dtype(),
+                                   rhs_indices.dtype(), counts.dtype()),
+      lib);
+
+  auto &encoder = mx::metal::get_command_encoder(s);
+  encoder.set_compute_pipeline_state(kernel);
+  encoder.set_input_array(lhs_indices, 0);
+  encoder.set_input_array(lhs_indptr, 1);
+  encoder.set_input_array(rhs_indices, 2);
+  encoder.set_input_array(rhs_indptr, 3);
+  encoder.set_output_array(counts, 4);
+  encoder.set_bytes(lhs_n_rows_, 5);
+  encoder.set_bytes(lhs_n_cols_, 6);
+  encoder.set_bytes(rhs_n_cols_, 7);
+
+  auto threads = std::max<size_t>(static_cast<size_t>(rhs_n_cols_), 1);
+  auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+}
+#else
+void CSCMatmatSymbolic::eval_gpu(const std::vector<mx::array> &,
+                                 std::vector<mx::array> &) {
+  throw std::runtime_error(
+      "csc_matmat has no GPU implementation in this build.");
+}
+#endif
+
+void CSCMatmatNumeric::eval_cpu(const std::vector<mx::array> &inputs,
+                                std::vector<mx::array> &outputs) {
+  const auto &lhs_data = inputs[0];
+  const auto &lhs_indices = inputs[1];
+  const auto &lhs_indptr = inputs[2];
+  const auto &rhs_data = inputs[3];
+  const auto &rhs_indices = inputs[4];
+  const auto &rhs_indptr = inputs[5];
+  const auto &out_indptr = inputs[6];
+
+#define DISPATCH_CSC_MATMAT_NUMERIC_VALUE(DTYPE, TYPE)                         \
+  if (lhs_data.dtype() == DTYPE) {                                             \
+    numeric_cpu_dispatch_lhs<TYPE>(                                            \
+        lhs_data, lhs_indices, lhs_indptr, rhs_data, rhs_indices, rhs_indptr,  \
+        out_indptr, outputs[0], outputs[1], lhs_n_rows_, lhs_n_cols_,          \
+        rhs_n_cols_, stream());                                                \
+    return;                                                                    \
+  }
+
+  DISPATCH_CSC_MATMAT_NUMERIC_VALUE(mx::float32, float)
+  DISPATCH_CSC_MATMAT_NUMERIC_VALUE(mx::float16, mx::float16_t)
+  DISPATCH_CSC_MATMAT_NUMERIC_VALUE(mx::bfloat16, mx::bfloat16_t)
+  DISPATCH_CSC_MATMAT_NUMERIC_VALUE(mx::complex64, mx::complex64_t)
+#undef DISPATCH_CSC_MATMAT_NUMERIC_VALUE
+
+  throw std::runtime_error("csc_matmat unsupported value dtype.");
+}
+
+#ifdef _METAL_
+void CSCMatmatNumeric::eval_gpu(const std::vector<mx::array> &inputs,
+                                std::vector<mx::array> &outputs) {
+  const auto &lhs_data = inputs[0];
+  const auto &lhs_indices = inputs[1];
+  const auto &lhs_indptr = inputs[2];
+  const auto &rhs_data = inputs[3];
+  const auto &rhs_indices = inputs[4];
+  const auto &rhs_indptr = inputs[5];
+  const auto &out_indptr = inputs[6];
+  auto &out_data = outputs[0];
+  auto &out_indices = outputs[1];
+
+  out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
+  out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
+
+  auto &s = stream();
+  auto &device = mx::metal::device(s.device);
+  auto *lib = device.get_library("mlx_sparse", current_binary_dir());
+  auto *kernel = device.get_kernel(
+      csc_matmat_numeric_kernel_name(lhs_data.dtype(), lhs_indices.dtype(),
+                                     rhs_indices.dtype(), out_indices.dtype()),
+      lib);
+
+  auto &encoder = mx::metal::get_command_encoder(s);
+  encoder.set_compute_pipeline_state(kernel);
+  encoder.set_input_array(lhs_data, 0);
+  encoder.set_input_array(lhs_indices, 1);
+  encoder.set_input_array(lhs_indptr, 2);
+  encoder.set_input_array(rhs_data, 3);
+  encoder.set_input_array(rhs_indices, 4);
+  encoder.set_input_array(rhs_indptr, 5);
+  encoder.set_input_array(out_indptr, 6);
+  encoder.set_output_array(out_data, 7);
+  encoder.set_output_array(out_indices, 8);
+  encoder.set_bytes(lhs_n_rows_, 9);
+  encoder.set_bytes(lhs_n_cols_, 10);
+  encoder.set_bytes(rhs_n_cols_, 11);
+
+  auto threads = std::max<size_t>(static_cast<size_t>(rhs_n_cols_), 1);
+  auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+}
+#else
+void CSCMatmatNumeric::eval_gpu(const std::vector<mx::array> &,
+                                std::vector<mx::array> &) {
+  throw std::runtime_error(
+      "csc_matmat has no GPU implementation in this build.");
+}
+#endif
+
+void CSCMatmatPruneCounts::eval_cpu(const std::vector<mx::array> &inputs,
+                                    std::vector<mx::array> &outputs) {
+  const auto &data = inputs[0];
+  const auto &indptr = inputs[1];
+
+#define DISPATCH_CSC_MATMAT_PRUNE_COUNTS(DTYPE, TYPE)                          \
+  if (data.dtype() == DTYPE) {                                                 \
+    dispatch_prune_counts<TYPE>(data, indptr, outputs[0], stream());           \
+    return;                                                                    \
+  }
+
+  DISPATCH_CSC_MATMAT_PRUNE_COUNTS(mx::float32, float)
+  DISPATCH_CSC_MATMAT_PRUNE_COUNTS(mx::float16, mx::float16_t)
+  DISPATCH_CSC_MATMAT_PRUNE_COUNTS(mx::bfloat16, mx::bfloat16_t)
+  DISPATCH_CSC_MATMAT_PRUNE_COUNTS(mx::complex64, mx::complex64_t)
+#undef DISPATCH_CSC_MATMAT_PRUNE_COUNTS
+
+  throw std::runtime_error("csc_matmat unsupported value dtype.");
+}
+
+#ifdef _METAL_
+void CSCMatmatPruneCounts::eval_gpu(const std::vector<mx::array> &inputs,
+                                    std::vector<mx::array> &outputs) {
+  const auto &data = inputs[0];
+  const auto &indptr = inputs[1];
+  auto &counts = outputs[0];
+
+  counts.set_data(mx::allocator::malloc(counts.nbytes()));
+
+  auto &s = stream();
+  auto &device = mx::metal::device(s.device);
+  auto *lib = device.get_library("mlx_sparse", current_binary_dir());
+  auto *kernel =
+      device.get_kernel(sparse_kernel_name("csc_matmat_prune_counts",
+                                           data.dtype(), indptr.dtype()),
+                        lib);
+
+  auto &encoder = mx::metal::get_command_encoder(s);
+  encoder.set_compute_pipeline_state(kernel);
+  encoder.set_input_array(data, 0);
+  encoder.set_input_array(indptr, 1);
+  encoder.set_output_array(counts, 2);
+  const int n_cols = static_cast<int>(indptr.size()) - 1;
+  encoder.set_bytes(n_cols, 3);
+
+  auto threads = std::max<size_t>(static_cast<size_t>(n_cols), 1);
+  auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+}
+#else
+void CSCMatmatPruneCounts::eval_gpu(const std::vector<mx::array> &,
+                                    std::vector<mx::array> &) {
+  throw std::runtime_error(
+      "csc_matmat has no GPU implementation in this build.");
+}
+#endif
+
+void CSCMatmatPruneFill::eval_cpu(const std::vector<mx::array> &inputs,
+                                  std::vector<mx::array> &outputs) {
+  const auto &data = inputs[0];
+  const auto &indices = inputs[1];
+  const auto &indptr = inputs[2];
+  const auto &out_indptr = inputs[3];
+
+#define DISPATCH_CSC_MATMAT_PRUNE_FILL(DTYPE, TYPE)                            \
+  if (data.dtype() == DTYPE) {                                                 \
+    dispatch_prune_fill<TYPE>(data, indices, indptr, out_indptr, outputs[0],   \
+                              outputs[1], stream());                           \
+    return;                                                                    \
+  }
+
+  DISPATCH_CSC_MATMAT_PRUNE_FILL(mx::float32, float)
+  DISPATCH_CSC_MATMAT_PRUNE_FILL(mx::float16, mx::float16_t)
+  DISPATCH_CSC_MATMAT_PRUNE_FILL(mx::bfloat16, mx::bfloat16_t)
+  DISPATCH_CSC_MATMAT_PRUNE_FILL(mx::complex64, mx::complex64_t)
+#undef DISPATCH_CSC_MATMAT_PRUNE_FILL
+
+  throw std::runtime_error("csc_matmat unsupported value dtype.");
+}
+
+#ifdef _METAL_
+void CSCMatmatPruneFill::eval_gpu(const std::vector<mx::array> &inputs,
+                                  std::vector<mx::array> &outputs) {
+  const auto &data = inputs[0];
+  const auto &indices = inputs[1];
+  const auto &indptr = inputs[2];
+  const auto &out_indptr = inputs[3];
+  auto &out_data = outputs[0];
+  auto &out_indices = outputs[1];
+
+  out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
+  out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
+
+  auto &s = stream();
+  auto &device = mx::metal::device(s.device);
+  auto *lib = device.get_library("mlx_sparse", current_binary_dir());
+  auto *kernel =
+      device.get_kernel(sparse_kernel_name("csc_matmat_prune_fill",
+                                           data.dtype(), indices.dtype()),
+                        lib);
+
+  auto &encoder = mx::metal::get_command_encoder(s);
+  encoder.set_compute_pipeline_state(kernel);
+  encoder.set_input_array(data, 0);
+  encoder.set_input_array(indices, 1);
+  encoder.set_input_array(indptr, 2);
+  encoder.set_input_array(out_indptr, 3);
+  encoder.set_output_array(out_data, 4);
+  encoder.set_output_array(out_indices, 5);
+  const int n_cols = static_cast<int>(indptr.size()) - 1;
+  encoder.set_bytes(n_cols, 6);
+
+  auto threads = std::max<size_t>(static_cast<size_t>(n_cols), 1);
+  auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+}
+#else
+void CSCMatmatPruneFill::eval_gpu(const std::vector<mx::array> &,
+                                  std::vector<mx::array> &) {
+  throw std::runtime_error(
+      "csc_matmat has no GPU implementation in this build.");
+}
+#endif
+
+std::tuple<mx::array, mx::array, mx::array>
+csc_matmat_staged(const mx::array &lhs_data, const mx::array &lhs_indices,
+                  const mx::array &lhs_indptr, const mx::array &rhs_data,
+                  const mx::array &rhs_indices, const mx::array &rhs_indptr,
+                  int lhs_n_rows, int lhs_n_cols, int rhs_n_cols,
+                  mx::Dtype out_index_dtype) {
+  auto stream = mx::default_stream(mx::default_device());
+  auto lhs_data_contig = mx::contiguous(lhs_data, false, stream);
+  auto lhs_indices_contig = mx::contiguous(lhs_indices, false, stream);
+  auto lhs_indptr_contig = mx::contiguous(lhs_indptr, false, stream);
+  auto rhs_data_contig = mx::contiguous(rhs_data, false, stream);
+  auto rhs_indices_contig = mx::contiguous(rhs_indices, false, stream);
+  auto rhs_indptr_contig = mx::contiguous(rhs_indptr, false, stream);
+
+  auto counts =
+      symbolic_counts(lhs_indices_contig, lhs_indptr_contig, rhs_indices_contig,
+                      rhs_indptr_contig, lhs_n_rows, lhs_n_cols, rhs_n_cols,
+                      out_index_dtype, stream);
+  mx::eval(counts);
+  auto [candidate_indptr, candidate_nnz] =
+      build_indptr_from_counts(counts, rhs_n_cols, out_index_dtype);
+
+  auto [candidate_data, candidate_indices] = numeric_fill(
+      lhs_data_contig, lhs_indices_contig, lhs_indptr_contig, rhs_data_contig,
+      rhs_indices_contig, rhs_indptr_contig, candidate_indptr, candidate_nnz,
+      lhs_n_rows, lhs_n_cols, rhs_n_cols, out_index_dtype, stream);
+
+  auto nonzero_counts =
+      prune_counts(candidate_data, candidate_indptr, rhs_n_cols, stream);
+  mx::eval(nonzero_counts);
+  auto [out_indptr, out_nnz] =
+      build_indptr_from_counts(nonzero_counts, rhs_n_cols, out_index_dtype);
+  auto [out_data, out_indices] =
+      prune_fill(candidate_data, candidate_indices, candidate_indptr,
+                 out_indptr, out_nnz, stream);
+  return {out_data, out_indices, out_indptr};
+}
+
 } // namespace
 
 std::tuple<mx::array, mx::array, mx::array>
@@ -286,6 +1148,12 @@ csc_matmat(const mx::array &lhs_data, const mx::array &lhs_indices,
       lhs_n_rows > std::numeric_limits<int32_t>::max()) {
     throw std::overflow_error(
         "csc_matmat n_rows exceeds int32 output index capacity.");
+  }
+
+  if (use_experimental_metal_spgemm()) {
+    return csc_matmat_staged(lhs_data, lhs_indices, lhs_indptr, rhs_data,
+                             rhs_indices, rhs_indptr, lhs_n_rows, lhs_n_cols,
+                             rhs_n_cols, out_index_dtype);
   }
 
   if (lhs_data.dtype() == mx::float32) {
