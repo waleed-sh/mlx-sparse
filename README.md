@@ -6,7 +6,7 @@
 [![codecov](https://codecov.io/gh/waleed-sh/mlx-sparse/graph/badge.svg?token=EV2KVPZTP0)](https://codecov.io/gh/waleed-sh/mlx-sparse)
 
 > **Warning: beta release**
-> This is an early beta. **It currently supports on Apple systems.** APIs may change, bugs are expected, and some features
+> This is an early beta. **It currently supports only Apple systems.** APIs may change, bugs are expected, and some features
 > are still incomplete, especially GPU kernels for various operations. Feedback and issue reports are very welcome!
 > 
 > A lot of the functionality is new and is currently being tested.
