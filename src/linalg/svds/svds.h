@@ -26,4 +26,9 @@ csr_svds(const mx::array &data, const mx::array &indices,
          const mx::array &indptr, int n_rows, int n_cols, int k, int ncv,
          const std::string &which);
 
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_normal_lanczos(const mx::array &data, const mx::array &indices,
+                   const mx::array &indptr, int n_rows, int n_cols, int k,
+                   mx::StreamOrDevice s = {});
+
 } // namespace mlx_sparse

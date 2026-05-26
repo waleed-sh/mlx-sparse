@@ -904,6 +904,29 @@ def csr_svds(
     )
 
 
+def csr_normal_lanczos(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    k: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_normal_lanczos requires the native mlx_sparse extension."
+        )
+    return ext.csr_normal_lanczos(
+        data,
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        int(k),
+    )
+
+
 def csr_cholesky(
     data: mx.array,
     indices: mx.array,

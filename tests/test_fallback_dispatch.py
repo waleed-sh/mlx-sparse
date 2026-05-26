@@ -205,6 +205,12 @@ def test_native_index_dtype_bits_rejects_unsupported_dtype(mx):
         ("csr_eigsh", "spectral", {"k": 1, "ncv": 2, "which": "LM"}, "csr_eigsh"),
         ("csr_eigs", "spectral", {"k": 1, "ncv": 2, "which": "LM"}, "csr_eigs"),
         ("csr_svds", "spectral", {"k": 1, "ncv": 2, "which": "LM"}, "csr_svds"),
+        (
+            "csr_normal_lanczos",
+            "normal_lanczos",
+            {"k": 1},
+            "csr_normal_lanczos",
+        ),
         ("csr_cholesky", "factorization", {}, "csr_cholesky"),
         ("csr_lu", "factorization", {}, "csr_lu"),
         (
@@ -233,6 +239,8 @@ def test_native_extension_required_error_paths(
     elif args == "lanczos":
         call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "spectral":
+        call_args = (data, indices, indptr, (1, 1))
+    elif args == "normal_lanczos":
         call_args = (data, indices, indptr, (1, 1))
     elif args == "factorization":
         call_args = (data, indices, indptr, (1, 1))

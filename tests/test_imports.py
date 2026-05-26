@@ -65,6 +65,7 @@ def test_native_extension_imports_after_editable_build():
     assert hasattr(ext, "csc_matmul_transpose")
     assert hasattr(ext, "coo_matmul_data_vjp")
     assert hasattr(ext, "csc_matmul_data_vjp")
+    assert hasattr(ext, "csr_normal_lanczos")
 
 
 def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
@@ -180,6 +181,10 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
             seen.append(("csc_sum_duplicates", kwargs))
             return "sum_csc"
 
+        def csr_normal_lanczos(self, *args, **kwargs):
+            seen.append(("csr_normal_lanczos", kwargs))
+            return "normal_lanczos"
+
     monkeypatch.setattr(native, "extension", lambda: FakeExt())
 
     assert native.identity_like("x") == "identity"
@@ -237,4 +242,8 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert native.csr_sort_indices("data", "indices", "indptr") == "sort"
     assert native.csc_sort_indices("data", "indices", "indptr") == "sort_csc"
     assert native.csc_sum_duplicates("data", "indices", "indptr") == "sum_csc"
+    assert (
+        native.csr_normal_lanczos("data", "indices", "indptr", (2, 3), k=2)
+        == "normal_lanczos"
+    )
     assert all("stream" not in kwargs for _, kwargs in seen)

@@ -796,6 +796,17 @@ NB_MODULE(_ext, m) {
       "which"_a, "Compute selected singular triplets from a CSR matrix.");
 
   m.def(
+      "csr_normal_lanczos",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols, int k) {
+        return mlx_sparse::csr_normal_lanczos(data, indices, indptr, n_rows,
+                                              n_cols, k);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "Run Lanczos on the CSR normal operator A.T @ A.");
+
+  m.def(
       "csr_cholesky",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,

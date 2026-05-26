@@ -157,6 +157,7 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/inner_product/inner_product.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/lanczos/lanczos.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/permute_vector/permute_vector.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.metal

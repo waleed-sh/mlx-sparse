@@ -307,10 +307,13 @@ def svds(
     that match the criterion specified by ``which``.
 
     GPU note:
-        ``svds`` currently runs on the CPU.  It forms products with ``A`` and
-        ``A.T``, runs the Lanczos process, solves the small eigenproblem, and
-        assembles singular vectors on host data.  Choosing GPU execution does
-        not move this solver to Metal yet.
+        When GPU execution is selected, the normal-operator Lanczos recurrence
+        uses a dedicated native ``A.T @ (A @ v)`` path.  The two sparse
+        products are kept inside one native step and the intermediate
+        ``A @ v`` vector is not materialized on the host.  The small
+        tridiagonal eigensolve, Ritz vector back transformation, and returned
+        singular-vector assembly still run on the CPU after the Lanczos basis
+        is synchronized.
 
     Args:
         A: Sparse matrix of shape ``(m, n)``.  Must be a

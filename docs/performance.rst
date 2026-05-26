@@ -297,6 +297,21 @@ availability fallback, not a dtype-specific path in normal wheels.
   numeric-fill, and prune kernels over compressed output columns. It does not
   call CSR sparse-sparse multiplication.
 
+**svds normal-operator Lanczos**
+
+* ``linalg.svds`` applies Lanczos to the normal operator ``A.T @ A`` without
+  materializing ``A.T @ A``.
+
+* The CSR path uses a dedicated fused normal-operator step. For each source
+  row, it computes the row contribution to ``A @ v`` and immediately scatters
+  that contribution into the ``A.T @ (...)`` workspace. This removes the
+  previous native-host decomposition into two separate SpMVs per Lanczos step
+  and avoids host materialization of the intermediate ``A @ v`` vector.
+
+* On Metal, the Lanczos recurrence runs in a native fused kernel. The small
+  tridiagonal eigensolve, Ritz back-transformation, and final singular-vector
+  assembly still synchronize the Lanczos basis back to CPU.
+
 **CPU backends**
 
 The CPU backends use MLX's command encoder dispatch model. They are correct
