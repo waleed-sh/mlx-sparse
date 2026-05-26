@@ -38,6 +38,12 @@ Improvements
   uses CSC-specific symbolic, numeric-fill, and zero-prune kernels to return
   canonical CSC output without calling CSR sparse-sparse multiplication.
 
+* Added a dedicated native normal-operator Lanczos path for
+  :func:`mlx_sparse.linalg.svds`. The CSR implementation now evaluates
+  ``A.T @ (A @ v)`` as a fused native step instead of decomposing each Lanczos
+  application into separate host SpMVs, and the Metal path keeps the recurrence
+  on GPU before synchronizing the small Ritz post-processing back to CPU.
+
 Backwards incompatible changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -59,6 +65,10 @@ Documentation
 * Updated sparse format, supported-feature, and performance documentation to
   describe the COO/CSC sparse-sparse execution paths and the experimental
   Metal gate accurately.
+
+* Updated sparse linear algebra docs to describe the new ``svds`` fused
+  normal-operator Lanczos execution path and its remaining CPU post-processing
+  boundary.
 
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------

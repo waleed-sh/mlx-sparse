@@ -47,24 +47,24 @@ operator without materializing ``A.T @ A``.
 Current ``svds`` execution audit
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The current ``svds`` path is intentionally conservative:
+The current ``svds`` path is conservative about output assembly but now has a
+dedicated native normal-operator Lanczos step:
 
 * ``CSRArray`` inputs are canonicalized. ``COOArray`` and ``CSCArray`` inputs
   are converted once to canonical CSR before dispatch.
 * ``float16`` and ``bfloat16`` inputs are promoted to ``float32``. Complex
   sparse inputs are not currently accepted by the spectral routines.
-* The native ``csr_svds`` implementation evaluates the CSR buffers on the host
-  and runs Lanczos over the normal operator in native C++ CPU code.
-* Each normal-operator application is two host sparse matrix-vector products:
-  first ``A @ v`` and then ``A.T @ (...)``. The normal matrix itself is not
-  materialized.
-* Returned singular vectors are assembled from the host Lanczos basis and
-  returned as MLX arrays.
-
-This means ``svds`` still requires the native extension, but it does not yet use
-the Metal kernels. A dedicated two-SpMV Lanczos path is planned so the
-``A @ v`` and ``A.T @ (...)`` pair can stay on the GPU without intermediate
-host synchronization.
+* The native ``csr_svds`` implementation runs Lanczos over the normal operator
+  ``A.T @ A`` without materializing the dense or sparse normal matrix.
+* Each normal-operator application uses a dedicated fused native step: for a
+  CSR row, it computes that row's ``A @ v`` contribution and immediately
+  accumulates the matching ``A.T @ (...)`` contribution into the right-vector
+  workspace. This avoids a Python-level pair of sparse products and avoids
+  host materialization of the intermediate ``A @ v`` vector.
+* On Metal, the Lanczos recurrence stays in a native GPU kernel. The small
+  tridiagonal eigensolve, Ritz-vector back transformation, and final
+  singular-vector assembly still run on CPU after synchronizing the Lanczos
+  basis.
 
 Sparse reductions
 -----------------
@@ -108,8 +108,10 @@ solver call routes the compute-heavy Krylov step to Metal.
      - Arnoldi factorisation (``csr_arnoldi`` kernel), QR iteration on
        the small Hessenberg matrix runs on CPU.
    * - ``linalg.svds``
-     - None
-     - Runs entirely on CPU. A two-matvec Lanczos kernel is planned.
+     - Partial
+     - Dedicated normal-operator Lanczos step
+       (``A.T @ (A @ v)`` without host intermediate), small eigensolve and
+       singular-vector assembly run on CPU.
    * - ``sparse_cholesky`` (factorisation)
      - None
      - Sequential fill-in algorithm runs on CPU.

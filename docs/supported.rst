@@ -273,9 +273,10 @@ Sparse linear algebra
        run on CPU.
    * - ``linalg.svds``
      - Done
-     - CPU only
-     - Normal-operator Lanczos (two SpMVs per step) has no dedicated Metal
-       kernel and runs entirely on CPU.
+     - CPU + GPU
+     - Dedicated normal-operator Lanczos step keeps
+       ``A.T @ (A @ v)`` native. The small eigensolve and singular-vector
+       assembly run on CPU.
    * - ``linalg.sparse_cholesky``
      - Done
      - CPU only
@@ -322,10 +323,12 @@ is:
   the ``csr_triangular_solve`` Metal kernel and the ``csr_permute_vector``
   Metal kernel for the LU row-permutation step.
 
-* **svds**: uses a two-SpMV-per-step Lanczos (``A.T @ (A @ x)``).  The
-  existing ``csr_lanczos`` kernel performs a single SpMV per step, so svds
-  has no GPU path and runs entirely on CPU.  A dedicated two-matvec kernel
-  is planned.
+* **svds**: uses a dedicated normal-operator Lanczos step for
+  ``A.T @ (A @ x)``.  The implementation does not materialize ``A.T @ A`` and
+  does not split the recurrence into Python-level sparse products.  On Metal,
+  the two sparse products are fused inside the native Lanczos step, the small
+  tridiagonal eigensolve, Ritz-vector back transformation, and final singular
+  vector assembly remain CPU work.
 
 Automatic differentiation
 --------------------------
