@@ -22,6 +22,34 @@ use\_device
 
 .. autofunction:: use_device
 
+Native capabilities
+-----------------------------
+
+``mlx-sparse`` exposes enum-backed runtime capability checks for native
+backend dispatch. Use these when application code needs to branch on whether a
+backend is actually usable, rather than checking platform strings or package
+filenames directly.
+
+.. code-block:: python
+
+   import mlx_sparse as ms
+
+   if ms.capabilities.METAL:
+       ms.use_gpu()
+
+   if ms.capabilities.status("accelerate") == "not_built":
+       pass  # current wheels do not compile Accelerate solver support yet
+
+The public capability names are ``"extension"``, ``"cpu"``, ``"metal"``,
+``"accelerate"``, ``"cuda"``, and ``"rocm"``. The corresponding uppercase
+attributes on :data:`capabilities` return booleans, for example
+``ms.capabilities.CPU`` and ``ms.capabilities.METAL``. Status strings are
+``"available"``, ``"unavailable"``, and ``"not_built"``.
+
+.. autodata:: capabilities
+
+.. autofunction:: has_capability
+
 Usage notes
 -----------
 
@@ -32,8 +60,8 @@ Usage notes
 * The Metal GPU path (``use_gpu``) requires macOS with Apple Silicon and
   MLX ≥ 0.31. On unsupported hardware ``use_gpu`` raises ``RuntimeError``
   when ``require_available=True`` (the default).
-* To check GPU availability without setting it as the default device, call
-  ``mlx.core.is_available(mlx.core.Device(mlx.core.gpu))``.
+* To check sparse native backend availability without setting the default
+  device, prefer ``ms.capabilities``.
 
 See :doc:`../user_guide/device_execution` for a full discussion of the lazy
 execution model and which operations run on GPU vs CPU.

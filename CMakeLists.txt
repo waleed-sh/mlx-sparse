@@ -8,6 +8,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(BUILD_SHARED_LIBS "Build extensions as a shared library" ON)
 option(MLX_SPARSE_BUILD_METAL "Build the mlx_sparse Metal library" ON)
+set(MLX_SPARSE_HAS_METAL 0)
 
 if(NOT CMAKE_LIBRARY_OUTPUT_DIRECTORY)
   set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -120,6 +121,7 @@ execute_process(
   ERROR_QUIET)
 
 if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT EQUAL 0)
+  set(MLX_SPARSE_HAS_METAL 1)
   mlx_build_metallib(
     TARGET mlx_sparse_metallib
     TITLE mlx_sparse
@@ -193,6 +195,15 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
 else()
   message(STATUS "Skipping mlx_sparse.metallib build. Metal compiler is unavailable.")
 endif()
+
+target_compile_definitions(
+  mlx_sparse_native
+  PUBLIC
+    MLX_SPARSE_HAS_CPU=1
+    MLX_SPARSE_HAS_METAL=${MLX_SPARSE_HAS_METAL}
+    MLX_SPARSE_HAS_ACCELERATE=0
+    MLX_SPARSE_HAS_CUDA=0
+    MLX_SPARSE_HAS_ROCM=0)
 
 nanobind_add_module(
   _ext

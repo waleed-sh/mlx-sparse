@@ -69,8 +69,74 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
+#ifndef MLX_SPARSE_HAS_CPU
+#define MLX_SPARSE_HAS_CPU 1
+#endif
+
+#ifndef MLX_SPARSE_HAS_METAL
+#define MLX_SPARSE_HAS_METAL 0
+#endif
+
+#ifndef MLX_SPARSE_HAS_ACCELERATE
+#define MLX_SPARSE_HAS_ACCELERATE 0
+#endif
+
+#ifndef MLX_SPARSE_HAS_CUDA
+#define MLX_SPARSE_HAS_CUDA 0
+#endif
+
+#ifndef MLX_SPARSE_HAS_ROCM
+#define MLX_SPARSE_HAS_ROCM 0
+#endif
+
+namespace {
+
+const char *native_platform() {
+#if defined(__APPLE__)
+  return "darwin";
+#elif defined(__linux__)
+  return "linux";
+#elif defined(_WIN32)
+  return "windows";
+#else
+  return "unknown";
+#endif
+}
+
+const char *native_architecture() {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+  return "x86_64";
+#elif defined(__arm__) || defined(_M_ARM)
+  return "arm";
+#elif defined(__i386__) || defined(_M_IX86)
+  return "x86";
+#else
+  return "unknown";
+#endif
+}
+
+} // namespace
+
 NB_MODULE(_ext, m) {
   m.doc() = "Native sparse primitives for MLX";
+
+  m.def(
+      "_compiled_capabilities",
+      []() {
+        nb::dict info;
+        info["extension"] = true;
+        info["cpu"] = static_cast<bool>(MLX_SPARSE_HAS_CPU);
+        info["metal"] = static_cast<bool>(MLX_SPARSE_HAS_METAL);
+        info["accelerate"] = static_cast<bool>(MLX_SPARSE_HAS_ACCELERATE);
+        info["cuda"] = static_cast<bool>(MLX_SPARSE_HAS_CUDA);
+        info["rocm"] = static_cast<bool>(MLX_SPARSE_HAS_ROCM);
+        info["platform"] = native_platform();
+        info["architecture"] = native_architecture();
+        return info;
+      },
+      "Return compile-time native backend facts for capability reporting.");
 
   m.def(
       "identity_like",
