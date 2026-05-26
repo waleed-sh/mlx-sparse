@@ -96,6 +96,8 @@ Verifying the installation
 
    # Check that the native extension compiled successfully.
    print("Native extension available:", ms.is_available())
+   print("CPU kernels:", ms.capabilities.CPU)
+   print("Metal kernels:", ms.capabilities.METAL)
 
    # Quick smoke test: identity_like passes a tensor through the extension.
    x = mx.array([1.0, 2.0, 3.0])
@@ -108,6 +110,17 @@ For an editable source install, re-run ``python -m pip install -e .`` and check
 that CMake, nanobind, and MLX are all accessible in the same virtual
 environment. The fallback Python implementations in ``mlx_sparse._fallback``
 remain functional, but they are not graph-safe for large workloads.
+
+For finer-grained native dispatch checks, use the enum-backed capability API:
+
+.. code-block:: python
+
+   ms.capabilities.status("metal")
+   ms.capabilities.status("accelerate")
+
+Current wheels report native CPU kernels and, on supported Apple Silicon
+runtimes with an accessible GPU, Metal kernels. Accelerate, CUDA, and ROCm are
+reserved capabilities for future builds and currently report ``"not_built"``.
 
 Running the test suite
 -----------------------

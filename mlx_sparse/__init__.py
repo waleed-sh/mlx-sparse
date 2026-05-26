@@ -43,6 +43,10 @@ Typical usage::
 """
 
 from mlx_sparse import linalg
+from mlx_sparse._capabilities import (
+    capabilities,
+    has_capability,
+)
 from mlx_sparse._config import (
     config,
     config_context,
@@ -142,6 +146,7 @@ __all__ = [
     "CSCArray",
     "CSRArray",
     "asarray",
+    "capabilities",
     "coo_array",
     "config",
     "config_context",
@@ -195,6 +200,7 @@ __all__ = [
     "is_available",
     "issparse",
     "linalg",
+    "has_capability",
     "get_config",
     "set_config",
     "todense",
