@@ -154,7 +154,7 @@ The kernel notes below use a few implementation terms:
 **Metal COO / CSC reductions**
 
 * COO row/column sums, diagonal extraction, and trace operate directly on
-  explicit coordinates. ``float32`` scatter reductions use ``atomic_float``;
+  explicit coordinates. ``float32`` scatter reductions use ``atomic_float``,
   low-precision and complex sum scatters lower through native compressed
   conversion plus storage-aligned reductions where Metal lacks compatible
   storage atomics.
@@ -175,7 +175,7 @@ The kernel notes below use a few implementation terms:
 The reduction status below was audited during ``v0.0.4b0`` planning. It records
 where the current Metal paths are already storage-aligned and where future work
 should replace scatter-heavy or low-parallel kernels with segmented/staged
-reductions. This will change over time until the release.
+reductions.
 
 .. list-table::
    :widths: 28 42 30
@@ -186,13 +186,13 @@ reductions. This will change over time until the release.
      - Current limitation
    * - CSR row sums / row norms
      - Storage-aligned CSR row kernels for ``float32``, ``float16``,
-       ``bfloat16``, and ``complex64``. Short rows use one thread per row;
+       ``bfloat16``, and ``complex64``. Short rows use one thread per row,
        long rows use a threadgroup reduction per row.
      - Only the row axis is storage-aligned. Column sums need either scatter or
        a transpose-style route.
    * - CSC column sums / column norms
      - Storage-aligned CSC column kernels for all supported value dtypes. Short
-       columns use one thread per column; long columns use threadgroup
+       columns use one thread per column, long columns use threadgroup
        reductions.
      - Only the column axis is storage-aligned. Row sums need either scatter or
        conversion to a row-compressed layout.
@@ -213,12 +213,12 @@ reductions. This will change over time until the release.
    * - CSR/CSC diagonal extraction
      - One Metal thread handles each diagonal slot and scans the corresponding
        compressed row or column. All supported value dtypes are native.
-     - Long rows or columns are serial within that diagonal slot; there is no
+     - Long rows or columns are serial within that diagonal slot, there is no
        vector reduction or sorted-index search yet.
    * - COO diagonal extraction
      - ``float32`` uses direct atomic scatter into diagonal output slots.
        Non-``float32`` inputs convert to CSR and reuse CSR diagonal extraction.
-     - ``float32`` is scatter-heavy; non-``float32`` pays conversion cost.
+     - ``float32`` is scatter-heavy, non-``float32`` pays conversion cost.
    * - CSR/COO/CSC trace
      - All supported value dtypes use native Metal kernels with a fixed
        128-lane threadgroup reduction.
@@ -265,17 +265,35 @@ availability fallback, not a dtype-specific path in normal wheels.
 
 **COO x COO and CSC x CSC**
 
+.. important::
+
+   Sparse-sparse multiplication in this release is correctness- and
+   infrastructure-focused, not yet the primary performance surface of
+   ``mlx-sparse``. The native host paths are the default because they are
+   currently the fastest implementation for the small and medium products in
+   the test/benchmark set. Staged Metal SpGEMM paths are experimental and are
+   intended to validate format-specific symbolic/numeric/prune pipelines before
+   later GPU tuning work such as group-level hashing, merge-based row/column
+   kernels, and lower-synchronization allocation strategies.
+
 * COO sparse-sparse multiplication groups explicit coordinate rows, performs a
   symbolic count for each output row, allocates compact coordinate buffers, then
   fills sorted ``(row, col)`` entries and prunes exact zero cancellations.
+
+* The default COO implementation remains the optimized native host path. An
+  experimental staged Metal COO path is available behind
+  ``ms.config.EXPERIMENTAL_METAL_SPGEMM``. It row-buckets the explicit COO
+  coordinates as a scheduling structure, then runs COO-specific symbolic,
+  numeric-fill, and prune kernels that return canonical COO output. It does not
+  call CSR sparse-sparse multiplication.
 
 * CSC sparse-sparse multiplication is column-native: each output column walks
   the right-hand compressed column and gathers matching left-hand compressed
   columns. The result is canonical CSC with sorted row indices per column.
 
-* These paths are native C++ host implementations today. They intentionally do
-  not route through CSR, format-specific Metal sparse-sparse kernels remain a
-  future tuning target because the output structure is dynamic.
+* CSC sparse-sparse multiplication is still a native C++ host implementation
+  today. Format-specific Metal CSC sparse-sparse kernels remain a future tuning
+  target because the output structure is dynamic.
 
 **CPU backends**
 

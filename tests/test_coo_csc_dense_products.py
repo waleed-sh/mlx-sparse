@@ -37,6 +37,19 @@ def _sample_arrays(dtype=np.float32, index_dtype=np.int32):
     return data, row, col, dense
 
 
+def _assert_canonical_coo(coo):
+    data = to_numpy(coo.data)
+    row = to_numpy(coo.row)
+    col = to_numpy(coo.col)
+    assert coo.has_canonical_format
+    assert np.all(data != 0)
+    if row.size:
+        order = np.lexsort((col, row))
+        np.testing.assert_array_equal(order, np.arange(row.size))
+        pairs = np.stack([row, col], axis=1)
+        assert np.unique(pairs, axis=0).shape[0] == pairs.shape[0]
+
+
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
 @pytest.mark.parametrize(
     ("dtype", "rtol", "atol"),
@@ -258,3 +271,144 @@ def test_coo_and_csc_sparse_sparse_matmat_match_scipy(
         _ = coo @ rhs_csc
     with pytest.raises(NotImplementedError, match="Mixed-format CSC"):
         _ = csc @ rhs_coo
+
+
+def test_coo_spgemm_duplicate_cancellation_and_rectangular_output(mx, scipy_sparse):
+    lhs_row = np.array([0, 0, 0, 1, 1, 2, 3, 3], dtype=np.int32)
+    lhs_col = np.array([1, 1, 3, 0, 2, 4, 1, 4], dtype=np.int32)
+    lhs_data = np.array([1.0, -1.0, 2.0, 3.0, -2.0, 5.0, 4.0, -5.0], dtype=np.float32)
+    rhs_row = np.array([1, 1, 3, 3, 4, 0, 2, 2, 4], dtype=np.int32)
+    rhs_col = np.array([0, 0, 2, 3, 1, 1, 0, 3, 1], dtype=np.int32)
+    rhs_data = np.array(
+        [7.0, -7.0, 2.0, 0.0, 1.0, 2.0, -3.0, 4.0, -1.0], dtype=np.float32
+    )
+
+    lhs = ms.coo_array(
+        (mx.array(lhs_data), (mx.array(lhs_row), mx.array(lhs_col))),
+        shape=(4, 5),
+    )
+    rhs = ms.coo_array(
+        (mx.array(rhs_data), (mx.array(rhs_row), mx.array(rhs_col))),
+        shape=(5, 4),
+    )
+
+    expected = (
+        scipy_sparse.coo_matrix((lhs_data, (lhs_row, lhs_col)), shape=lhs.shape)
+        @ scipy_sparse.coo_matrix((rhs_data, (rhs_row, rhs_col)), shape=rhs.shape)
+    ).toarray()
+    out = lhs @ rhs
+
+    assert out.shape == (4, 4)
+    _assert_canonical_coo(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_coo_spgemm_empty_product_preserves_output_shape_and_dtype(mx):
+    lhs = ms.coo_array(
+        (
+            mx.array(np.array([2.0, -3.0], dtype=np.float32)),
+            (
+                mx.array(np.array([0, 2], dtype=np.int32)),
+                mx.array(np.array([0, 0], dtype=np.int32)),
+            ),
+        ),
+        shape=(3, 4),
+    )
+    rhs = ms.coo_array(
+        (
+            mx.array(np.array([4.0, 5.0], dtype=np.float32)),
+            (
+                mx.array(np.array([1, 3], dtype=np.int32)),
+                mx.array(np.array([0, 1], dtype=np.int32)),
+            ),
+        ),
+        shape=(4, 2),
+    )
+
+    out = lhs @ rhs
+
+    assert out.shape == (3, 2)
+    assert out.nnz == 0
+    assert out.dtype == lhs.dtype
+    assert out.index_dtype == lhs.index_dtype
+    assert out.has_canonical_format
+    np.testing.assert_array_equal(
+        to_numpy(out.todense()), np.zeros((3, 2), dtype=np.float32)
+    )
+
+
+def test_native_coo_spgemm_mixed_index_dtypes_promotes_output_indices(mx, scipy_sparse):
+    lhs = ms.coo_array(
+        (
+            mx.array(np.array([1.0, 2.0, 3.0], dtype=np.float32)),
+            (
+                mx.array(np.array([0, 1, 1], dtype=np.int32)),
+                mx.array(np.array([0, 1, 2], dtype=np.int32)),
+            ),
+        ),
+        shape=(2, 3),
+    )
+    rhs = ms.coo_array(
+        (
+            mx.array(np.array([4.0, -1.0, 5.0], dtype=np.float32)),
+            (
+                mx.array(np.array([0, 1, 2], dtype=np.int64)),
+                mx.array(np.array([1, 0, 1], dtype=np.int64)),
+            ),
+        ),
+        shape=(3, 2),
+    )
+
+    data, row, col = native.coo_matmat(lhs, rhs)
+    expected = (
+        scipy_sparse.coo_matrix(
+            (
+                to_numpy(lhs.data),
+                (
+                    to_numpy(lhs.row).astype(np.int64),
+                    to_numpy(lhs.col).astype(np.int64),
+                ),
+            ),
+            shape=lhs.shape,
+        )
+        @ scipy_sparse.coo_matrix(
+            (to_numpy(rhs.data), (to_numpy(rhs.row), to_numpy(rhs.col))),
+            shape=rhs.shape,
+        )
+    ).toarray()
+    out = ms.COOArray(data, row, col, (2, 2), has_canonical_format=True)
+
+    assert row.dtype == mx.int64
+    assert col.dtype == mx.int64
+    _assert_canonical_coo(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.gpu
+def test_experimental_metal_coo_spgemm_matches_scipy(mx, scipy_sparse):
+    lhs_row = np.array([0, 0, 1, 1, 2, 2, 2], dtype=np.int32)
+    lhs_col = np.array([0, 2, 1, 3, 0, 2, 2], dtype=np.int32)
+    lhs_data = np.array([1.0, -2.0, 3.0, 4.0, -1.0, 2.5, -0.5], dtype=np.float32)
+    rhs_row = np.array([0, 1, 2, 2, 3], dtype=np.int32)
+    rhs_col = np.array([1, 0, 0, 2, 1], dtype=np.int32)
+    rhs_data = np.array([2.0, -1.0, 5.0, -5.0, 0.5], dtype=np.float32)
+
+    lhs = ms.coo_array(
+        (mx.array(lhs_data), (mx.array(lhs_row), mx.array(lhs_col))),
+        shape=(3, 4),
+    )
+    rhs = ms.coo_array(
+        (mx.array(rhs_data), (mx.array(rhs_row), mx.array(rhs_col))),
+        shape=(4, 3),
+    )
+
+    expected = (
+        scipy_sparse.coo_matrix((lhs_data, (lhs_row, lhs_col)), shape=lhs.shape)
+        @ scipy_sparse.coo_matrix((rhs_data, (rhs_row, rhs_col)), shape=rhs.shape)
+    ).toarray()
+    with ms.config.patch(EXPERIMENTAL_METAL_SPGEMM=True):
+        out = lhs @ rhs
+
+    assert isinstance(out, ms.COOArray)
+    _assert_canonical_coo(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)

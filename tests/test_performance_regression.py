@@ -64,6 +64,34 @@ def _random_csr(mx, scipy_sparse, *, rows: int, cols: int, density: float):
     return csr, scipy_csr, rng
 
 
+def _random_coo(mx, scipy_sparse, *, rows: int, cols: int, density: float, seed: int):
+    rng = np.random.default_rng(seed)
+    scipy_coo = scipy_sparse.random(
+        rows,
+        cols,
+        density=density,
+        format="coo",
+        dtype=np.float32,
+        random_state=rng,
+    )
+    coo = ms.coo_array(
+        (
+            mx.array(scipy_coo.data.astype(np.float32)),
+            (
+                mx.array(scipy_coo.row.astype(np.int32)),
+                mx.array(scipy_coo.col.astype(np.int32)),
+            ),
+        ),
+        shape=scipy_coo.shape,
+    )
+    return coo, scipy_coo
+
+
+def _eval_coo_product(mx, coo):
+    mx.eval(coo.data, coo.row, coo.col)
+    return coo.data
+
+
 @pytest.mark.performance
 def test_csr_matvec_native_performance_regression(mx, scipy_sparse):
     if not ms.is_available():
@@ -138,6 +166,44 @@ def test_csr_matmul_native_performance_regression(mx, scipy_sparse):
     dense_ms = _bench_ms(mx, lambda: dense @ rhs, warmup=2, iters=4)
 
     assert native_ms <= max(100.0, 25.0 * dense_ms)
+
+
+@pytest.mark.performance
+def test_coo_spgemm_native_performance_regression(mx, scipy_sparse):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    lhs, scipy_lhs = _random_coo(
+        mx, scipy_sparse, rows=128, cols=160, density=0.025, seed=1234
+    )
+    rhs, scipy_rhs = _random_coo(
+        mx, scipy_sparse, rows=160, cols=96, density=0.025, seed=5678
+    )
+    dense_lhs = lhs.todense()
+    dense_rhs = rhs.todense()
+
+    out = lhs @ rhs
+    np.testing.assert_allclose(
+        to_numpy(out.todense()),
+        (scipy_lhs @ scipy_rhs).toarray(),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    native_ms = _bench_ms(
+        mx, lambda: _eval_coo_product(mx, lhs @ rhs), warmup=2, iters=4
+    )
+    dense_ms = _bench_ms(mx, lambda: dense_lhs @ dense_rhs, warmup=2, iters=4)
+
+    def fallback_product():
+        data, row, col = fallback.coo_matmat(lhs, rhs)
+        mx.eval(data, row, col)
+        return data
+
+    fallback_ms = _bench_ms(mx, fallback_product, warmup=1, iters=3)
+
+    assert native_ms <= max(150.0, 50.0 * dense_ms)
+    assert native_ms <= 2.5 * fallback_ms
 
 
 @pytest.mark.performance
