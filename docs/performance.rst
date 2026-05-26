@@ -170,6 +170,65 @@ The kernel notes below use a few implementation terms:
   long columns, matching the CSR row-reduction strategy but along the CSC
   compressed dimension.
 
+**Reduction audit snapshot (v0.0.4b0 planning)**
+
+The reduction status below was audited during ``v0.0.4b0`` planning. It records
+where the current Metal paths are already storage-aligned and where future work
+should replace scatter-heavy or low-parallel kernels with segmented/staged
+reductions. This will change over time until the release.
+
+.. list-table::
+   :widths: 28 42 30
+   :header-rows: 1
+
+   * - Operation family
+     - Current Metal path
+     - Current limitation
+   * - CSR row sums / row norms
+     - Storage-aligned CSR row kernels for ``float32``, ``float16``,
+       ``bfloat16``, and ``complex64``. Short rows use one thread per row;
+       long rows use a threadgroup reduction per row.
+     - Only the row axis is storage-aligned. Column sums need either scatter or
+       a transpose-style route.
+   * - CSC column sums / column norms
+     - Storage-aligned CSC column kernels for all supported value dtypes. Short
+       columns use one thread per column; long columns use threadgroup
+       reductions.
+     - Only the column axis is storage-aligned. Row sums need either scatter or
+       conversion to a row-compressed layout.
+   * - CSR column sums, CSC row sums, COO row/column sums
+     - ``float32`` uses direct scatter-add kernels with ``atomic_float``.
+       ``float16``, ``bfloat16``, and ``complex64`` stay native by converting to
+       the matching compressed layout and then using storage-aligned reductions.
+     - Non-``float32`` sum scatters pay for structural conversion because Metal
+       does not provide compatible storage atomic adds. These are the main
+       candidates for segmented reductions.
+   * - COO row/column norms and CSC row norms
+     - Squared magnitudes accumulate into ``float32`` outputs, so Metal can use
+       ``atomic_float`` for all supported input dtypes. Public norm methods
+       canonicalize non-canonical inputs first so duplicates are summed before
+       squaring.
+     - The kernels are scatter-heavy and can contend when many entries map to
+       the same output row or column.
+   * - CSR/CSC diagonal extraction
+     - One Metal thread handles each diagonal slot and scans the corresponding
+       compressed row or column. All supported value dtypes are native.
+     - Long rows or columns are serial within that diagonal slot; there is no
+       vector reduction or sorted-index search yet.
+   * - COO diagonal extraction
+     - ``float32`` uses direct atomic scatter into diagonal output slots.
+       Non-``float32`` inputs convert to CSR and reuse CSR diagonal extraction.
+     - ``float32`` is scatter-heavy; non-``float32`` pays conversion cost.
+   * - CSR/COO/CSC trace
+     - All supported value dtypes use native Metal kernels with a fixed
+       128-lane threadgroup reduction.
+     - The trace reduction is limited to one threadgroup, so very large
+       diagonal or coordinate scans do not scale across multiple threadgroups.
+
+If the native extension is unavailable, public reduction helpers fall back to
+the NumPy-backed ``mlx_sparse._fallback`` implementations. That is an extension
+availability fallback, not a dtype-specific path in normal wheels.
+
 **Metal csr_transpose**
 
 * The CPU path uses a counting transpose: count destination-row sizes, prefix
