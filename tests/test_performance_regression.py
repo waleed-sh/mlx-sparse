@@ -87,9 +87,39 @@ def _random_coo(mx, scipy_sparse, *, rows: int, cols: int, density: float, seed:
     return coo, scipy_coo
 
 
+def _random_csc(mx, scipy_sparse, *, rows: int, cols: int, density: float, seed: int):
+    rng = np.random.default_rng(seed)
+    scipy_csc = scipy_sparse.random(
+        rows,
+        cols,
+        density=density,
+        format="csc",
+        dtype=np.float32,
+        random_state=rng,
+    )
+    scipy_csc.sum_duplicates()
+    scipy_csc.sort_indices()
+    csc = ms.csc_array(
+        (
+            mx.array(scipy_csc.data.astype(np.float32)),
+            mx.array(scipy_csc.indices.astype(np.int32)),
+            mx.array(scipy_csc.indptr.astype(np.int32)),
+        ),
+        shape=scipy_csc.shape,
+        sorted_indices=True,
+        canonical=True,
+    )
+    return csc, scipy_csc
+
+
 def _eval_coo_product(mx, coo):
     mx.eval(coo.data, coo.row, coo.col)
     return coo.data
+
+
+def _eval_csc_product(mx, csc):
+    mx.eval(csc.data, csc.indices, csc.indptr)
+    return csc.data
 
 
 @pytest.mark.performance
@@ -198,6 +228,44 @@ def test_coo_spgemm_native_performance_regression(mx, scipy_sparse):
     def fallback_product():
         data, row, col = fallback.coo_matmat(lhs, rhs)
         mx.eval(data, row, col)
+        return data
+
+    fallback_ms = _bench_ms(mx, fallback_product, warmup=1, iters=3)
+
+    assert native_ms <= max(150.0, 50.0 * dense_ms)
+    assert native_ms <= 2.5 * fallback_ms
+
+
+@pytest.mark.performance
+def test_csc_spgemm_native_performance_regression(mx, scipy_sparse):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    lhs, scipy_lhs = _random_csc(
+        mx, scipy_sparse, rows=128, cols=160, density=0.025, seed=2468
+    )
+    rhs, scipy_rhs = _random_csc(
+        mx, scipy_sparse, rows=160, cols=96, density=0.025, seed=1357
+    )
+    dense_lhs = lhs.todense()
+    dense_rhs = rhs.todense()
+
+    out = lhs @ rhs
+    np.testing.assert_allclose(
+        to_numpy(out.todense()),
+        (scipy_lhs @ scipy_rhs).toarray(),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    native_ms = _bench_ms(
+        mx, lambda: _eval_csc_product(mx, lhs @ rhs), warmup=2, iters=4
+    )
+    dense_ms = _bench_ms(mx, lambda: dense_lhs @ dense_rhs, warmup=2, iters=4)
+
+    def fallback_product():
+        data, indices, indptr = fallback.csc_matmat(lhs, rhs)
+        mx.eval(data, indices, indptr)
         return data
 
     fallback_ms = _bench_ms(mx, fallback_product, warmup=1, iters=3)

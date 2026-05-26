@@ -512,11 +512,16 @@ compact buffers.
      - All value and index dtypes
      - Optimized host path by default, experimental staged Metal path behind
        ``EXPERIMENTAL_METAL_SPGEMM``
-   * - ``coo_matmat`` / ``csc_matmat``
-     - Native host path
-     - Dynamic-output symbolic/numeric sparse-sparse products for COO and CSC.
-       They do not route through CSR, Metal sparse-sparse kernels are not
-       enabled yet for these formats.
+   * - ``coo_matmat``
+     - All value and index dtypes
+     - Optimized host path by default, experimental staged Metal path behind
+       ``EXPERIMENTAL_METAL_SPGEMM``. The Metal path uses COO-specific
+       symbolic/numeric/prune kernels and returns canonical COO.
+   * - ``csc_matmat``
+     - All value and index dtypes
+     - Optimized host path by default, experimental staged Metal path behind
+       ``EXPERIMENTAL_METAL_SPGEMM``. The Metal path uses CSC-specific
+       symbolic/numeric/prune kernels and returns canonical CSC.
 
 Known limitations
 -----------------------------

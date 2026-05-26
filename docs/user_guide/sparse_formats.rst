@@ -182,7 +182,9 @@ walk compressed columns and sum duplicate diagonal entries.
 Same-format sparse-sparse products are also column-native. ``CSCArray @
 CSCArray`` dispatches to ``csc_matmat``, which walks each right-hand compressed
 column, gathers the needed left-hand compressed columns, and writes canonical
-CSC output with sorted row indices per column.
+CSC output with sorted row indices per column. The optimized host path is the
+default, ``ms.config.EXPERIMENTAL_METAL_SPGEMM`` enables an experimental staged
+Metal path with CSC-specific symbolic, numeric-fill, and prune kernels.
 
 Canonical form
 --------------
