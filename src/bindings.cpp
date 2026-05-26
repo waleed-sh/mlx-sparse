@@ -81,6 +81,10 @@ using namespace nb::literals;
 #define MLX_SPARSE_HAS_ACCELERATE 0
 #endif
 
+#ifndef MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+#define MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK 0
+#endif
+
 #ifndef MLX_SPARSE_HAS_CUDA
 #define MLX_SPARSE_HAS_CUDA 0
 #endif
@@ -130,6 +134,8 @@ NB_MODULE(_ext, m) {
         info["cpu"] = static_cast<bool>(MLX_SPARSE_HAS_CPU);
         info["metal"] = static_cast<bool>(MLX_SPARSE_HAS_METAL);
         info["accelerate"] = static_cast<bool>(MLX_SPARSE_HAS_ACCELERATE);
+        info["accelerate_framework"] =
+            static_cast<bool>(MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK);
         info["cuda"] = static_cast<bool>(MLX_SPARSE_HAS_CUDA);
         info["rocm"] = static_cast<bool>(MLX_SPARSE_HAS_ROCM);
         info["platform"] = native_platform();

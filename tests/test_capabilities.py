@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +23,8 @@ import pytest
 import mlx_sparse as ms
 import mlx_sparse._capabilities as _capabilities
 from mlx_sparse._ext_loader import extension
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_public_capabilities_are_simple_booleans_and_strings():
@@ -166,6 +169,7 @@ def test_older_extension_without_compiled_fact_hook_uses_resource_fallback(monke
     assert facts["cpu"] is True
     assert facts["metal"] is True
     assert facts["accelerate"] is False
+    assert facts["accelerate_framework"] is False
     assert facts["cuda"] is False
     assert facts["rocm"] is False
 
@@ -179,6 +183,7 @@ def test_not_built_compile_facts_surface_as_not_built(monkeypatch):
             "cpu": False,
             "metal": False,
             "accelerate": False,
+            "accelerate_framework": False,
             "cuda": False,
             "rocm": False,
             "platform": "darwin",
@@ -191,6 +196,28 @@ def test_not_built_compile_facts_surface_as_not_built(monkeypatch):
     assert _capabilities.capabilities.status("accelerate") == "not_built"
 
 
+def test_accelerate_framework_detection_does_not_enable_solver_capability(monkeypatch):
+    monkeypatch.setattr(
+        _capabilities,
+        "_compiled_facts",
+        lambda: {
+            "extension": True,
+            "cpu": False,
+            "metal": False,
+            "accelerate": False,
+            "accelerate_framework": True,
+            "cuda": False,
+            "rocm": False,
+            "platform": "darwin",
+            "architecture": "arm64",
+        },
+    )
+
+    assert not _capabilities.capabilities.ACCELERATE
+    assert _capabilities.capabilities.status("accelerate") == "not_built"
+    assert "framework was detected" in _capabilities.capabilities.reason("accelerate")
+
+
 def test_future_compiled_backends_keep_distinct_runtime_status(monkeypatch):
     monkeypatch.setattr(
         _capabilities,
@@ -200,6 +227,7 @@ def test_future_compiled_backends_keep_distinct_runtime_status(monkeypatch):
             "cpu": False,
             "metal": False,
             "accelerate": True,
+            "accelerate_framework": True,
             "cuda": True,
             "rocm": True,
             "platform": "darwin",
@@ -305,6 +333,18 @@ def test_python_platform_normalization(monkeypatch):
         assert _capabilities._python_platform() == expected
 
 
+def test_cmake_accelerate_detection_is_feature_gated():
+    cmake = (ROOT / "CMakeLists.txt").read_text()
+
+    assert "MLX_SPARSE_ENABLE_ACCELERATE" in cmake
+    assert "find_library(MLX_SPARSE_ACCELERATE_FRAMEWORK Accelerate)" in cmake
+    assert "MLX_SPARSE_HAS_ACCELERATE=0" in cmake
+    framework_definition = (
+        "MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK=" "${MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK}"
+    )
+    assert framework_definition in cmake
+
+
 @pytest.mark.native
 def test_native_extension_reports_compiled_capability_facts():
     ext = extension()
@@ -315,7 +355,10 @@ def test_native_extension_reports_compiled_capability_facts():
 
     assert facts["extension"] is True
     assert facts["cpu"] is True
-    assert facts["accelerate"] is False
+    assert isinstance(facts["accelerate"], bool)
+    assert isinstance(facts["accelerate_framework"], bool)
+    if facts["accelerate"]:
+        assert facts["accelerate_framework"] is True
     assert facts["cuda"] is False
     assert facts["rocm"] is False
     assert facts["platform"] in {"darwin", "linux", "windows", "unknown"}

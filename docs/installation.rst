@@ -86,6 +86,24 @@ For documentation builds, install the ``docs`` extras instead:
 
    python -m pip install -e ".[docs]"
 
+Optional build feature gates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Contributor builds can opt into native feature-detection gates through
+``CMAKE_ARGS``. The Accelerate gate detects and links Apple's Accelerate
+framework on supported macOS builds, but does not enable any Accelerate-backed
+solver dispatch yet:
+
+.. code-block:: bash
+
+   CMAKE_ARGS="-DMLX_SPARSE_ENABLE_ACCELERATE=ON" python -m pip install -e .
+
+This gate is Darwin-only. Passing ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` on
+non-Apple platforms fails at configure time instead of silently pretending that
+Accelerate is available. Until the solver adapter is implemented,
+``ms.capabilities.ACCELERATE`` remains ``False`` even when the framework was
+detected and linked.
+
 Verifying the installation
 ---------------------------
 

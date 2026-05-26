@@ -8,7 +8,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(BUILD_SHARED_LIBS "Build extensions as a shared library" ON)
 option(MLX_SPARSE_BUILD_METAL "Build the mlx_sparse Metal library" ON)
+option(
+  MLX_SPARSE_ENABLE_ACCELERATE
+  "Detect and link Apple's Accelerate framework for future sparse solver support"
+  OFF)
 set(MLX_SPARSE_HAS_METAL 0)
+set(MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK 0)
 
 if(NOT CMAKE_LIBRARY_OUTPUT_DIRECTORY)
   set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -114,6 +119,27 @@ target_include_directories(
 
 target_link_libraries(mlx_sparse_native PUBLIC mlx)
 
+if(MLX_SPARSE_ENABLE_ACCELERATE)
+  if(NOT APPLE)
+    message(FATAL_ERROR
+      "MLX_SPARSE_ENABLE_ACCELERATE=ON requires an Apple platform with the "
+      "Accelerate framework.")
+  endif()
+
+  find_library(MLX_SPARSE_ACCELERATE_FRAMEWORK Accelerate)
+  if(NOT MLX_SPARSE_ACCELERATE_FRAMEWORK)
+    message(FATAL_ERROR
+      "MLX_SPARSE_ENABLE_ACCELERATE=ON but the Accelerate framework was not found.")
+  endif()
+
+  set(MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK 1)
+  target_link_libraries(
+    mlx_sparse_native PUBLIC "${MLX_SPARSE_ACCELERATE_FRAMEWORK}")
+  message(
+    STATUS
+      "Apple Accelerate framework enabled: ${MLX_SPARSE_ACCELERATE_FRAMEWORK}")
+endif()
+
 execute_process(
   COMMAND xcrun -sdk macosx -find metal
   RESULT_VARIABLE MLX_SPARSE_METAL_FIND_RESULT
@@ -202,6 +228,7 @@ target_compile_definitions(
     MLX_SPARSE_HAS_CPU=1
     MLX_SPARSE_HAS_METAL=${MLX_SPARSE_HAS_METAL}
     MLX_SPARSE_HAS_ACCELERATE=0
+    MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK=${MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK}
     MLX_SPARSE_HAS_CUDA=0
     MLX_SPARSE_HAS_ROCM=0)
 
