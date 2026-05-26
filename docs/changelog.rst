@@ -15,10 +15,14 @@ New features
 
 * Support multiplying all sparse array types by numbers.
 
-* Added an enum based native capability reporting via
-  :data:`mlx_sparse.capabilities` and helper :func:`mlx_sparse.has_capability`. Users
+* Added user-friendly native capability reporting via
+  :data:`mlx_sparse.capabilities` and :func:`mlx_sparse.has_capability`. Users
   can check booleans such as ``ms.capabilities.METAL`` or query status strings
   for CPU, Metal, and reserved Accelerate/CUDA/ROCm backend capabilities.
+
+* Added a CMake feature gate, ``MLX_SPARSE_ENABLE_ACCELERATE``, that detects
+  and links Apple's Accelerate framework on Darwin builds for future sparse
+  solver integration. No Accelerate-backed solver dispatch is enabled yet.
 
 Improvements
 ~~~~~~~~~~~~

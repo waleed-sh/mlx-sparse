@@ -46,6 +46,12 @@ attributes on :data:`capabilities` return booleans, for example
 ``ms.capabilities.CPU`` and ``ms.capabilities.METAL``. Status strings are
 ``"available"``, ``"unavailable"``, and ``"not_built"``.
 
+``ms.capabilities.ACCELERATE`` reports Accelerate-backed sparse solver
+availability, not merely framework presence. Development builds may detect and
+link the Accelerate framework behind ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` before
+solver dispatch is implemented, in that case the public Accelerate capability
+still remains unavailable.
+
 .. autodata:: capabilities
 
 .. autofunction:: has_capability

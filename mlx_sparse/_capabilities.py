@@ -294,7 +294,9 @@ def _native_capabilities() -> NativeCapabilities:
             ext_loaded,
             bool(facts.get("accelerate", False)),
             platform,
-            "Accelerate sparse solver integration is not compiled into this build.",
+            _accelerate_not_built_reason(
+                bool(facts.get("accelerate_framework", False))
+            ),
         ),
         _backend_record(
             NativeCapability.CUDA_KERNELS,
@@ -366,6 +368,7 @@ def _compiled_facts() -> Mapping[str, object]:
             "cpu": False,
             "metal": False,
             "accelerate": False,
+            "accelerate_framework": False,
             "cuda": False,
             "rocm": False,
             "platform": _python_platform(),
@@ -383,6 +386,7 @@ def _compiled_facts() -> Mapping[str, object]:
         "cpu": True,
         "metal": _metallib_present(),
         "accelerate": False,
+        "accelerate_framework": False,
         "cuda": False,
         "rocm": False,
         "platform": _python_platform(),
@@ -407,6 +411,15 @@ def _extension_record(loaded: bool) -> NativeCapabilityRecord:
             "implementations will be used where available."
         ),
     )
+
+
+def _accelerate_not_built_reason(framework_built: bool) -> str:
+    if framework_built:
+        return (
+            "The Accelerate framework was detected and linked at build time, "
+            "but Accelerate sparse solver integration is not compiled yet."
+        )
+    return "Accelerate sparse solver integration is not compiled into this build."
 
 
 def _cpu_record(extension_loaded: bool, built: bool) -> NativeCapabilityRecord:
