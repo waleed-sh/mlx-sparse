@@ -44,6 +44,28 @@ Spectral routines
 uses native Arnoldi projection. ``svds`` applies Lanczos to the sparse normal
 operator without materializing ``A.T @ A``.
 
+Current ``svds`` execution audit
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The current ``svds`` path is intentionally conservative:
+
+* ``CSRArray`` inputs are canonicalized. ``COOArray`` and ``CSCArray`` inputs
+  are converted once to canonical CSR before dispatch.
+* ``float16`` and ``bfloat16`` inputs are promoted to ``float32``. Complex
+  sparse inputs are not currently accepted by the spectral routines.
+* The native ``csr_svds`` implementation evaluates the CSR buffers on the host
+  and runs Lanczos over the normal operator in native C++ CPU code.
+* Each normal-operator application is two host sparse matrix-vector products:
+  first ``A @ v`` and then ``A.T @ (...)``. The normal matrix itself is not
+  materialized.
+* Returned singular vectors are assembled from the host Lanczos basis and
+  returned as MLX arrays.
+
+This means ``svds`` still requires the native extension, but it does not yet use
+the Metal kernels. A dedicated two-SpMV Lanczos path is planned so the
+``A @ v`` and ``A.T @ (...)`` pair can stay on the GPU without intermediate
+host synchronization.
+
 Sparse reductions
 -----------------
 
