@@ -65,7 +65,9 @@ COO also has a same-format sparse-sparse product. ``COOArray @ COOArray``
 dispatches to native ``coo_matmat``: it groups coordinates by row, performs a
 symbolic pass to size each output row, fills sorted coordinates, sums duplicate
 contributions, and prunes exact zero cancellations. It returns canonical COO
-without silently converting through CSR.
+without silently converting through CSR. The optimized host path is the default,
+``ms.config.EXPERIMENTAL_METAL_SPGEMM`` enables an experimental staged Metal
+path with COO-specific symbolic, numeric-fill, and prune kernels.
 
 Compressed Sparse Row (CSR) format
 ------------------------------------
