@@ -17,8 +17,14 @@
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 
-#include "linalg/accelerate/accelerate_csc_adapter.h"
-#include "linalg/accelerate/accelerate_errors.h"
+#include <cstdint>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+#include "linalg/accelerate/adapter/csc_adapter.h"
+#include "linalg/accelerate/errors/status.h"
+#include "linalg/accelerate/factorization/factorization.h"
 #include "linalg/linalg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
@@ -157,6 +163,95 @@ nb::dict accelerate_csc_adapter_summary(
   return out;
 }
 
+nb::dict accelerate_factorization_wrapper_summary() {
+  nb::dict out;
+  out["accelerate_framework"] =
+      mlx_sparse::accelerate_factorization_wrappers_available();
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+  const std::vector<float> data_values{4.0f, 1.0f, 3.0f};
+  const std::vector<int32_t> index_values{0, 1, 1};
+  const std::vector<int32_t> pointer_values{0, 2, 3};
+  const auto data = mlx_sparse::mx::array(
+      data_values.begin(), mlx_sparse::mx::Shape{3}, mlx_sparse::mx::float32);
+  const auto indices = mlx_sparse::mx::array(
+      index_values.begin(), mlx_sparse::mx::Shape{3}, mlx_sparse::mx::int32);
+  const auto indptr = mlx_sparse::mx::array(
+      pointer_values.begin(), mlx_sparse::mx::Shape{3}, mlx_sparse::mx::int32);
+  auto matrix = mlx_sparse::make_accelerate_csc_matrix_float32(
+      data, indices, indptr, 2, 2,
+      accelerate_csc_adapter_options(
+          /*require_square=*/true, /*require_non_empty=*/true,
+          /*canonicalize=*/true),
+      "accelerate_factorization_test_adapter");
+
+  auto symbolic = mlx_sparse::make_accelerate_symbolic_factorization(
+      SparseFactorizationCholesky, matrix, "accelerate_symbolic_test");
+  auto retained_symbolic = symbolic.retained("accelerate_symbolic_retain_test");
+  auto numeric = mlx_sparse::make_accelerate_float_factorization(
+      symbolic, matrix, "accelerate_numeric_test");
+  auto retained_numeric = numeric.retained("accelerate_numeric_retain_test");
+  auto moved_numeric = std::move(numeric);
+  auto subfactor = mlx_sparse::make_accelerate_float_subfactor(
+      SparseSubfactorL, moved_numeric, "accelerate_subfactor_test");
+  auto retained_subfactor =
+      subfactor.retained("accelerate_subfactor_retain_test");
+  auto solution = moved_numeric.solve_vector(std::vector<float>{1.0f, 2.0f},
+                                             "accelerate_solve_test");
+
+  out["symbolic_status"] = static_cast<int>(symbolic.status());
+  out["retained_symbolic_status"] =
+      static_cast<int>(retained_symbolic.status());
+  out["numeric_status"] = static_cast<int>(moved_numeric.status());
+  out["retained_numeric_status"] = static_cast<int>(retained_numeric.status());
+  out["factorization_type"] =
+      mlx_sparse::accelerate_factorization_name(moved_numeric.type());
+  out["row_count"] = moved_numeric.row_count();
+  out["column_count"] = moved_numeric.column_count();
+  out["rhs_size"] = moved_numeric.rhs_size();
+  out["solution_size"] = moved_numeric.solution_size();
+  out["solve_workspace_static"] =
+      static_cast<unsigned long long>(moved_numeric.solve_workspace_static());
+  out["solve_workspace_per_rhs"] =
+      static_cast<unsigned long long>(moved_numeric.solve_workspace_per_rhs());
+  out["solve_workspace_one_rhs"] =
+      static_cast<unsigned long long>(moved_numeric.solve_workspace_size(1));
+  out["moved_from_owns"] = numeric.owns();
+  out["moved_to_owns"] = moved_numeric.owns();
+  out["solution"] = solution;
+  out["subfactor_status"] = static_cast<int>(subfactor.status());
+  out["subfactor_contents"] =
+      mlx_sparse::accelerate_subfactor_name(subfactor.contents());
+  out["retained_subfactor_status"] =
+      static_cast<int>(retained_subfactor.status());
+#endif
+  return out;
+}
+
+void accelerate_factorization_failure() {
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+  const std::vector<float> data_values{-1.0f};
+  const std::vector<int32_t> index_values{0};
+  const std::vector<int32_t> pointer_values{0, 1};
+  const auto data = mlx_sparse::mx::array(
+      data_values.begin(), mlx_sparse::mx::Shape{1}, mlx_sparse::mx::float32);
+  const auto indices = mlx_sparse::mx::array(
+      index_values.begin(), mlx_sparse::mx::Shape{1}, mlx_sparse::mx::int32);
+  const auto indptr = mlx_sparse::mx::array(
+      pointer_values.begin(), mlx_sparse::mx::Shape{2}, mlx_sparse::mx::int32);
+  auto matrix = mlx_sparse::make_accelerate_csc_matrix_float32(
+      data, indices, indptr, 1, 1,
+      accelerate_csc_adapter_options(
+          /*require_square=*/true, /*require_non_empty=*/true,
+          /*canonicalize=*/true),
+      "accelerate_factorization_failure_adapter");
+  (void)mlx_sparse::make_accelerate_float_factorization(
+      SparseFactorizationCholesky, matrix, "accelerate_cholesky_failure_test");
+#else
+  throw std::runtime_error(
+      "Accelerate factorization wrappers are not available in this build.");
+#endif
+}
+
 } // namespace
 
 NB_MODULE(_ext, m) {
@@ -257,6 +352,15 @@ NB_MODULE(_ext, m) {
       "canonicalize"_a = true,
       "Return the validated COO-to-Accelerate CSC adapter state used by "
       "tests.");
+
+  m.def("_accelerate_factorization_wrapper_summary_for_testing",
+        &accelerate_factorization_wrapper_summary,
+        "Return a validated Accelerate factorization wrapper smoke-test "
+        "summary.");
+
+  m.def("_accelerate_factorization_failure_for_testing",
+        &accelerate_factorization_failure,
+        "Raise the exception produced by a failing Accelerate factorization.");
 
   m.def(
       "identity_like",

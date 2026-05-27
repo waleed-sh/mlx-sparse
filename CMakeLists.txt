@@ -48,8 +48,9 @@ target_sources(
   mlx_sparse_native
   PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/src/common/common.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/accelerate_csc_adapter.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/accelerate_errors.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/adapter/csc_adapter.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/errors/status.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/factorization/factorization.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/arnoldi/arnoldi.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cg/cg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cholesky/cholesky.cpp

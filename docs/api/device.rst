@@ -48,7 +48,8 @@ attributes on :data:`capabilities` return booleans, for example
 
 ``ms.capabilities.ACCELERATE`` reports Accelerate-backed sparse solver
 availability, not merely framework presence. Development builds may detect and
-link the Accelerate framework behind ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` before
+link the Accelerate framework behind ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` and
+compile internal solver-adapter and factorization-wrapper infrastructure before
 solver dispatch is implemented, in that case the public Accelerate capability
 still remains unavailable.
 
