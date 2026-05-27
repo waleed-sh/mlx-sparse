@@ -15,7 +15,9 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
+#include <nanobind/stl/vector.h>
 
+#include "linalg/accelerate/accelerate_csc_adapter.h"
 #include "linalg/accelerate/accelerate_errors.h"
 #include "linalg/linalg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
@@ -122,6 +124,39 @@ const char *native_architecture() {
 #endif
 }
 
+mlx_sparse::AccelerateCscAdapterOptions
+accelerate_csc_adapter_options(bool require_square, bool require_non_empty,
+                               bool canonicalize) {
+  mlx_sparse::AccelerateCscAdapterOptions options;
+  options.require_square = require_square;
+  options.require_non_empty = require_non_empty;
+  options.canonicalize = canonicalize;
+  return options;
+}
+
+nb::dict accelerate_csc_adapter_summary(
+    const mlx_sparse::AccelerateCscMatrixFloat &matrix) {
+  nb::dict out;
+  out["n_rows"] = matrix.row_count;
+  out["n_cols"] = matrix.column_count;
+  out["nnz"] = static_cast<long long>(matrix.nnz());
+  out["column_starts"] = matrix.column_starts;
+  out["row_indices"] = matrix.row_indices;
+  out["values"] = matrix.values;
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+  const auto sparse = matrix.matrix();
+  out["accelerate_framework"] = true;
+  out["accelerate_row_count"] = sparse.structure.rowCount;
+  out["accelerate_column_count"] = sparse.structure.columnCount;
+  out["accelerate_block_size"] = static_cast<int>(sparse.structure.blockSize);
+  out["accelerate_data_points_to_owned_values"] =
+      sparse.data == matrix.values.data();
+#else
+  out["accelerate_framework"] = false;
+#endif
+  return out;
+}
+
 } // namespace
 
 NB_MODULE(_ext, m) {
@@ -165,6 +200,63 @@ NB_MODULE(_ext, m) {
       "family"_a, "status_code"_a, "operation"_a = "Accelerate operation",
       "detail"_a = "",
       "Raise the Python exception produced for an Accelerate status.");
+
+  m.def(
+      "_accelerate_csc_adapter_summary_for_testing",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, long long n_rows,
+         long long n_cols, bool require_square, bool require_non_empty,
+         bool canonicalize) {
+        auto matrix = mlx_sparse::make_accelerate_csc_matrix_float32(
+            data, indices, indptr, n_rows, n_cols,
+            accelerate_csc_adapter_options(require_square, require_non_empty,
+                                           canonicalize),
+            "accelerate_csc_adapter");
+        return accelerate_csc_adapter_summary(matrix);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "require_square"_a = false, "require_non_empty"_a = true,
+      "canonicalize"_a = true,
+      "Return the validated Accelerate CSC adapter state used by tests.");
+
+  m.def(
+      "_accelerate_csr_adapter_summary_for_testing",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, long long n_rows,
+         long long n_cols, bool require_square, bool require_non_empty,
+         bool canonicalize) {
+        auto matrix = mlx_sparse::make_accelerate_csc_matrix_float32_from_csr(
+            data, indices, indptr, n_rows, n_cols,
+            accelerate_csc_adapter_options(require_square, require_non_empty,
+                                           canonicalize),
+            "accelerate_csr_adapter");
+        return accelerate_csc_adapter_summary(matrix);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "require_square"_a = false, "require_non_empty"_a = true,
+      "canonicalize"_a = true,
+      "Return the validated CSR-to-Accelerate CSC adapter state used by "
+      "tests.");
+
+  m.def(
+      "_accelerate_coo_adapter_summary_for_testing",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, long long n_rows, long long n_cols,
+         bool require_square, bool require_non_empty, bool canonicalize) {
+        auto matrix = mlx_sparse::make_accelerate_csc_matrix_float32_from_coo(
+            data, row, col, n_rows, n_cols,
+            accelerate_csc_adapter_options(require_square, require_non_empty,
+                                           canonicalize),
+            "accelerate_coo_adapter");
+        return accelerate_csc_adapter_summary(matrix);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "require_square"_a = false, "require_non_empty"_a = true,
+      "canonicalize"_a = true,
+      "Return the validated COO-to-Accelerate CSC adapter state used by "
+      "tests.");
 
   m.def(
       "identity_like",

@@ -36,6 +36,11 @@ uses sparse LU and sparse triangular solves.
 
 Direct factorization still produces CSR factors. CSC input support is an input
 format convenience, not a CSC-native supernodal factorization path.
+Accelerate direct-solver support is being built behind a feature gate; the
+native infrastructure can validate and normalize real ``float32`` CSR, COO, and
+CSC inputs into canonical CSC storage for future framework calls, but public
+``sparse_cholesky``, ``sparse_lu``, and ``spsolve`` dispatch still use the
+existing sparse factorization path.
 
 Spectral routines
 -----------------
