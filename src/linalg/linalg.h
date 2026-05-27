@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "linalg/accelerate/accelerate_errors.h"
 #include "linalg/arnoldi/arnoldi.h"
 #include "linalg/cg/cg.h"
 #include "linalg/cholesky/cholesky.h"

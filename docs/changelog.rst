@@ -26,6 +26,11 @@ New features
   solver integration. No Accelerate-backed solver dispatch is enabled yet
   (`PR #4 <https://github.com/waleed-sh/mlx-sparse/pull/4>`_).
 
+* Added a native Accelerate status/error mapping layer for future sparse solver
+  integration. Factorization, Sparse BLAS, and iterative status codes now
+  normalize to predictable Python ``ValueError`` or ``RuntimeError`` exceptions
+  while preserving operation names and optional diagnostic detail.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -53,7 +58,8 @@ Improvements
   CSC, and COO traces now use staged partial reductions, CSR/CSC diagonal
   extraction uses threadgroup reductions for long compressed segments, and
   non-``float32`` COO/CSC norm reductions lower through native compressed
-  storage-aligned reductions instead of scatter-heavy norm atomics.
+  storage-aligned reductions instead of scatter-heavy norm atomics
+  (`PR #8 <https://github.com/waleed-sh/mlx-sparse/pull/8>`_).
 
 Backwards incompatible changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -89,7 +95,7 @@ Documentation
 
 * Updated dtype and performance documentation with the reduction accumulation
   policy, staged trace behavior, and remaining scatter-heavy ``float32`` norm
-  limitations.
+  limitations (`PR #8 <https://github.com/waleed-sh/mlx-sparse/pull/8>`_).
 
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------
