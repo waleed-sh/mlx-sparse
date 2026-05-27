@@ -14,6 +14,9 @@
 
 #include "sparse/coo_col_norms/coo_col_norms.h"
 
+#include "sparse/coo_tocsc/coo_tocsc.h"
+#include "sparse/csc_col_norms/csc_col_norms.h"
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -202,6 +205,13 @@ mx::array coo_col_norms(const mx::array &data, const mx::array &row,
   auto data_contig = mx::contiguous(data, false, stream);
   auto row_contig = mx::contiguous(row, false, stream);
   auto col_contig = mx::contiguous(col, false, stream);
+
+  if (stream.device == mx::Device::gpu && data.dtype() != mx::float32) {
+    auto [csc_data, csc_indices, csc_indptr] =
+        coo_tocsc(data_contig, row_contig, col_contig, n_rows, n_cols, stream);
+    return csc_col_norms(csc_data, csc_indices, csc_indptr, n_rows, n_cols,
+                         stream);
+  }
 
   return mx::array(mx::Shape{n_cols}, mx::float32,
                    std::make_shared<COOColNorms>(stream, n_rows, n_cols),

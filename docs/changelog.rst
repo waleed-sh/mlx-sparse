@@ -18,11 +18,13 @@ New features
 * Added user-friendly native capability reporting via
   :data:`mlx_sparse.capabilities` and :func:`mlx_sparse.has_capability`. Users
   can check booleans such as ``ms.capabilities.METAL`` or query status strings
-  for CPU, Metal, and reserved Accelerate/CUDA/ROCm backend capabilities.
+  for CPU, Metal, and reserved Accelerate/CUDA/ROCm backend capabilities
+  (`PR #3 <https://github.com/waleed-sh/mlx-sparse/pull/3>`_).
 
 * Added a CMake feature gate, ``MLX_SPARSE_ENABLE_ACCELERATE``, that detects
   and links Apple's Accelerate framework on Darwin builds for future sparse
-  solver integration. No Accelerate-backed solver dispatch is enabled yet.
+  solver integration. No Accelerate-backed solver dispatch is enabled yet
+  (`PR #4 <https://github.com/waleed-sh/mlx-sparse/pull/4>`_).
 
 Improvements
 ~~~~~~~~~~~~
@@ -31,18 +33,27 @@ Improvements
   ``ms.config.EXPERIMENTAL_METAL_SPGEMM``. The path row-buckets explicit COO
   coordinates for scheduling, then uses COO-specific symbolic, numeric-fill,
   and zero-prune kernels to return canonical COO output without calling CSR
-  sparse-sparse multiplication.
+  sparse-sparse multiplication
+  (`PR #5 <https://github.com/waleed-sh/mlx-sparse/pull/5>`_).
 
 * Added an experimental staged Metal path for ``CSCArray @ CSCArray`` behind
   ``ms.config.EXPERIMENTAL_METAL_SPGEMM``. The path stays column-native and
   uses CSC-specific symbolic, numeric-fill, and zero-prune kernels to return
-  canonical CSC output without calling CSR sparse-sparse multiplication.
+  canonical CSC output without calling CSR sparse-sparse multiplication
+  (`PR #6 <https://github.com/waleed-sh/mlx-sparse/pull/6>`_).
 
 * Added a dedicated native normal-operator Lanczos path for
   :func:`mlx_sparse.linalg.svds`. The CSR implementation now evaluates
   ``A.T @ (A @ v)`` as a fused native step instead of decomposing each Lanczos
   application into separate host SpMVs, and the Metal path keeps the recurrence
-  on GPU before synchronizing the small Ritz post-processing back to CPU.
+  on GPU before synchronizing the small Ritz post-processing back to CPU
+  (`PR #7 <https://github.com/waleed-sh/mlx-sparse/pull/7>`_).
+
+* Improved sparse Metal reductions for reduction-heavy workloads. Large CSR,
+  CSC, and COO traces now use staged partial reductions, CSR/CSC diagonal
+  extraction uses threadgroup reductions for long compressed segments, and
+  non-``float32`` COO/CSC norm reductions lower through native compressed
+  storage-aligned reductions instead of scatter-heavy norm atomics.
 
 Backwards incompatible changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -62,13 +73,23 @@ Bug fixes
 Documentation
 ~~~~~~~~~~~~~
 
+* Added the v0.0.4b0 sparse execution audit covering current ``svds`` sparse
+  execution, Metal reduction coverage by dtype and format, and remaining
+  serial/scatter-heavy/fallback boundaries
+  (`PR #2 <https://github.com/waleed-sh/mlx-sparse/pull/2>`_).
+
 * Updated sparse format, supported-feature, and performance documentation to
   describe the COO/CSC sparse-sparse execution paths and the experimental
-  Metal gate accurately.
+  Metal gate accurately (`PR #5 <https://github.com/waleed-sh/mlx-sparse/pull/5>`_,
+  `PR #6 <https://github.com/waleed-sh/mlx-sparse/pull/6>`_).
 
 * Updated sparse linear algebra docs to describe the new ``svds`` fused
   normal-operator Lanczos execution path and its remaining CPU post-processing
-  boundary.
+  boundary (`PR #7 <https://github.com/waleed-sh/mlx-sparse/pull/7>`_).
+
+* Updated dtype and performance documentation with the reduction accumulation
+  policy, staged trace behavior, and remaining scatter-heavy ``float32`` norm
+  limitations.
 
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------

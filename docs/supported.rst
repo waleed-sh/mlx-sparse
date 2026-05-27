@@ -223,15 +223,21 @@ Sparse reductions
      - Native row/column sums, row/column L2 norms, diagonal extraction, and
        trace. Sums and diagonal/trace operate directly on coordinates. Norms
        canonicalize first when duplicates may be present so the result matches
-       dense semantics.
+       dense semantics. Non-``float32`` canonical norm reductions on Metal use
+       native COO-to-compressed conversion plus storage-aligned reductions to
+       avoid scatter-heavy atomic accumulation.
    * - CSR reductions
      - Done
-     - Native row/column sums, row norms, diagonal, and trace.
+     - Native row/column sums, row norms, diagonal, and trace. Storage-aligned
+       row reductions and long diagonal segments use threadgroup reductions on
+       Metal, large traces use a staged partial-reduction path.
    * - CSC reductions
      - Done
      - Native row/column sums, row/column L2 norms, diagonal, and trace.
        Column sums and column norms are storage-aligned compressed-column
-       reductions and are the fast path for CSC.
+       reductions and are the fast path for CSC. Non-``float32`` row norms on
+       Metal lower through native CSC-to-CSR conversion and CSR row reductions,
+       long diagonal segments and large traces use staged/vector reductions.
 
 .. _gpu-supported-linalg:
 

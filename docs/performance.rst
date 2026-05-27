@@ -160,15 +160,27 @@ The kernel notes below use a few implementation terms:
   storage atomics.
 
 * COO row/column norms and CSC row norms accumulate squared magnitudes into
-  ``float32`` outputs, so Metal can use ``atomic_float`` even for
-  ``float16``, ``bfloat16``, and ``complex64`` inputs. Public norm methods
-  canonicalize non-canonical COO/CSC inputs first so duplicates are summed
-  before squaring.
+  ``float32`` outputs. ``float32`` inputs can use direct atomic accumulation.
+  Non-``float32`` canonical norms lower through native COO/CSC-to-compressed
+  conversion plus storage-aligned CSR/CSC norm reductions, avoiding a
+  scatter-heavy path when Metal lacks storage-compatible atomics. Public norm
+  methods canonicalize non-canonical COO/CSC inputs first so duplicates are
+  summed before squaring.
 
 * CSC column sums and column norms are storage-aligned. They use scalar
   per-column kernels for short columns and threadgroup vector reductions for
   long columns, matching the CSR row-reduction strategy but along the CSC
   compressed dimension.
+
+* CSR/CSC diagonal extraction uses one thread per diagonal slot for short
+  segments and a threadgroup-per-slot vector reduction for long compressed
+  rows or columns.
+
+* CSR, CSC, and COO trace use the fixed 128-lane reduction for small inputs.
+  Large traces use a staged Metal reduction: independent threadgroups write
+  accumulator-typed partials, then a final threadgroup reduces those partials
+  to the scalar output. ``float16`` and ``bfloat16`` partials are stored as
+  ``float32`` until the final cast.
 
 **Reduction audit snapshot (v0.0.4b0 planning)**
 
@@ -205,25 +217,27 @@ reductions.
        candidates for segmented reductions.
    * - COO row/column norms and CSC row norms
      - Squared magnitudes accumulate into ``float32`` outputs, so Metal can use
-       ``atomic_float`` for all supported input dtypes. Public norm methods
-       canonicalize non-canonical inputs first so duplicates are summed before
-       squaring.
-     - The kernels are scatter-heavy and can contend when many entries map to
-       the same output row or column.
+       ``atomic_float`` for ``float32`` inputs. Non-``float32`` canonical paths
+       now lower through native compressed conversion and storage-aligned
+       reductions. Public norm methods canonicalize non-canonical inputs first
+       so duplicates are summed before squaring.
+     - ``float32`` direct norm kernels remain scatter-heavy and can contend
+       when many entries map to the same output row or column.
    * - CSR/CSC diagonal extraction
-     - One Metal thread handles each diagonal slot and scans the corresponding
-       compressed row or column. All supported value dtypes are native.
-     - Long rows or columns are serial within that diagonal slot, there is no
-       vector reduction or sorted-index search yet.
+     - Short segments use one Metal thread per diagonal slot. Long compressed
+       rows or columns use a threadgroup vector reduction for all supported
+       value dtypes.
+     - Sorted-index binary search is not used yet, each diagonal slot still
+       scans its compressed segment.
    * - COO diagonal extraction
      - ``float32`` uses direct atomic scatter into diagonal output slots.
        Non-``float32`` inputs convert to CSR and reuse CSR diagonal extraction.
      - ``float32`` is scatter-heavy, non-``float32`` pays conversion cost.
    * - CSR/COO/CSC trace
-     - All supported value dtypes use native Metal kernels with a fixed
-       128-lane threadgroup reduction.
-     - The trace reduction is limited to one threadgroup, so very large
-       diagonal or coordinate scans do not scale across multiple threadgroups.
+     - Small inputs use the fixed 128-lane threadgroup reduction. Large inputs
+       use staged partial reductions for all supported value dtypes.
+     - The final partial merge is still one threadgroup, extremely large
+       partial counts are not recursively reduced yet.
 
 If the native extension is unavailable, public reduction helpers fall back to
 the NumPy-backed ``mlx_sparse._fallback`` implementations. That is an extension

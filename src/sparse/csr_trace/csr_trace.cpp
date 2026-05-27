@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "mlx/allocator.h"
@@ -30,6 +31,16 @@
 namespace mlx_sparse {
 
 namespace {
+
+constexpr size_t kTraceThreads = 128;
+constexpr int kTraceRowsPerBlock = 512;
+
+mx::Dtype trace_accumulator_dtype(mx::Dtype dtype) {
+  if (dtype == mx::float16 || dtype == mx::bfloat16) {
+    return mx::float32;
+  }
+  return dtype;
+}
 
 class CSRTrace : public mx::Primitive {
 public:
@@ -150,11 +161,46 @@ void CSRTrace::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
+  auto &encoder = mx::metal::get_command_encoder(s);
+
+  const int num_blocks =
+      (diag_size + kTraceRowsPerBlock - 1) / kTraceRowsPerBlock;
+  if (num_blocks > 1) {
+    const auto partial_dtype = trace_accumulator_dtype(data.dtype());
+    mx::array partials(mx::allocator::malloc(static_cast<size_t>(num_blocks) *
+                                             mx::size_of(partial_dtype)),
+                       mx::Shape{num_blocks}, partial_dtype);
+
+    auto blocks_kernel_name =
+        sparse_kernel_name("csr_trace_blocks", data.dtype(), indices.dtype());
+    auto *blocks_kernel = device.get_kernel(blocks_kernel_name, lib);
+    encoder.set_compute_pipeline_state(blocks_kernel);
+    encoder.set_input_array(data, 0);
+    encoder.set_input_array(indices, 1);
+    encoder.set_input_array(indptr, 2);
+    encoder.set_output_array(partials, 3);
+    encoder.set_bytes(diag_size, 4);
+    encoder.set_bytes(kTraceRowsPerBlock, 5);
+    encoder.dispatch_threads(
+        MTL::Size(static_cast<size_t>(num_blocks) * kTraceThreads, 1, 1),
+        MTL::Size(kTraceThreads, 1, 1));
+
+    auto finalize_kernel_name =
+        std::string("csr_trace_finalize_") + value_kernel_suffix(data.dtype());
+    auto *finalize_kernel = device.get_kernel(finalize_kernel_name, lib);
+    encoder.set_compute_pipeline_state(finalize_kernel);
+    encoder.set_input_array(partials, 0);
+    encoder.set_output_array(out, 1);
+    encoder.set_bytes(num_blocks, 2);
+    encoder.dispatch_threads(MTL::Size(kTraceThreads, 1, 1),
+                             MTL::Size(kTraceThreads, 1, 1));
+    encoder.add_temporary(std::move(partials));
+    return;
+  }
+
   auto kernel_name =
       sparse_kernel_name("csr_trace", data.dtype(), indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
-
-  auto &encoder = mx::metal::get_command_encoder(s);
   encoder.set_compute_pipeline_state(kernel);
   encoder.set_input_array(data, 0);
   encoder.set_input_array(indices, 1);

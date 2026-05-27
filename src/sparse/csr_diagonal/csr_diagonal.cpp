@@ -31,6 +31,9 @@ namespace mlx_sparse {
 
 namespace {
 
+constexpr size_t kVectorThreads = 128;
+constexpr size_t kVectorMinAverageNnz = 32;
+
 class CSRDiagonal : public mx::Primitive {
 public:
   CSRDiagonal(mx::Stream stream, int n_rows, int n_cols)
@@ -151,8 +154,12 @@ void CSRDiagonal::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
-  auto kernel_name =
-      sparse_kernel_name("csr_diagonal", data.dtype(), indices.dtype());
+  const bool use_vector_kernel =
+      diag_size > 0 &&
+      data.size() >= static_cast<size_t>(diag_size) * kVectorMinAverageNnz;
+  auto kernel_name = sparse_kernel_name(
+      use_vector_kernel ? "csr_diagonal_vector" : "csr_diagonal", data.dtype(),
+      indices.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -162,9 +169,15 @@ void CSRDiagonal::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_input_array(indptr, 2);
   encoder.set_output_array(out, 3);
   encoder.set_bytes(diag_size, 4);
-  auto threads = static_cast<size_t>(std::max(diag_size, 1));
-  auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
-  encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+  if (use_vector_kernel) {
+    const auto threadgroups = static_cast<size_t>(diag_size);
+    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
+                             MTL::Size(kVectorThreads, 1, 1));
+  } else {
+    auto threads = static_cast<size_t>(std::max(diag_size, 1));
+    auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+  }
 }
 #else
 void CSRDiagonal::eval_gpu(const std::vector<mx::array> &,
