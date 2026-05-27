@@ -112,6 +112,44 @@ def _random_csc(mx, scipy_sparse, *, rows: int, cols: int, density: float, seed:
     return csc, scipy_csc
 
 
+def _reduction_workload(mx, csr, coo, csc):
+    return (
+        mx.sum(csr.row_sums())
+        + mx.sum(csr.col_sums())
+        + mx.sum(csr.row_norms())
+        + csr.trace()
+        + mx.sum(coo.row_sums())
+        + mx.sum(coo.col_sums())
+        + mx.sum(coo.row_norms())
+        + mx.sum(coo.col_norms())
+        + coo.trace()
+        + mx.sum(csc.row_sums())
+        + mx.sum(csc.col_sums())
+        + mx.sum(csc.row_norms())
+        + mx.sum(csc.col_norms())
+        + csc.trace()
+    )
+
+
+def _fallback_reduction_workload(mx, csr, coo, csc):
+    return (
+        mx.sum(fallback.csr_row_sums(csr.data, csr.indices, csr.indptr, csr.shape))
+        + mx.sum(fallback.csr_col_sums(csr.data, csr.indices, csr.indptr, csr.shape))
+        + mx.sum(fallback.csr_row_norms(csr.data, csr.indices, csr.indptr, csr.shape))
+        + fallback.csr_trace(csr.data, csr.indices, csr.indptr, csr.shape)
+        + mx.sum(fallback.coo_row_sums(coo.data, coo.row, coo.col, coo.shape))
+        + mx.sum(fallback.coo_col_sums(coo.data, coo.row, coo.col, coo.shape))
+        + mx.sum(fallback.coo_row_norms(coo.data, coo.row, coo.col, coo.shape))
+        + mx.sum(fallback.coo_col_norms(coo.data, coo.row, coo.col, coo.shape))
+        + fallback.coo_trace(coo.data, coo.row, coo.col, coo.shape)
+        + mx.sum(fallback.csc_row_sums(csc.data, csc.indices, csc.indptr, csc.shape))
+        + mx.sum(fallback.csc_col_sums(csc.data, csc.indices, csc.indptr, csc.shape))
+        + mx.sum(fallback.csc_row_norms(csc.data, csc.indices, csc.indptr, csc.shape))
+        + mx.sum(fallback.csc_col_norms(csc.data, csc.indices, csc.indptr, csc.shape))
+        + fallback.csc_trace(csc.data, csc.indices, csc.indptr, csc.shape)
+    )
+
+
 def _eval_coo_product(mx, coo):
     mx.eval(coo.data, coo.row, coo.col)
     return coo.data
@@ -343,6 +381,87 @@ def test_csr_batched_matmul_native_performance_regression(mx, scipy_sparse):
     dense_ms = _bench_ms(mx, lambda: dense[None, :, :] @ rhs, warmup=2, iters=4)
 
     assert native_ms <= max(100.0, 30.0 * dense_ms)
+
+
+@pytest.mark.performance
+def test_reduction_heavy_native_performance_regression(mx, scipy_sparse):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    rows = int(os.environ.get("MLX_SPARSE_PERF_REDUCTION_ROWS", "640"))
+    cols = int(os.environ.get("MLX_SPARSE_PERF_REDUCTION_COLS", "640"))
+    density = float(os.environ.get("MLX_SPARSE_PERF_REDUCTION_DENSITY", "0.025"))
+    warmup = int(os.environ.get("MLX_SPARSE_PERF_WARMUP", "2"))
+    iters = int(os.environ.get("MLX_SPARSE_PERF_ITERS", "4"))
+
+    csr, scipy_csr, _ = _random_csr(
+        mx, scipy_sparse, rows=rows, cols=cols, density=density
+    )
+    scipy_coo = scipy_csr.tocoo(copy=True)
+    coo = ms.coo_array(
+        (
+            mx.array(scipy_coo.data.astype(np.float32)),
+            (
+                mx.array(scipy_coo.row.astype(np.int32)),
+                mx.array(scipy_coo.col.astype(np.int32)),
+            ),
+        ),
+        shape=scipy_coo.shape,
+        canonical=True,
+    )
+    scipy_csc = scipy_csr.tocsc(copy=True)
+    csc = ms.csc_array(
+        (
+            mx.array(scipy_csc.data.astype(np.float32)),
+            mx.array(scipy_csc.indices.astype(np.int32)),
+            mx.array(scipy_csc.indptr.astype(np.int32)),
+        ),
+        shape=scipy_csc.shape,
+        sorted_indices=True,
+        canonical=True,
+    )
+
+    dense = scipy_csr.toarray()
+    expected = (
+        dense.sum(axis=1).sum()
+        + dense.sum(axis=0).sum()
+        + np.linalg.norm(dense, axis=1).sum()
+        + np.trace(dense)
+        + dense.sum(axis=1).sum()
+        + dense.sum(axis=0).sum()
+        + np.linalg.norm(dense, axis=1).sum()
+        + np.linalg.norm(dense, axis=0).sum()
+        + np.trace(dense)
+        + dense.sum(axis=1).sum()
+        + dense.sum(axis=0).sum()
+        + np.linalg.norm(dense, axis=1).sum()
+        + np.linalg.norm(dense, axis=0).sum()
+        + np.trace(dense)
+    )
+    np.testing.assert_allclose(
+        to_numpy(_reduction_workload(mx, csr, coo, csc)),
+        np.asarray(expected, dtype=np.float32),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+
+    native_ms = _bench_ms(
+        mx, lambda: _reduction_workload(mx, csr, coo, csc), warmup=warmup, iters=iters
+    )
+    fallback_ms = _bench_ms(
+        mx,
+        lambda: _fallback_reduction_workload(mx, csr, coo, csc),
+        warmup=1,
+        iters=max(2, min(iters, 3)),
+    )
+
+    absolute_ms = float(
+        os.environ.get("MLX_SPARSE_PERF_REDUCTION_ABSOLUTE_MS", "250.0")
+    )
+    fallback_factor = float(
+        os.environ.get("MLX_SPARSE_PERF_REDUCTION_FALLBACK_FACTOR", "2.5")
+    )
+    assert native_ms <= max(absolute_ms, fallback_factor * fallback_ms)
 
 
 @pytest.mark.performance

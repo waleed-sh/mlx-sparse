@@ -19,6 +19,14 @@ import pytest
 
 import mlx_sparse as ms
 from mlx_sparse import linalg
+from mlx_sparse._host import to_numpy
+
+_REDUCTION_TOLERANCES = {
+    "float32": (2e-5, 2e-5),
+    "float16": (8e-3, 8e-3),
+    "bfloat16": (5e-2, 5e-2),
+    "complex64": (2e-5, 2e-5),
+}
 
 
 def _available_devices(mx):
@@ -49,6 +57,66 @@ def _sample_csr(mx):
         sorted_indices=True,
         canonical=True,
     )
+
+
+def _reduction_stress_arrays(mx, dtype_name: str):
+    n = 640
+    nnz_per_row = 36
+    rows = []
+    cols = []
+    indptr = [0]
+    values = []
+
+    for row in range(n):
+        row_cols = np.sort((row + np.arange(nnz_per_row) * 17) % n).astype(np.int32)
+        rows.extend(np.full(nnz_per_row, row, dtype=np.int32))
+        cols.extend(row_cols)
+        base = np.arange(nnz_per_row, dtype=np.float32)
+        values.extend(np.sin(0.011 * (row + 1) * (base + 1)) / 4.0)
+        indptr.append(len(cols))
+
+    values = np.asarray(values, dtype=np.float32)
+    if dtype_name == "complex64":
+        values = values.astype(np.complex64) + 1j * (
+            np.cos(np.arange(values.size, dtype=np.float32) * 0.003) / 6.0
+        )
+
+    dtype = getattr(mx, dtype_name)
+    data = mx.array(values).astype(dtype)
+    row = mx.array(np.asarray(rows, dtype=np.int32))
+    col = mx.array(np.asarray(cols, dtype=np.int32))
+    indptr = mx.array(np.asarray(indptr, dtype=np.int32))
+    csr = ms.csr_array(
+        (data, col, indptr),
+        shape=(n, n),
+        sorted_indices=True,
+        canonical=True,
+    )
+    coo = ms.coo_array((data, (row, col)), shape=(n, n), canonical=True)
+    csc = csr.tocsc(canonical=True)
+    return csr, coo, csc
+
+
+def _reduction_results(csr, coo, csc):
+    return {
+        "csr_row_sums": to_numpy(csr.row_sums()),
+        "csr_col_sums": to_numpy(csr.col_sums()),
+        "csr_row_norms": to_numpy(csr.row_norms()),
+        "csr_diagonal": to_numpy(csr.diagonal()),
+        "csr_trace": to_numpy(csr.trace()),
+        "coo_row_sums": to_numpy(coo.row_sums()),
+        "coo_col_sums": to_numpy(coo.col_sums()),
+        "coo_row_norms": to_numpy(coo.row_norms()),
+        "coo_col_norms": to_numpy(coo.col_norms()),
+        "coo_diagonal": to_numpy(coo.diagonal()),
+        "coo_trace": to_numpy(coo.trace()),
+        "csc_row_sums": to_numpy(csc.row_sums()),
+        "csc_col_sums": to_numpy(csc.col_sums()),
+        "csc_row_norms": to_numpy(csc.row_norms()),
+        "csc_col_norms": to_numpy(csc.col_norms()),
+        "csc_diagonal": to_numpy(csc.diagonal()),
+        "csc_trace": to_numpy(csc.trace()),
+    }
 
 
 @pytest.mark.gpu
@@ -164,3 +232,31 @@ def test_sparse_linalg_native_ops_match_on_available_devices():
         np.testing.assert_allclose(result["dot"], reference["dot"], rtol=1e-6)
         np.testing.assert_allclose(result["vdot"], reference["vdot"], rtol=1e-6)
         np.testing.assert_allclose(result["cg"], reference["cg"], rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype_name", list(_REDUCTION_TOLERANCES))
+def test_reduction_heavy_cpu_gpu_parity(dtype_name):
+    mx = pytest.importorskip("mlx.core")
+    devices = _available_devices(mx)
+    if len(devices) < 2:
+        pytest.skip("CPU/GPU reduction parity requires both devices.")
+
+    reference = None
+    for name, device in devices:
+        mx.set_default_device(device)
+        csr, coo, csc = _reduction_stress_arrays(mx, dtype_name)
+        result = _reduction_results(csr, coo, csc)
+        if reference is None:
+            reference = result
+            continue
+
+        rtol, atol = _REDUCTION_TOLERANCES[dtype_name]
+        for key, expected in reference.items():
+            np.testing.assert_allclose(
+                result[key],
+                expected,
+                rtol=rtol,
+                atol=atol,
+                err_msg=f"{key} differed on {name}",
+            )

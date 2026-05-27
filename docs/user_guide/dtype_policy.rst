@@ -94,6 +94,9 @@ Accumulation policy
 For ``float16`` and ``bfloat16``, both CPU and Metal GPU backends use a
 ``float32`` accumulator to reduce rounding error during the inner-product
 loop, then cast back to the storage dtype on output.
+Staged Metal trace reductions also store intermediate ``float32`` partials for
+these dtypes before the final cast, so large traces do not introduce an extra
+low-precision partial-sum boundary.
 
 For ``complex64``, both real and imaginary components accumulate in
 ``complex64`` (i.e. ``float32`` component precision). There is no upcasting
@@ -119,6 +122,8 @@ Every Metal GPU kernel is compiled for all four value dtypes (``float32``,
 * ``csr_sort_indices``
 * ``csc_sort_indices``
 * ``csr_transpose``
+* sparse reductions, including row/column sums, row/column norms, diagonal,
+  and trace for COO, CSR, and CSC
 
 Dynamic-output helpers such as ``canonicalize()``, ``fromdense()``, and
 ``CSR @ CSR`` synchronize to host because their output sizes depend on values.

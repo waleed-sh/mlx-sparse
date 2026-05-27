@@ -14,6 +14,9 @@
 
 #include "sparse/coo_row_norms/coo_row_norms.h"
 
+#include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/csr_row_norms/csr_row_norms.h"
+
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -202,6 +205,13 @@ mx::array coo_row_norms(const mx::array &data, const mx::array &row,
   auto data_contig = mx::contiguous(data, false, stream);
   auto row_contig = mx::contiguous(row, false, stream);
   auto col_contig = mx::contiguous(col, false, stream);
+
+  if (stream.device == mx::Device::gpu && data.dtype() != mx::float32) {
+    auto [csr_data, csr_indices, csr_indptr] =
+        coo_tocsr(data_contig, row_contig, col_contig, n_rows, n_cols, stream);
+    return csr_row_norms(csr_data, csr_indices, csr_indptr, n_rows, n_cols,
+                         stream);
+  }
 
   return mx::array(mx::Shape{n_rows}, mx::float32,
                    std::make_shared<COORowNorms>(stream, n_rows, n_cols),
