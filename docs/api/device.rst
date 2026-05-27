@@ -37,8 +37,8 @@ filenames directly.
    if ms.capabilities.METAL:
        ms.use_gpu()
 
-   if ms.capabilities.status("accelerate") == "not_built":
-       pass  # current wheels do not compile Accelerate solver support yet
+   if ms.capabilities.ACCELERATE:
+       pass  # optional Apple Accelerate sparse direct solvers are available
 
 The public capability names are ``"extension"``, ``"cpu"``, ``"metal"``,
 ``"accelerate"``, ``"cuda"``, and ``"rocm"``. The corresponding uppercase
@@ -48,10 +48,9 @@ attributes on :data:`capabilities` return booleans, for example
 
 ``ms.capabilities.ACCELERATE`` reports Accelerate-backed sparse solver
 availability, not merely framework presence. Development builds may detect and
-link the Accelerate framework behind ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` and
-compile internal solver-adapter and factorization-wrapper infrastructure before
-solver dispatch is implemented, in that case the public Accelerate capability
-still remains unavailable.
+link the Accelerate framework behind ``MLX_SPARSE_ENABLE_ACCELERATE=ON``. The
+portable wheels remain non-Accelerate builds unless a platform-specific release
+explicitly says otherwise.
 
 .. autodata:: capabilities
 

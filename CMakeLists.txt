@@ -13,6 +13,7 @@ option(
   "Detect and link Apple's Accelerate framework for future sparse solver support"
   OFF)
 set(MLX_SPARSE_HAS_METAL 0)
+set(MLX_SPARSE_HAS_ACCELERATE 0)
 set(MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK 0)
 
 if(NOT CMAKE_LIBRARY_OUTPUT_DIRECTORY)
@@ -51,6 +52,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/adapter/csc_adapter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/errors/status.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/factorization/factorization.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/solve/solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/arnoldi/arnoldi.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cg/cg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cholesky/cholesky.cpp
@@ -135,6 +137,7 @@ if(MLX_SPARSE_ENABLE_ACCELERATE)
       "MLX_SPARSE_ENABLE_ACCELERATE=ON but the Accelerate framework was not found.")
   endif()
 
+  set(MLX_SPARSE_HAS_ACCELERATE 1)
   set(MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK 1)
   target_link_libraries(
     mlx_sparse_native PUBLIC "${MLX_SPARSE_ACCELERATE_FRAMEWORK}")
@@ -231,7 +234,7 @@ target_compile_definitions(
   PUBLIC
     MLX_SPARSE_HAS_CPU=1
     MLX_SPARSE_HAS_METAL=${MLX_SPARSE_HAS_METAL}
-    MLX_SPARSE_HAS_ACCELERATE=0
+    MLX_SPARSE_HAS_ACCELERATE=${MLX_SPARSE_HAS_ACCELERATE}
     MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK=${MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK}
     MLX_SPARSE_HAS_CUDA=0
     MLX_SPARSE_HAS_ROCM=0)

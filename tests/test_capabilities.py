@@ -338,7 +338,10 @@ def test_cmake_accelerate_detection_is_feature_gated():
 
     assert "MLX_SPARSE_ENABLE_ACCELERATE" in cmake
     assert "find_library(MLX_SPARSE_ACCELERATE_FRAMEWORK Accelerate)" in cmake
-    assert "MLX_SPARSE_HAS_ACCELERATE=0" in cmake
+    assert "set(MLX_SPARSE_HAS_ACCELERATE 0)" in cmake
+    assert "set(MLX_SPARSE_HAS_ACCELERATE 1)" in cmake
+    solver_definition = "MLX_SPARSE_HAS_ACCELERATE=${MLX_SPARSE_HAS_ACCELERATE}"
+    assert solver_definition in cmake
     framework_definition = (
         "MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK=" "${MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK}"
     )
@@ -367,7 +370,7 @@ def test_native_extension_reports_compiled_capability_facts():
 
 @pytest.mark.accelerate
 @pytest.mark.native
-def test_accelerate_enabled_build_reports_framework_without_public_solver_capability():
+def test_accelerate_enabled_build_reports_public_solver_capability():
     ext = extension()
     if ext is None:
         pytest.skip("native extension is not built")
@@ -376,7 +379,7 @@ def test_accelerate_enabled_build_reports_framework_without_public_solver_capabi
     if not facts["accelerate_framework"]:
         pytest.skip("Accelerate framework support is not compiled in")
 
-    assert facts["accelerate"] is False
-    assert ms.capabilities.ACCELERATE is False
-    assert ms.capabilities.status("accelerate") == "not_built"
-    assert "framework was detected" in ms.capabilities.reason("accelerate")
+    assert facts["accelerate"] is True
+    assert ms.capabilities.ACCELERATE is True
+    assert ms.capabilities.status("accelerate") == "available"
+    assert ms.capabilities.runtime_available("accelerate")

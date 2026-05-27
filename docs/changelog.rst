@@ -43,7 +43,20 @@ New features
   ``float32`` subfactor objects. The wrappers are move-only, release resources
   through ``SparseCleanup``, retain shared opaque objects explicitly, route
   Accelerate parameter callbacks into Python exceptions, and expose solve and
-  refactor helpers for future direct-solver dispatch.
+  refactor helpers for future direct-solver dispatch
+  (`PR #11 <https://github.com/waleed-sh/mlx-sparse/pull/11>`_).
+
+* Added optional Accelerate-backed sparse direct solves for Apple builds that
+  opt into ``MLX_SPARSE_ENABLE_ACCELERATE``. Supported real ``float32`` CSR,
+  CSC, and COO inputs normalize through the shared CSC adapter and use opaque
+  Accelerate Cholesky, LDLT, QR, Cholesky-at-A, and runtime-gated LU
+  factorization objects. ``linalg.spsolve`` now takes the Accelerate LU fast
+  path for supported square systems, while explicit-factor APIs stay on the
+  native path because they promise CSR factors.
+
+* Added :func:`mlx_sparse.linalg.factorized` and
+  :class:`mlx_sparse.linalg.FactorizedSolve` for reusable opaque solves with
+  ``backend``, ``method``, ``rhs_size``, and ``solution_size`` metadata.
 
 Improvements
 ~~~~~~~~~~~~
@@ -110,6 +123,13 @@ Documentation
 * Updated dtype and performance documentation with the reduction accumulation
   policy, staged trace behavior, and remaining scatter-heavy ``float32`` norm
   limitations (`PR #8 <https://github.com/waleed-sh/mlx-sparse/pull/8>`_).
+
+* Updated sparse linalg, installation, capability, supported-feature, and
+  performance docs for the Accelerate direct-solver fast path.
+
+* Added a dedicated solver support page documenting each public
+  ``mlx_sparse.linalg`` solver, its CPU/GPU coverage label, and whether an
+  Accelerate-enabled build can use an Apple sparse direct-solver path.
 
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------

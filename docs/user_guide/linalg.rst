@@ -5,6 +5,9 @@ Sparse linear algebra
 densify inputs. Solver, factorization, and spectral routines dispatch through
 native C++/Metal sparse kernels and require sparse containers.
 
+For a solver-by-solver map of CPU, Metal GPU, and Accelerate coverage, see
+:doc:`linalg_solvers`.
+
 Design contract
 ---------------
 
@@ -31,16 +34,21 @@ Sparse direct factorizations
 
 ``sparse_cholesky(A)`` computes a sparse lower factor ``L`` with
 ``A = L @ L.T`` for positive-definite real matrices. ``sparse_lu(A)`` computes
-``P @ A = L @ U`` with sparse CSR factors and row pivoting. ``spsolve(A, b)``
-uses sparse LU and sparse triangular solves.
+``P @ A = L @ U`` with sparse CSR factors and row pivoting. These APIs return
+explicit sparse factors and therefore stay on the native mlx-sparse path.
 
-Direct factorization still produces CSR factors. CSC input support is an input
-format convenience, not a CSC-native supernodal factorization path.
-Accelerate direct-solver support is being built behind a feature gate; the
-native infrastructure can validate and normalize real ``float32`` CSR, COO, and
-CSC inputs into canonical CSC storage for future framework calls, but public
-``sparse_cholesky``, ``sparse_lu``, and ``spsolve`` dispatch still use the
-existing sparse factorization path.
+``factorized(A, method="auto")`` returns a reusable solve object without
+exposing explicit factors. On Accelerate-enabled Apple builds it uses opaque
+Accelerate ``float32`` factorization objects for supported methods:
+``"cholesky"``, ``"ldlt"``, ``"qr"``, ``"cholesky_ata"``, and, on macOS 15.5
+or newer SDK/runtimes, ``"lu"``. CSR, CSC, and COO inputs are validated and
+normalized to canonical CSC before the framework call. ``spsolve(A, b)`` uses
+this transparent Accelerate LU fast path for supported square real systems and
+falls back to the native LU path otherwise.
+
+The explicit-factor APIs are intentionally not Accelerate-backed: Accelerate
+does not return mlx-sparse ``CSRArray`` factors, so using it there would change
+the public contract.
 
 Spectral routines
 -----------------
@@ -84,54 +92,15 @@ GPU coverage
 ------------
 
 Calling ``ms.use_gpu()`` (or ``mx.set_default_device(mx.gpu)``) before a
-solver call routes the compute-heavy Krylov step to Metal.
+solver call routes supported native kernels to Metal. The exact behavior is
+solver-specific: some paths are full GPU paths, some use GPU for the dominant
+Krylov or triangular-solve phase, and Accelerate direct solves are CPU-only.
+See :doc:`linalg_solvers` for the complete support matrix.
 
-.. list-table::
-   :widths: 25 20 55
-   :header-rows: 1
-
-   * - Function
-     - GPU path
-     - What runs on GPU
-   * - ``linalg.cg``
-     - Full
-     - Entire CG iteration inside a single Metal threadgroup kernel.
-   * - ``linalg.gmres``
-     - Partial
-     - Arnoldi factorisation (``csr_arnoldi`` kernel) per restart, the
-       small least-squares solve and convergence check run on CPU.
-   * - ``linalg.minres``
-     - Partial
-     - Lanczos tridiagonalisation (``csr_lanczos`` kernel), the
-       tridiagonal least-squares solve runs on CPU.
-   * - ``linalg.eigsh``
-     - Partial
-     - Lanczos tridiagonalisation (``csr_lanczos`` kernel), Jacobi
-       eigendecomposition of the small tridiagonal matrix runs on CPU.
-   * - ``linalg.eigs``
-     - Partial
-     - Arnoldi factorisation (``csr_arnoldi`` kernel), QR iteration on
-       the small Hessenberg matrix runs on CPU.
-   * - ``linalg.svds``
-     - Partial
-     - Dedicated normal-operator Lanczos step
-       (``A.T @ (A @ v)`` without host intermediate), small eigensolve and
-       singular-vector assembly run on CPU.
-   * - ``sparse_cholesky`` (factorisation)
-     - None
-     - Sequential fill-in algorithm runs on CPU.
-   * - ``SparseCholesky.solve`` / ``SparseLU.solve`` / ``spsolve``
-     - Full
-     - Forward/back-substitution via ``csr_triangular_solve`` kernel,
-       row permutation via ``csr_permute_vector`` kernel.
-   * - ``CSRArray.vdot`` / ``CSRArray.dot``
-     - Full
-     - Row-merge sparse inner product via ``csr_vdot`` kernel.
-
-The GPU advantage grows with matrix size.  At ``n ≲ 1 000`` the kernel
-launch and ``mx.eval()`` synchronisation overhead can exceed the parallel
-speedup, the break-even point is typically around ``n ≈ 2 000–5 000``
-depending on density.
+The GPU advantage grows with matrix size. At ``n < 1 000`` the kernel launch
+and ``mx.eval()`` synchronization overhead can exceed the parallel speedup.
+The break-even point is typically around ``n = 2 000`` to ``5 000`` depending
+on density.
 
 Numerical scope
 ---------------

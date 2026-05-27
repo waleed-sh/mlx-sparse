@@ -20,9 +20,11 @@ Dense MLX arrays should use ``mlx.linalg`` directly.
 
 from mlx_sparse.linalg._eigen import eigs, eigsh, lanczos, svds
 from mlx_sparse.linalg._factorizations import (
+    FactorizedSolve,
     SparseCholesky,
     SparseLU,
     cholesky,
+    factorized,
     sparse_cholesky,
     sparse_lu,
     splu,
@@ -34,6 +36,7 @@ from mlx_sparse.linalg._sparse_ops import dot, vdot
 
 __all__ = [
     "LinearOperator",
+    "FactorizedSolve",
     "SparseCholesky",
     "SparseLU",
     "aslinearoperator",
@@ -42,6 +45,7 @@ __all__ = [
     "dot",
     "eigs",
     "eigsh",
+    "factorized",
     "gmres",
     "lanczos",
     "minres",

@@ -951,6 +951,67 @@ def csr_lu(
     return ext.csr_lu(data, indices, indptr, shape[0], shape[1])
 
 
+def accelerate_solvers_available() -> bool:
+    ext = extension()
+    if ext is None:
+        return False
+    checker = getattr(ext, "_accelerate_solvers_available", None)
+    return bool(checker()) if checker is not None else False
+
+
+def accelerate_lu_solvers_available() -> bool:
+    ext = extension()
+    if ext is None:
+        return False
+    checker = getattr(ext, "_accelerate_lu_solvers_available", None)
+    return bool(checker()) if checker is not None else False
+
+
+def accelerate_factorize_csr_float32(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    method: str,
+):
+    ext = extension()
+    if ext is None or not hasattr(ext, "accelerate_factorize_csr_float32"):
+        raise RuntimeError("Accelerate sparse direct solves are not available.")
+    return ext.accelerate_factorize_csr_float32(
+        data, indices, indptr, shape[0], shape[1], method
+    )
+
+
+def accelerate_factorize_csc_float32(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    method: str,
+):
+    ext = extension()
+    if ext is None or not hasattr(ext, "accelerate_factorize_csc_float32"):
+        raise RuntimeError("Accelerate sparse direct solves are not available.")
+    return ext.accelerate_factorize_csc_float32(
+        data, indices, indptr, shape[0], shape[1], method
+    )
+
+
+def accelerate_factorize_coo_float32(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+    method: str,
+):
+    ext = extension()
+    if ext is None or not hasattr(ext, "accelerate_factorize_coo_float32"):
+        raise RuntimeError("Accelerate sparse direct solves are not available.")
+    return ext.accelerate_factorize_coo_float32(
+        data, row, col, shape[0], shape[1], method
+    )
+
+
 def csr_triangular_solve(
     data: mx.array,
     indices: mx.array,
