@@ -36,7 +36,14 @@ New features
   solver dispatch. The adapter validates ``float32`` values, shape constraints,
   ``int32``/``int64`` compressed or coordinate indices, row/column bounds, and
   Accelerate ``int``/``long`` overflow limits. CSR and COO inputs normalize
-  through owned canonical CSC buffers before any framework call.
+  through owned canonical CSC buffers before any framework call
+  (`PR #10 <https://github.com/waleed-sh/mlx-sparse/pull/10>`_).
+
+* Added RAII wrappers for Accelerate symbolic, ``float32`` numeric, and
+  ``float32`` subfactor objects. The wrappers are move-only, release resources
+  through ``SparseCleanup``, retain shared opaque objects explicitly, route
+  Accelerate parameter callbacks into Python exceptions, and expose solve and
+  refactor helpers for future direct-solver dispatch.
 
 Improvements
 ~~~~~~~~~~~~

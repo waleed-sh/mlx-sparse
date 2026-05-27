@@ -1,0 +1,51 @@
+name: Accelerate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  accelerate:
+    name: Accelerate gated tests
+    runs-on: macos-15
+    env:
+      CMAKE_ARGS: "-DMLX_SPARSE_ENABLE_ACCELERATE=ON"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify Metal toolchain
+        run: xcrun -sdk macosx -find metal
+
+      - name: Install with Accelerate
+        run: python -m pip install -e ".[dev]"
+
+      - name: Verify Accelerate framework gate
+        run: |
+          python - <<'PY'
+          from mlx_sparse._ext_loader import extension
+
+          ext = extension()
+          if ext is None:
+              raise SystemExit("native extension is unavailable")
+
+          facts = ext._compiled_capabilities()
+          if not facts["accelerate_framework"]:
+              raise SystemExit(
+                  "MLX_SPARSE_ENABLE_ACCELERATE=ON did not link Accelerate"
+              )
+
+          if facts["accelerate"]:
+              raise SystemExit(
+                  "Public Accelerate solver capability should remain disabled"
+              )
+          PY
+
+      - name: Accelerate tests
+        run: python -m pytest -q -m accelerate --strict-markers

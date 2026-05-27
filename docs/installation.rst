@@ -101,8 +101,8 @@ solver dispatch yet:
 This gate is Darwin-only. Passing ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` on
 non-Apple platforms fails at configure time instead of silently pretending that
 Accelerate is available. The native build includes internal validation and CSC
-normalization infrastructure for future Accelerate direct solvers, but until
-solver dispatch is implemented,
+normalization infrastructure plus RAII wrappers for Accelerate factorization
+objects, but until solver dispatch is implemented,
 ``ms.capabilities.ACCELERATE`` remains ``False`` even when the framework was
 detected and linked.
 

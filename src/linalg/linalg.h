@@ -14,8 +14,9 @@
 
 #pragma once
 
-#include "linalg/accelerate/accelerate_csc_adapter.h"
-#include "linalg/accelerate/accelerate_errors.h"
+#include "linalg/accelerate/adapter/csc_adapter.h"
+#include "linalg/accelerate/errors/status.h"
+#include "linalg/accelerate/factorization/factorization.h"
 #include "linalg/arnoldi/arnoldi.h"
 #include "linalg/cg/cg.h"
 #include "linalg/cholesky/cholesky.h"
