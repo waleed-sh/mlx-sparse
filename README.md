@@ -5,14 +5,14 @@
 [![Documentation Status](https://readthedocs.org/projects/mlx-sparse/badge/?version=latest)](https://mlx-sparse.readthedocs.io/en/latest/?badge=latest)
 [![codecov](https://codecov.io/gh/waleed-sh/mlx-sparse/graph/badge.svg?token=EV2KVPZTP0)](https://codecov.io/gh/waleed-sh/mlx-sparse)
 
-> **Warning: beta release**
+> [!WARNING]
 > This is an early beta. **It currently supports only Apple systems.** APIs may change, bugs are expected, and some features
 > are still incomplete, especially GPU kernels for various operations. Feedback and issue reports are very welcome!
 > 
 > A lot of the functionality is new and is currently being tested.
 > We welcome any and all feedback! Not all solvers are GPU supported ([see here](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg.html#gpu-coverage)).
 
-> **Platform note**
+> [!NOTE]
 > GPU support in this version is Apple Silicon Metal only. CUDA is not
 > currently supported.
 

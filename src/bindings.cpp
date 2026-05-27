@@ -16,6 +16,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 
+#include "linalg/accelerate/accelerate_errors.h"
 #include "linalg/linalg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
@@ -143,6 +144,27 @@ NB_MODULE(_ext, m) {
         return info;
       },
       "Return compile-time native backend facts for capability reporting.");
+
+  m.def(
+      "_accelerate_status_name_for_testing",
+      [](const std::string &family, int status_code) {
+        return mlx_sparse::accelerate_status_name(
+            mlx_sparse::parse_accelerate_status_family(family), status_code);
+      },
+      "family"_a, "status_code"_a,
+      "Return the native Accelerate status name used by the error mapper.");
+
+  m.def(
+      "_accelerate_check_status_for_testing",
+      [](const std::string &family, int status_code,
+         const std::string &operation, const std::string &detail) {
+        mlx_sparse::check_accelerate_status(
+            mlx_sparse::parse_accelerate_status_family(family), status_code,
+            operation, detail);
+      },
+      "family"_a, "status_code"_a, "operation"_a = "Accelerate operation",
+      "detail"_a = "",
+      "Raise the Python exception produced for an Accelerate status.");
 
   m.def(
       "identity_like",
