@@ -67,11 +67,11 @@ SparseFactorization_t parse_factorization_method(const std::string &method) {
   }
   if (method == "lu") {
 #if MLX_SPARSE_ACCELERATE_SOLVE_HAS_LU_FACTORIZATION_TYPES
-    if (!accelerate_lu_factorization_available()) {
-      throw std::runtime_error(
-          "Accelerate LU factorization requires macOS 15.5 or newer.");
+    if (__builtin_available(macOS 15.5, *)) {
+      return SparseFactorizationLU;
     }
-    return SparseFactorizationLU;
+    throw std::runtime_error(
+        "Accelerate LU factorization requires macOS 15.5 or newer.");
 #else
     throw std::runtime_error(
         "Accelerate LU factorization requires a macOS 15.5 SDK and runtime.");

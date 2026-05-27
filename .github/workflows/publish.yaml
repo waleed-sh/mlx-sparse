@@ -10,8 +10,10 @@ jobs:
     name: Wheel / Python ${{ matrix.python-version }}
     runs-on: macos-15
     env:
-      CMAKE_ARGS: "-DMLX_SPARSE_ENABLE_ACCELERATE=ON"
+      CMAKE_ARGS: "-DMLX_SPARSE_ENABLE_ACCELERATE=ON -DCMAKE_OSX_ARCHITECTURES=arm64"
       MACOSX_DEPLOYMENT_TARGET: "14.0"
+      ARCHFLAGS: "-arch arm64"
+      _PYTHON_HOST_PLATFORM: "macosx-14.0-arm64"
 
     strategy:
       fail-fast: false
@@ -59,6 +61,39 @@ jobs:
 
           if not ms.capabilities.ACCELERATE:
               raise SystemExit("public Accelerate capability is not available")
+          PY
+
+      - name: Verify wheel architecture
+        run: |
+          python - <<'PY'
+          import subprocess
+          import tempfile
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheels = list(Path("dist").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"expected one wheel, found {len(wheels)}")
+          wheel = wheels[0]
+          if "macosx_14_0_arm64" not in wheel.name:
+              raise SystemExit(f"wheel has unexpected platform tag: {wheel.name}")
+
+          with tempfile.TemporaryDirectory() as tmp:
+              with ZipFile(wheel) as archive:
+                  archive.extractall(tmp)
+              package = Path(tmp) / "mlx_sparse"
+              binaries = [
+                  next(package.glob("_ext*.so")),
+                  package / "libmlx_sparse_native.dylib",
+              ]
+              for binary in binaries:
+                  info = subprocess.check_output(
+                      ["lipo", "-info", str(binary)], text=True
+                  )
+                  if "architecture: arm64" not in info and "are: arm64" not in info:
+                      raise SystemExit(
+                          f"{binary.name} has unexpected architecture: {info}"
+                      )
           PY
 
       - name: Upload wheel artifact
