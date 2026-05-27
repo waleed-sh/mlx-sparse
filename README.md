@@ -10,7 +10,7 @@
 > are still incomplete, especially GPU kernels for various operations. Feedback and issue reports are very welcome!
 > 
 > A lot of the functionality is new and is currently being tested.
-> We welcome any and all feedback! Not all solvers are GPU supported ([see here](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg.html#gpu-coverage)).
+> We welcome any and all feedback! Not all solvers are GPU supported ([see the solver support matrix](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg_solvers.html)).
 
 > [!NOTE]
 > GPU support in this version is Apple Silicon Metal only. CUDA is not
@@ -20,14 +20,14 @@
 while performance-critical operations are implemented as MLX primitives in C++
 with CPU backends and Metal kernels for fixed-shape sparse operations.
 
-The supported format surface is COO and CSR for 2D sparse arrays. Current
-functionality includes construction, validation, COO to CSR, CSR to dense, CSR
-canonicalization, CSR matrix-vector multiply, CSR matrix-matrix multiply,
-batched dense RHS products, CSR sparse-sparse products, transpose, Hermitian
-transpose. ``mlx-sparse`` also supports sparse linalg solvers (`cg`, `gmres`, `minres`), sparse spectral
-routines (`eigsh`, `eigs`, `svds`), sparse Cholesky/LU factors, sparse
-triangular solves, sparse `dot`/`vdot`, and autodiff through sparse values and
-dense RHS operands, including `complex64`. 
+The supported format surface is COO, CSR, and CSC for 2D sparse arrays. Current
+functionality includes construction, validation, format conversions,
+canonicalization, sparse-dense products, batched dense RHS products,
+sparse-sparse products, transpose, and Hermitian transpose. `mlx-sparse` also
+supports sparse linalg solvers (`cg`, `gmres`, `minres`), reusable direct solves
+(`factorized`), sparse spectral routines (`eigsh`, `eigs`, `svds`), sparse
+Cholesky/LU factors, sparse triangular solves, sparse `dot`/`vdot`, and autodiff
+through sparse values and dense RHS operands, including `complex64`.
 
 
 Supported value dtypes are `float32`, `float16`, `bfloat16`, and `complex64`.
@@ -40,6 +40,16 @@ Install from PyPI:
 ```bash
 python -m pip install mlx-sparse
 ```
+
+Published macOS wheels are built with optional Apple Accelerate sparse direct
+solver support enabled. For editable/source builds, enable the same path with:
+
+```bash
+CMAKE_ARGS="-DMLX_SPARSE_ENABLE_ACCELERATE=ON" python -m pip install -e .
+```
+
+See the full [installation guide](https://mlx-sparse.readthedocs.io/en/latest/installation.html)
+for platform requirements, feature gates, and verification commands.
 
 ```python
 import mlx.core as mx

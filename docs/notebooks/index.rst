@@ -44,3 +44,17 @@ factorizations, spectral routines, and matrix-free linear operators.
    14_linalg_factorizations
    15_linalg_spectral
    16_linalg_operators
+
+Accelerate direct solvers
+--------------------------
+
+These notebooks focus on optional Apple Accelerate sparse direct solvers:
+opaque reusable factorized solves for square systems and rectangular
+least-squares workloads. Source/editable builds must enable Accelerate as
+described in :doc:`../installation`.
+
+.. toctree::
+   :maxdepth: 1
+
+   19_accelerate_square_solvers
+   20_accelerate_rectangular_solvers

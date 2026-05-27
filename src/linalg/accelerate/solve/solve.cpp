@@ -15,6 +15,7 @@
 #include "linalg/accelerate/solve/solve.h"
 
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -164,7 +165,10 @@ mx::array AccelerateFloatSolve::solve(const mx::array &rhs) const {
   if (rhs.ndim() == 1) {
     if (rhs.shape(0) != rhs_size()) {
       throw std::invalid_argument(
-          "Accelerate factorized solve rhs has incompatible shape.");
+          "Accelerate factorized solve rhs has incompatible shape: expected "
+          "shape (" +
+          std::to_string(rhs_size()) + ",), got (" +
+          std::to_string(rhs.shape(0)) + ",).");
     }
     const auto rhs_values = copy_float_values(rhs);
     const auto solution =
@@ -177,7 +181,10 @@ mx::array AccelerateFloatSolve::solve(const mx::array &rhs) const {
   }
   if (rhs.shape(0) != rhs_size()) {
     throw std::invalid_argument(
-        "Accelerate factorized solve rhs has incompatible shape.");
+        "Accelerate factorized solve rhs has incompatible shape: expected "
+        "first dimension " +
+        std::to_string(rhs_size()) + ", got " + std::to_string(rhs.shape(0)) +
+        ".");
   }
   const int rhs_count = rhs.shape(1);
   if (rhs_count <= 0) {

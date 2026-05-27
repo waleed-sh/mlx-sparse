@@ -47,10 +47,10 @@ attributes on :data:`capabilities` return booleans, for example
 ``"available"``, ``"unavailable"``, and ``"not_built"``.
 
 ``ms.capabilities.ACCELERATE`` reports Accelerate-backed sparse solver
-availability, not merely framework presence. Development builds may detect and
-link the Accelerate framework behind ``MLX_SPARSE_ENABLE_ACCELERATE=ON``. The
-portable wheels remain non-Accelerate builds unless a platform-specific release
-explicitly says otherwise.
+availability, not just framework presence. Current published macOS wheels (v0.0.4b0 onwards) are
+built with Accelerate sparse direct-solver support enabled. Editable and source
+builds can opt into the same path with
+``MLX_SPARSE_ENABLE_ACCELERATE=ON``.
 
 .. autodata:: capabilities
 

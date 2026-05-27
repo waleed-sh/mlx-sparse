@@ -52,11 +52,13 @@ New features
   Accelerate Cholesky, LDLT, QR, Cholesky-at-A, and runtime-gated LU
   factorization objects. ``linalg.spsolve`` now takes the Accelerate LU fast
   path for supported square systems, while explicit-factor APIs stay on the
-  native path because they promise CSR factors.
+  native path because they promise CSR factors
+  (`PR #12 <https://github.com/waleed-sh/mlx-sparse/pull/12>`_).
 
 * Added :func:`mlx_sparse.linalg.factorized` and
   :class:`mlx_sparse.linalg.FactorizedSolve` for reusable opaque solves with
-  ``backend``, ``method``, ``rhs_size``, and ``solution_size`` metadata.
+  ``backend``, ``method``, ``rhs_size``, and ``solution_size`` metadata
+  (`PR #12 <https://github.com/waleed-sh/mlx-sparse/pull/12>`_).
 
 Improvements
 ~~~~~~~~~~~~
@@ -87,6 +89,13 @@ Improvements
   non-``float32`` COO/CSC norm reductions lower through native compressed
   storage-aligned reductions instead of scatter-heavy norm atomics
   (`PR #8 <https://github.com/waleed-sh/mlx-sparse/pull/8>`_).
+
+Packaging
+~~~~~~~~~
+
+* Updated the PyPI publishing workflow so macOS wheels are built with
+  ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` and verified after wheel installation
+  before upload (`PR #12 <https://github.com/waleed-sh/mlx-sparse/pull/12>`_).
 
 Backwards incompatible changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -129,7 +138,8 @@ Documentation
 
 * Added a dedicated solver support page documenting each public
   ``mlx_sparse.linalg`` solver, its CPU/GPU coverage label, and whether an
-  Accelerate-enabled build can use an Apple sparse direct-solver path.
+  Accelerate-enabled build can use an Apple sparse direct-solver path
+  (`PR #12 <https://github.com/waleed-sh/mlx-sparse/pull/12>`_).
 
 mlx-sparse v0.0.3b0 (25.05.2026)
 ----------------------------------
