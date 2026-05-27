@@ -202,8 +202,9 @@ Sparse-dense arithmetic
      - Native compressed-column symbolic/count pass, prefix allocation, sorted
        numeric fill, and zero pruning returning canonical CSC.
    * - Scalar multiply (``alpha * A``)
-     - Not yet
-     - Can be approximated with ``ms.csr_array((alpha * data, ...), ...)``.
+     - Done
+     - Scales stored values for COO, CSR, and CSC inputs while preserving the
+       sparse format and structural metadata.
    * - Sparse-sparse addition
      - Not planned
      - Dynamic output size. May be added as a host-side utility.

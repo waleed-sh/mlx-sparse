@@ -615,7 +615,8 @@ class ConfigManager:
             "EXPERIMENTAL_METAL_SPGEMM",
             default=False,
             doc=(
-                "Enable the experimental staged Metal implementation for CSR x CSR. "
+                "Enable experimental staged Metal implementations for same-format "
+                "CSR, COO, and CSC sparse-sparse products. "
                 "The optimized native host SpGEMM path remains the default because "
                 "it is faster on current small and medium benchmark cases."
             ),

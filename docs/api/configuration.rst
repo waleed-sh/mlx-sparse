@@ -21,9 +21,10 @@ sync so native code can read the same values without a Python callback.
    with ms.config_context(EXPERIMENTAL_METAL_SPGEMM=True):
        C = ms.csr_matmat(A, B)
 
-``EXPERIMENTAL_METAL_SPGEMM`` enables the staged Metal implementation for
-CSR x CSR. The optimized native host implementation remains the default
-because it is faster on current small and medium benchmark cases.
+``EXPERIMENTAL_METAL_SPGEMM`` enables experimental staged Metal implementations
+for same-format CSR, COO, and CSC sparse-sparse products. The optimized native
+host implementation remains the default because it is faster on current small
+and medium benchmark cases.
 
 Top-level objects
 -----------------
