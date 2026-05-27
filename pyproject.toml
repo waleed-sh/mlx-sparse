@@ -63,6 +63,7 @@ include = ["mlx_sparse*"]
 testpaths = ["tests"]
 addopts = "-ra"
 markers = [
+    "accelerate: requires or validates the optional Apple Accelerate build gate",
     "cpu_only: forces CPU execution for CPU-specific regression coverage",
     "gpu: requires an available GPU device",
     "metal: requires an available Metal GPU device",
