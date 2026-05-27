@@ -14,12 +14,12 @@
 
 from __future__ import annotations
 
-import mlx.core as mx
 import pytest
 
+import mlx.core as mx
 from mlx_sparse._ext_loader import extension
 
-pytestmark = pytest.mark.native
+pytestmark = [pytest.mark.native, pytest.mark.accelerate]
 
 
 def _require_ext():

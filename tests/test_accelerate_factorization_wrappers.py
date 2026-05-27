@@ -18,7 +18,7 @@ import pytest
 
 from mlx_sparse._ext_loader import extension
 
-pytestmark = pytest.mark.native
+pytestmark = [pytest.mark.native, pytest.mark.accelerate]
 
 
 def _require_ext():

@@ -363,3 +363,20 @@ def test_native_extension_reports_compiled_capability_facts():
     assert facts["rocm"] is False
     assert facts["platform"] in {"darwin", "linux", "windows", "unknown"}
     assert isinstance(facts["architecture"], str)
+
+
+@pytest.mark.accelerate
+@pytest.mark.native
+def test_accelerate_enabled_build_reports_framework_without_public_solver_capability():
+    ext = extension()
+    if ext is None:
+        pytest.skip("native extension is not built")
+
+    facts = ext._compiled_capabilities()
+    if not facts["accelerate_framework"]:
+        pytest.skip("Accelerate framework support is not compiled in")
+
+    assert facts["accelerate"] is False
+    assert ms.capabilities.ACCELERATE is False
+    assert ms.capabilities.status("accelerate") == "not_built"
+    assert "framework was detected" in ms.capabilities.reason("accelerate")

@@ -75,7 +75,9 @@ def _reference_normal_lanczos(dense: np.ndarray, steps: int):
 
 
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
-def test_native_csr_normal_lanczos_matches_dense_reference(mx, to_numpy, index_dtype):
+def test_native_csr_normal_lanczos_matches_dense_reference(
+    mx, to_numpy, index_dtype
+):
     dense = np.array(
         [
             [3.0, 0.0, 1.0, 0.0],
@@ -163,7 +165,9 @@ def test_svds_rectangular_vectors_satisfy_singular_equations(mx, to_numpy):
         right = vh_np[col]
         left = u_np[:, col]
         np.testing.assert_allclose(dense @ right, sigma * left, rtol=2e-4, atol=2e-4)
-        np.testing.assert_allclose(dense.T @ left, sigma * right, rtol=2e-4, atol=2e-4)
+        np.testing.assert_allclose(
+            dense.T @ left, sigma * right, rtol=2e-4, atol=2e-4
+        )
 
 
 def test_svds_smallest_mode_uses_normal_operator_lanczos(mx, to_numpy):
