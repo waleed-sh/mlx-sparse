@@ -417,7 +417,7 @@ def _accelerate_not_built_reason(framework_built: bool) -> str:
     if framework_built:
         return (
             "The Accelerate framework was detected and linked at build time, "
-            "but Accelerate sparse solver integration is not compiled yet."
+            "but Accelerate sparse solver integration is not enabled in this build."
         )
     return "Accelerate sparse solver integration is not compiled into this build."
 

@@ -326,6 +326,19 @@ availability fallback, not a dtype-specific path in normal wheels.
   tridiagonal eigensolve, Ritz back-transformation, and final singular-vector
   assembly still synchronize the Lanczos basis back to CPU.
 
+**Accelerate direct solves**
+
+* Accelerate-enabled Apple builds can route ``linalg.spsolve`` and
+  ``linalg.factorized`` through opaque Accelerate ``float32`` direct
+  factorizations for supported CPU cases. Native explicit-factor APIs remain
+  available as the baseline because they return mlx-sparse CSR factors.
+
+* ``benchmarks/bench_accelerate_direct_solvers.py`` compares native
+  Cholesky/LU factor-and-solve and solve-only timings against Accelerate
+  opaque-factor timings across CSR, CSC, and COO inputs. Run it once in a
+  normal build and once after rebuilding with
+  ``CMAKE_ARGS="-DMLX_SPARSE_ENABLE_ACCELERATE=ON"``.
+
 **CPU backends**
 
 The CPU backends use MLX's command encoder dispatch model. They are correct

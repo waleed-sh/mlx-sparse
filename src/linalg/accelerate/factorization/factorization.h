@@ -138,6 +138,9 @@ public:
   std::vector<float> solve_vector(
       const std::vector<float> &rhs,
       std::string_view operation = "accelerate factorization solve") const;
+  std::vector<float> solve_matrix_column_major(
+      const std::vector<float> &rhs, int rhs_count,
+      std::string_view operation = "accelerate factorization solve") const;
 
 private:
   void cleanup() noexcept;

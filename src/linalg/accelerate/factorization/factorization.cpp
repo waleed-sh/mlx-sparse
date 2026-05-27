@@ -432,6 +432,52 @@ AccelerateFloatFactorization::solve_vector(const std::vector<float> &rhs,
   return solution;
 }
 
+std::vector<float> AccelerateFloatFactorization::solve_matrix_column_major(
+    const std::vector<float> &rhs, int rhs_count,
+    std::string_view operation) const {
+  check_ready(operation);
+  if (rhs_count <= 0) {
+    throw std::invalid_argument(std::string(operation) +
+                                " requires at least one right-hand side.");
+  }
+
+  const int expected_rhs_size = rhs_size();
+  const int expected_solution_size = solution_size();
+  const auto expected_rhs_values = static_cast<std::size_t>(expected_rhs_size) *
+                                   static_cast<std::size_t>(rhs_count);
+  if (rhs.size() != expected_rhs_values) {
+    throw std::invalid_argument(std::string(operation) +
+                                " rhs has incompatible size.");
+  }
+
+  std::vector<float> solution(static_cast<std::size_t>(expected_solution_size) *
+                              static_cast<std::size_t>(rhs_count));
+  SparseAttributes_t dense_attributes{};
+  DenseMatrix_Float rhs_matrix{};
+  rhs_matrix.rowCount = expected_rhs_size;
+  rhs_matrix.columnCount = rhs_count;
+  rhs_matrix.columnStride = expected_rhs_size;
+  rhs_matrix.attributes = dense_attributes;
+  rhs_matrix.data = const_cast<float *>(rhs.data());
+
+  DenseMatrix_Float solution_matrix{};
+  solution_matrix.rowCount = expected_solution_size;
+  solution_matrix.columnCount = rhs_count;
+  solution_matrix.columnStride = expected_solution_size;
+  solution_matrix.attributes = dense_attributes;
+  solution_matrix.data = solution.data();
+
+  std::vector<char> workspace(
+      std::max<std::size_t>(solve_workspace_size(rhs_count, operation), 1));
+  clear_accelerate_parameter_error();
+  SparseSolve(factorization_, rhs_matrix, solution_matrix, workspace.data());
+  const auto reported = consume_accelerate_parameter_error();
+  if (!reported.empty()) {
+    throw std::invalid_argument(combine_details(operation, reported));
+  }
+  return solution;
+}
+
 void AccelerateFloatFactorization::cleanup() noexcept {
   if (owns_ && has_storage()) {
     SparseCleanup(factorization_);

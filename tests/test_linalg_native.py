@@ -211,6 +211,58 @@ def test_sparse_lu_factor_and_solve(mx, to_numpy):
     )
 
 
+def test_factorized_lu_solve_reuses_factor_and_accepts_matrix_rhs(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    a = _nonsymmetric(mx)
+    dense_a = to_numpy(a.todense())
+    rhs_np = np.array([[1.0, 0.25], [-2.0, 1.5], [0.5, -0.75]], dtype=np.float32)
+    solver = linalg.factorized(a, method="lu")
+
+    assert solver.shape == a.shape
+    assert solver.method == "lu"
+    assert solver.backend in {"native", "accelerate"}
+    assert solver.rhs_size == 3
+    assert solver.solution_size == 3
+    np.testing.assert_allclose(
+        to_numpy(solver.solve(mx.array(rhs_np))),
+        np.linalg.solve(dense_a, rhs_np),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+
+
+def test_factorized_cholesky_matches_sparse_cholesky(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    a = _spd(mx)
+    b = mx.array([1.0, 2.0], dtype=mx.float32)
+    solver = linalg.factorized(a, method="cholesky")
+
+    np.testing.assert_allclose(
+        to_numpy(solver(b)),
+        to_numpy(linalg.sparse_cholesky(a).solve(b)),
+        rtol=5e-4,
+        atol=5e-4,
+    )
+
+
+def test_spsolve_rejects_rectangular_sparse_matrix(mx):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    rectangular = ms.csr_array(
+        (
+            mx.array([1.0, 2.0, 3.0], dtype=mx.float32),
+            mx.array([0, 1, 1], dtype=mx.int32),
+            mx.array([0, 2, 3], dtype=mx.int32),
+        ),
+        shape=(2, 3),
+        validate="full",
+    )
+    with pytest.raises(ValueError, match="square"):
+        linalg.spsolve(rectangular, mx.ones((2,), dtype=mx.float32))
+
+
 def test_eigsh_eigs_svds_match_dense_references(mx, to_numpy):
     if not extension_available():
         pytest.skip("native extension unavailable")

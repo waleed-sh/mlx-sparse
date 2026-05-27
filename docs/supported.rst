@@ -244,6 +244,9 @@ Sparse reductions
 Sparse linear algebra
 ---------------------
 
+For a solver-centric view of CPU, Metal GPU, and Accelerate coverage, see
+:doc:`user_guide/linalg_solvers`.
+
 .. list-table::
    :widths: 35 15 15 35
    :header-rows: 1
@@ -288,12 +291,18 @@ Sparse linear algebra
      - CPU only
      - Symbolic fill-in factorisation is inherently sequential. Planned GPU
        path via supernodal Cholesky is out of scope for v0.x.
-   * - ``linalg.sparse_lu`` / ``linalg.spsolve``
+   * - ``linalg.sparse_lu``
      - Done
      - CPU + GPU
      - LU factorisation (partial pivoting) runs on CPU. Triangular
        forward/back-substitution and permutation dispatch to Metal GPU via
        ``csr_triangular_solve`` and ``csr_permute_vector`` kernels.
+   * - ``linalg.factorized`` / ``linalg.spsolve``
+     - Optional
+     - CPU only
+     - Accelerate-enabled Apple builds use opaque Accelerate direct solves for
+       supported real ``float32`` systems. Portable builds fall back to native
+       LU for square ``spsolve``.
    * - ``CSRArray.dot`` / ``CSRArray.vdot``
      - Done
      - CPU + GPU
@@ -303,13 +312,12 @@ Linalg GPU coverage notes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Sparse linalg entrypoints accept CSR, COO, and CSC inputs. CSR is the execution
-format, COO and CSC inputs are converted once to canonical CSR at solver entry.
-This keeps the existing Metal Krylov, triangular solve, and permutation kernels
-active without doing repeated CSC scatter-add matvecs inside solver iterations.
-Internal Accelerate adapter infrastructure can validate and normalize real
-``float32`` CSR, COO, and CSC inputs into canonical CSC storage and manage
-Accelerate factorization objects, but public CSC-specific direct factorization
-dispatch remains future work.
+format for native kernels, so COO and CSC inputs are converted once to
+canonical CSR at native solver entry. This keeps the existing Metal Krylov,
+triangular solve, and permutation kernels active without doing repeated CSC
+scatter-add matvecs inside solver iterations. Accelerate-enabled direct solves
+instead validate and normalize real ``float32`` CSR, COO, and CSC inputs into
+canonical CSC storage because Apple's sparse direct solvers are CSC-native.
 
 The table above uses a simplified "CPU + GPU" label. The precise breakdown
 is:
@@ -501,10 +509,10 @@ compact buffers.
    * - ``csr_triangular_solve``
      - ``float32`` values, int32/int64 indices
      - Forward/back-substitution for ``SparseCholesky.solve``,
-       ``SparseLU.solve``, and ``linalg.spsolve``
+       ``SparseLU.solve``, and native ``linalg.spsolve`` fallback
    * - ``csr_permute_vector``
      - ``float32``, int32 permutation
-     - Row permutation step in ``SparseLU.solve`` / ``linalg.spsolve``
+     - Row permutation step in ``SparseLU.solve`` / native ``linalg.spsolve``
    * - ``csr_dot`` / ``csr_vdot``
      - ``float32``/``complex64`` values, int32/int64 indices
      - Sparse Frobenius inner products with explicit complex conjugation
@@ -544,10 +552,9 @@ Known limitations
   structure to host before allocating final output buffers.
 * CSC currently covers construction, conversion, canonicalization, dense
   materialization, reductions, dense vector/matrix products including batched
-  dense RHS, same-format sparse-sparse matmul, and one-time conversion at
-  linalg solver entry. Internal Accelerate CSC adapter and factorization-wrapper
-  support exists for future direct solves, public CSC-specific direct
-  factorizations remain future work.
+  dense RHS, same-format sparse-sparse matmul, one-time conversion at native
+  linalg solver entry, and canonical CSC normalization for Accelerate-enabled
+  opaque direct solves.
 * Sparse solver, factorization, and spectral kernels are real-valued.
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.

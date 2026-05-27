@@ -26,7 +26,7 @@ jobs:
       - name: Install with Accelerate
         run: python -m pip install -e ".[dev]"
 
-      - name: Verify Accelerate framework gate
+      - name: Verify Accelerate solver gate
         run: |
           python - <<'PY'
           from mlx_sparse._ext_loader import extension
@@ -41,9 +41,9 @@ jobs:
                   "MLX_SPARSE_ENABLE_ACCELERATE=ON did not link Accelerate"
               )
 
-          if facts["accelerate"]:
+          if not facts["accelerate"]:
               raise SystemExit(
-                  "Public Accelerate solver capability should remain disabled"
+                  "MLX_SPARSE_ENABLE_ACCELERATE=ON did not enable solvers"
               )
           PY
 

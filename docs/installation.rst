@@ -91,8 +91,8 @@ Optional build feature gates
 
 Contributor builds can opt into native feature-detection gates through
 ``CMAKE_ARGS``. The Accelerate gate detects and links Apple's Accelerate
-framework on supported macOS builds, but does not enable any Accelerate-backed
-solver dispatch yet:
+framework on supported macOS builds and enables the optional Accelerate sparse
+direct-solver integration:
 
 .. code-block:: bash
 
@@ -100,11 +100,10 @@ solver dispatch yet:
 
 This gate is Darwin-only. Passing ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` on
 non-Apple platforms fails at configure time instead of silently pretending that
-Accelerate is available. The native build includes internal validation and CSC
-normalization infrastructure plus RAII wrappers for Accelerate factorization
-objects, but until solver dispatch is implemented,
-``ms.capabilities.ACCELERATE`` remains ``False`` even when the framework was
-detected and linked.
+Accelerate is available. Accelerate-enabled builds validate and normalize
+``float32`` CSR, CSC, and COO inputs into owned canonical CSC storage, use
+opaque Accelerate factorization objects for supported direct solves, and report
+``ms.capabilities.ACCELERATE`` as ``True`` when the runtime can use them.
 
 Verifying the installation
 ---------------------------
@@ -138,9 +137,10 @@ For finer-grained native dispatch checks, use the enum-backed capability API:
    ms.capabilities.status("metal")
    ms.capabilities.status("accelerate")
 
-Current wheels report native CPU kernels and, on supported Apple Silicon
-runtimes with an accessible GPU, Metal kernels. Accelerate, CUDA, and ROCm are
-reserved capabilities for future builds and currently report ``"not_built"``.
+Current portable wheels report native CPU kernels and, on supported Apple
+Silicon runtimes with an accessible GPU, Metal kernels. Accelerate-enabled
+builds are opt-in unless a platform-specific release explicitly states
+otherwise. CUDA and ROCm remain reserved capabilities for future builds.
 
 Running the test suite
 -----------------------
@@ -159,7 +159,7 @@ specific device:
 
 Tests marked ``native`` are skipped if the compiled extension is not present.
 Tests marked ``performance`` run small deterministic microbenchmarks with
-lenient regression thresholds; tune them with ``MLX_SPARSE_PERF_*``
+lenient regression thresholds, tune them with ``MLX_SPARSE_PERF_*``
 environment variables if you need to calibrate a slower CI host. To run only
 the performance regression checks:
 

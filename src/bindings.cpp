@@ -15,6 +15,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
+#include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/vector.h>
 
 #include <cstdint>
@@ -25,6 +26,7 @@
 #include "linalg/accelerate/adapter/csc_adapter.h"
 #include "linalg/accelerate/errors/status.h"
 #include "linalg/accelerate/factorization/factorization.h"
+#include "linalg/accelerate/solve/solve.h"
 #include "linalg/linalg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
@@ -361,6 +363,61 @@ NB_MODULE(_ext, m) {
   m.def("_accelerate_factorization_failure_for_testing",
         &accelerate_factorization_failure,
         "Raise the exception produced by a failing Accelerate factorization.");
+
+  m.def("_accelerate_solvers_available",
+        &mlx_sparse::accelerate_sparse_solve_available,
+        "Return whether Accelerate sparse direct solves are compiled in.");
+
+  m.def("_accelerate_lu_solvers_available",
+        &mlx_sparse::accelerate_sparse_lu_solve_available,
+        "Return whether Accelerate sparse LU solves are available at runtime.");
+
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+  nb::class_<mlx_sparse::AccelerateFloatSolve>(m, "_AccelerateFloatSolve")
+      .def("solve", &mlx_sparse::AccelerateFloatSolve::solve, "rhs"_a)
+      .def_prop_ro("method", &mlx_sparse::AccelerateFloatSolve::method)
+      .def_prop_ro("row_count", &mlx_sparse::AccelerateFloatSolve::row_count)
+      .def_prop_ro("column_count",
+                   &mlx_sparse::AccelerateFloatSolve::column_count)
+      .def_prop_ro("rhs_size", &mlx_sparse::AccelerateFloatSolve::rhs_size)
+      .def_prop_ro("solution_size",
+                   &mlx_sparse::AccelerateFloatSolve::solution_size);
+
+  m.def(
+      "accelerate_factorize_csr_float32",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, long long n_rows,
+         long long n_cols, const std::string &method) {
+        return mlx_sparse::make_accelerate_float_solve_from_csr(
+            data, indices, indptr, n_rows, n_cols, method);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "method"_a,
+      "Factorize CSR buffers into an opaque Accelerate float32 solver.");
+
+  m.def(
+      "accelerate_factorize_csc_float32",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, long long n_rows,
+         long long n_cols, const std::string &method) {
+        return mlx_sparse::make_accelerate_float_solve_from_csc(
+            data, indices, indptr, n_rows, n_cols, method);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "method"_a,
+      "Factorize CSC buffers into an opaque Accelerate float32 solver.");
+
+  m.def(
+      "accelerate_factorize_coo_float32",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, long long n_rows, long long n_cols,
+         const std::string &method) {
+        return mlx_sparse::make_accelerate_float_solve_from_coo(
+            data, row, col, n_rows, n_cols, method);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a, "method"_a,
+      "Factorize COO buffers into an opaque Accelerate float32 solver.");
+#endif
 
   m.def(
       "identity_like",

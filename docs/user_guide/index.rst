@@ -10,3 +10,4 @@ User guide
    autodiff
    device_execution
    linalg
+   linalg_solvers
