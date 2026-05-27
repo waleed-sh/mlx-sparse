@@ -306,7 +306,9 @@ Sparse linalg entrypoints accept CSR, COO, and CSC inputs. CSR is the execution
 format, COO and CSC inputs are converted once to canonical CSR at solver entry.
 This keeps the existing Metal Krylov, triangular solve, and permutation kernels
 active without doing repeated CSC scatter-add matvecs inside solver iterations.
-Native CSC-specific direct factorization remains future work.
+Internal Accelerate adapter infrastructure can validate and normalize real
+``float32`` CSR, COO, and CSC inputs into canonical CSC storage, but public
+CSC-specific direct factorization dispatch remains future work.
 
 The table above uses a simplified "CPU + GPU" label. The precise breakdown
 is:
@@ -542,7 +544,9 @@ Known limitations
 * CSC currently covers construction, conversion, canonicalization, dense
   materialization, reductions, dense vector/matrix products including batched
   dense RHS, same-format sparse-sparse matmul, and one-time conversion at
-  linalg solver entry. CSC-specific direct factorizations remain future work.
+  linalg solver entry. Internal Accelerate CSC adapter support exists for
+  future direct solves, public CSC-specific direct factorizations remain future
+  work.
 * Sparse solver, factorization, and spectral kernels are real-valued.
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.

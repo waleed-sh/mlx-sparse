@@ -29,7 +29,14 @@ New features
 * Added a native Accelerate status/error mapping layer for future sparse solver
   integration. Factorization, Sparse BLAS, and iterative status codes now
   normalize to predictable Python ``ValueError`` or ``RuntimeError`` exceptions
-  while preserving operation names and optional diagnostic detail.
+  while preserving operation names and optional diagnostic detail
+  (`PR #9 <https://github.com/waleed-sh/mlx-sparse/pull/9>`_).
+
+* Added shared native Accelerate CSC adapter infrastructure for future direct
+  solver dispatch. The adapter validates ``float32`` values, shape constraints,
+  ``int32``/``int64`` compressed or coordinate indices, row/column bounds, and
+  Accelerate ``int``/``long`` overflow limits. CSR and COO inputs normalize
+  through owned canonical CSC buffers before any framework call.
 
 Improvements
 ~~~~~~~~~~~~
