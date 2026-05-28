@@ -57,11 +57,11 @@ Spectral routines
 uses native Arnoldi projection. ``svds`` applies Lanczos to the sparse normal
 operator without materializing ``A.T @ A``.
 
-Current ``svds`` execution audit
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``svds`` execution model
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-The current ``svds`` path is conservative about output assembly but now has a
-dedicated native normal-operator Lanczos step:
+The ``svds`` path uses a dedicated native normal-operator Lanczos step while
+keeping the small post-processing phases on CPU:
 
 * ``CSRArray`` inputs are canonicalized. ``COOArray`` and ``CSCArray`` inputs
   are converted once to canonical CSR before dispatch.
@@ -76,8 +76,7 @@ dedicated native normal-operator Lanczos step:
   host materialization of the intermediate ``A @ v`` vector.
 * On Metal, the Lanczos recurrence stays in a native GPU kernel. The small
   tridiagonal eigensolve, Ritz-vector back transformation, and final
-  singular-vector assembly still run on CPU after synchronizing the Lanczos
-  basis.
+  singular-vector assembly run on CPU after synchronizing the Lanczos basis.
 
 Sparse reductions
 -----------------

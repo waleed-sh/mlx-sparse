@@ -10,6 +10,9 @@ jobs:
     name: Wheel / Python ${{ matrix.python-version }}
     runs-on: macos-15
     env:
+      # Build on the current macOS 15 arm64 runner, but tag the wheel for the
+      # oldest supported runtime. This produces macosx_14_0_arm64 wheels rather
+      # than misleading universal2 wheels from an arm64-only build.
       CMAKE_ARGS: "-DMLX_SPARSE_ENABLE_ACCELERATE=ON -DCMAKE_OSX_ARCHITECTURES=arm64"
       MACOSX_DEPLOYMENT_TARGET: "14.0"
       ARCHFLAGS: "-arch arm64"
@@ -105,6 +108,8 @@ jobs:
 
   build-sdist:
     name: Source distribution
+    # The sdist is platform-independent, but setup.py imports MLX during the
+    # PEP 517 build hooks, so this job also needs a macOS runner.
     runs-on: macos-15
 
     steps:

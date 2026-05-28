@@ -1,12 +1,12 @@
 Changelog
 =========
 
-mlx-sparse v0.0.4b0 (Unreleased)
+mlx-sparse v0.0.4b0 (28.05.2026)
 ----------------------------------
 
 .. note::
 
-    This release will focus on improving the performance of the existing sparse linear algebra solvers, specifically for the
+    This release focused on improving the performance of the existing sparse linear algebra solvers, specifically for the
     CPU case, by providing Accelerate based solvers when appropriate and optimised versions of the current C++ native solvers
     otherwise. See the roadmap `here <https://github.com/waleed-sh/mlx-sparse/issues/1>`_.
 
@@ -115,8 +115,8 @@ Bug fixes
 Documentation
 ~~~~~~~~~~~~~
 
-* Added the v0.0.4b0 sparse execution audit covering current ``svds`` sparse
-  execution, Metal reduction coverage by dtype and format, and remaining
+* Added sparse execution documentation covering ``svds`` sparse execution,
+  Metal reduction coverage by dtype and format, and
   serial/scatter-heavy/fallback boundaries
   (`PR #2 <https://github.com/waleed-sh/mlx-sparse/pull/2>`_).
 
