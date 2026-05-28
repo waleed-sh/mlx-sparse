@@ -50,6 +50,16 @@ def bench(fn, *, warmup: int, iters: int) -> float:
     return 1000.0 * (end - start) / iters
 
 
+def bench_scipy(fn, *, warmup: int, iters: int) -> float:
+    for _ in range(warmup):
+        np.asarray(fn())
+    start = time.perf_counter()
+    for _ in range(iters):
+        np.asarray(fn())
+    end = time.perf_counter()
+    return 1000.0 * (end - start) / iters
+
+
 def make_spd_csr(n: int, density: float, rng) -> scipy.sparse.csr_matrix:
     """Random sparse SPD matrix for Cholesky and LU."""
     A = scipy.sparse.random(
@@ -115,6 +125,8 @@ def main() -> None:
     A_dense = mx.array(scipy_csr.toarray())
 
     x_ref = scipy.sparse.linalg.spsolve(scipy_csr, b_np)
+    scipy_csc = scipy_csr.tocsc(copy=True)
+    scipy_lu = scipy.sparse.linalg.splu(scipy_csc)
 
     x_chol = linalg.sparse_cholesky(A_ms).solve(b)
     mx.eval(x_chol)
@@ -143,6 +155,21 @@ def main() -> None:
         warmup=args.warmup,
         iters=args.iters,
     )
+    scipy_spsolve_ms = bench_scipy(
+        lambda: scipy.sparse.linalg.spsolve(scipy_csr, b_np),
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+    scipy_splu_factor_solve_ms = bench_scipy(
+        lambda: scipy.sparse.linalg.splu(scipy_csc).solve(b_np),
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+    scipy_splu_solve_only_ms = bench_scipy(
+        lambda: scipy_lu.solve(b_np),
+        warmup=args.warmup,
+        iters=args.iters,
+    )
     dense_ms = bench(
         lambda: mx.linalg.solve(A_dense, b),
         warmup=args.warmup,
@@ -158,14 +185,22 @@ def main() -> None:
             # Sparse Cholesky
             "cholesky_rel_error": round(err_chol, 8),
             "cholesky_ms": round(chol_ms, 4),
+            "cholesky_speedup_vs_scipy_spsolve": round(scipy_spsolve_ms / chol_ms, 2),
             "cholesky_speedup_vs_dense": round(dense_ms / chol_ms, 2),
             # Sparse LU
             "lu_rel_error": round(err_lu, 8),
             "lu_ms": round(lu_ms, 4),
+            "lu_speedup_vs_scipy_splu_factor_solve": round(
+                scipy_splu_factor_solve_ms / lu_ms, 2
+            ),
             "lu_speedup_vs_dense": round(dense_ms / lu_ms, 2),
             # spsolve (LU shorthand)
             "spsolve_rel_error": round(err_spsolve, 8),
             "spsolve_ms": round(spsolve_ms, 4),
+            "scipy_spsolve_ms": round(scipy_spsolve_ms, 4),
+            "scipy_splu_factor_solve_ms": round(scipy_splu_factor_solve_ms, 4),
+            "scipy_splu_solve_only_ms": round(scipy_splu_solve_only_ms, 4),
+            "spsolve_speedup_vs_scipy_spsolve": round(scipy_spsolve_ms / spsolve_ms, 2),
             "spsolve_speedup_vs_dense": round(dense_ms / spsolve_ms, 2),
             # Dense baseline
             "dense_solve_ms": round(dense_ms, 4),

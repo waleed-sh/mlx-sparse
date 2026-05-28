@@ -1,6 +1,60 @@
 Changelog
 =========
 
+mlx-sparse v0.0.4b1 (Unreleased)
+---------------------------------
+
+.. note::
+
+    Unlike the previous release which targetted Accelerate integration, this release targets
+    native CPU performance when Metal and Accelerate are unavailable, disabled, or intentionally avoided.
+
+Benchmarks
+~~~~~~~~~~
+
+* Added shared benchmark helpers that evaluate dense MLX results and force all
+  structural buffers for sparse containers before timing.
+
+* Added a native CPU direct-solver benchmark that records runtime capability,
+  device, hardware, worker-count, matrix-structure, dtype, warmup, and
+  iteration metadata for reproducible non-Accelerate baselines.
+
+* Split native LU and Cholesky direct-solver timings into ``factor_only``,
+  ``solve_only``, and ``factor_plus_solve`` phases.
+
+* Added native CPU sparse-operation benchmark suites for ``fromdense``,
+  compressed ``sort_indices`` and ``sum_duplicates``, COO-to-CSR/CSC
+  conversion, CSR/COO/CSC sparse-sparse products, CSR/CSC transpose products,
+  and COO/CSC dense products.
+
+* Added benchmark matrix families for uniformly short rows, highly imbalanced
+  rows, banded matrices, diagonal-dominant matrices, duplicate-heavy COO and
+  compressed inputs, exact-cancellation SpGEMM, and output-density sweeps.
+
+* Expanded native CPU benchmarks to sweep matrix dimensions, target nonzeros
+  per row, and short-row occupancies, with a hard 32k maximum dimension guard,
+  dense materialization limits for ``fromdense`` cases, and explicit-density
+  compatibility flags for ad-hoc runs.
+
+* Recorded the first v0.0.4b1 native CPU current-performance report under
+  ``benchmarks/reports/v0.0.4b1/current`` to guide subsequent optimization
+  work.
+
+* Added SciPy reference timings to every benchmark entrypoint, with
+  speedup-versus-SciPy fields in machine-readable reports and text summaries.
+  Native Cholesky records explicitly mark SciPy sparse Cholesky as unavailable
+  instead of using a misleading substitute, while LU records compare against
+  SciPy SuperLU.
+
+* Refreshed the v0.0.4b1 current-performance reports with SciPy as the primary
+  CPU comparison target for sparse operations, direct solvers, fixed-shape CSR
+  products, reductions, linalg solvers, spectral routines, and README CG.
+
+* Added structured before/after report support with loose local-regression
+  comparison thresholds for optimized native CPU families.
+
+
+
 mlx-sparse v0.0.4b0 (28.05.2026)
 ----------------------------------
 

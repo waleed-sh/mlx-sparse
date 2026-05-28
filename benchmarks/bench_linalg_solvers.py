@@ -46,6 +46,16 @@ def bench(fn, *, warmup: int, iters: int) -> float:
     return 1000.0 * (end - start) / iters
 
 
+def bench_scipy(fn, *, warmup: int, iters: int) -> float:
+    for _ in range(warmup):
+        np.asarray(fn())
+    start = time.perf_counter()
+    for _ in range(iters):
+        np.asarray(fn())
+    end = time.perf_counter()
+    return 1000.0 * (end - start) / iters
+
+
 def make_spd_csr(n: int, density: float, rng) -> scipy.sparse.csr_matrix:
     """Random sparse SPD matrix: symmetrize a random matrix + strong diagonal."""
     A = scipy.sparse.random(
@@ -77,6 +87,44 @@ def rel_error(x_mlx: mx.array, x_ref: np.ndarray) -> float:
     if norm == 0.0:
         return float(np.linalg.norm(x_np - x_ref))
     return float(np.linalg.norm(x_np - x_ref) / norm)
+
+
+def scipy_cg_solve(matrix, rhs, *, rtol: float, maxiter: int | None) -> np.ndarray:
+    x, info = scipy.sparse.linalg.cg(
+        matrix,
+        rhs,
+        rtol=rtol,
+        atol=0.0,
+        maxiter=maxiter,
+    )
+    if info != 0:
+        raise RuntimeError(f"SciPy CG did not converge: info={info}")
+    return x
+
+
+def scipy_gmres_solve(matrix, rhs, *, rtol: float, maxiter: int | None) -> np.ndarray:
+    x, info = scipy.sparse.linalg.gmres(
+        matrix,
+        rhs,
+        rtol=rtol,
+        atol=0.0,
+        maxiter=maxiter,
+    )
+    if info != 0:
+        raise RuntimeError(f"SciPy GMRES did not converge: info={info}")
+    return x
+
+
+def scipy_minres_solve(matrix, rhs, *, rtol: float, maxiter: int | None) -> np.ndarray:
+    x, info = scipy.sparse.linalg.minres(
+        matrix,
+        rhs,
+        rtol=rtol,
+        maxiter=maxiter,
+    )
+    if info != 0:
+        raise RuntimeError(f"SciPy MINRES did not converge: info={info}")
+    return x
 
 
 def main() -> None:
@@ -132,13 +180,43 @@ def main() -> None:
         warmup=args.warmup,
         iters=args.iters,
     )
+    scipy_cg_ms = bench_scipy(
+        lambda: scipy_cg_solve(
+            scipy_csr,
+            b_np,
+            rtol=args.rtol,
+            maxiter=args.maxiter,
+        ),
+        warmup=args.warmup,
+        iters=args.iters,
+    )
     gmres_ms = bench(
         lambda: linalg.gmres(A_ms, b, rtol=args.rtol, maxiter=args.maxiter)[0],
         warmup=args.warmup,
         iters=args.iters,
     )
+    scipy_gmres_ms = bench_scipy(
+        lambda: scipy_gmres_solve(
+            scipy_csr,
+            b_np,
+            rtol=args.rtol,
+            maxiter=args.maxiter,
+        ),
+        warmup=args.warmup,
+        iters=args.iters,
+    )
     minres_ms = bench(
         lambda: linalg.minres(A_ms, b, rtol=args.rtol, maxiter=args.maxiter)[0],
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+    scipy_minres_ms = bench_scipy(
+        lambda: scipy_minres_solve(
+            scipy_csr,
+            b_np,
+            rtol=args.rtol,
+            maxiter=args.maxiter,
+        ),
         warmup=args.warmup,
         iters=args.iters,
     )
@@ -158,16 +236,22 @@ def main() -> None:
             "cg_converged": info_cg == 0,
             "cg_rel_error": round(err_cg, 8),
             "cg_ms": round(cg_ms, 4),
+            "scipy_cg_ms": round(scipy_cg_ms, 4),
+            "cg_speedup_vs_scipy": round(scipy_cg_ms / cg_ms, 2),
             "cg_speedup_vs_dense": round(dense_ms / cg_ms, 2),
             # GMRES
             "gmres_converged": info_gmres == 0,
             "gmres_rel_error": round(err_gmres, 8),
             "gmres_ms": round(gmres_ms, 4),
+            "scipy_gmres_ms": round(scipy_gmres_ms, 4),
+            "gmres_speedup_vs_scipy": round(scipy_gmres_ms / gmres_ms, 2),
             "gmres_speedup_vs_dense": round(dense_ms / gmres_ms, 2),
             # MINRES
             "minres_converged": info_minres == 0,
             "minres_rel_error": round(err_minres, 8),
             "minres_ms": round(minres_ms, 4),
+            "scipy_minres_ms": round(scipy_minres_ms, 4),
+            "minres_speedup_vs_scipy": round(scipy_minres_ms / minres_ms, 2),
             "minres_speedup_vs_dense": round(dense_ms / minres_ms, 2),
             # Dense baseline
             "dense_solve_ms": round(dense_ms, 4),

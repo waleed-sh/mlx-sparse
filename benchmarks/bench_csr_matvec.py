@@ -37,6 +37,17 @@ def bench(fn, *, warmup: int, iters: int) -> float:
     return 1000.0 * (end - start) / iters
 
 
+def bench_scipy(fn, *, warmup: int, iters: int) -> float:
+    for _ in range(warmup):
+        np.asarray(fn())
+
+    start = time.perf_counter()
+    for _ in range(iters):
+        np.asarray(fn())
+    end = time.perf_counter()
+    return 1000.0 * (end - start) / iters
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rows", type=int, default=8192 * 4)
@@ -80,6 +91,11 @@ def main() -> None:
     dense = mx.array(scipy_csr.toarray().astype(value_dtype))
 
     sparse_ms = bench(lambda: csr @ x, warmup=args.warmup, iters=args.iters)
+    scipy_ms = bench_scipy(
+        lambda: scipy_csr @ x_np,
+        warmup=args.warmup,
+        iters=args.iters,
+    )
     dense_ms = bench(lambda: dense @ x, warmup=args.warmup, iters=args.iters)
 
     print(
@@ -90,6 +106,8 @@ def main() -> None:
             "density": args.density,
             "dtype": str(value_dtype),
             "csr_matvec_ms": sparse_ms,
+            "scipy_csr_matvec_ms": scipy_ms,
+            "speedup_vs_scipy": scipy_ms / sparse_ms if sparse_ms > 0.0 else None,
             "dense_matvec_ms": dense_ms,
             "effective_nnz_per_s": scipy_csr.nnz / (sparse_ms / 1000.0),
         }
