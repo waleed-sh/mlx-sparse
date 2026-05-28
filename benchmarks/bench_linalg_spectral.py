@@ -33,6 +33,7 @@ import time
 import mlx.core as mx
 import numpy as np
 import scipy.sparse
+import scipy.sparse.linalg
 
 import mlx_sparse as ms
 from mlx_sparse import linalg
@@ -47,6 +48,25 @@ def bench(fn, *, warmup: int, iters: int) -> float:
         mx.eval(fn())
     end = time.perf_counter()
     return 1000.0 * (end - start) / iters
+
+
+def bench_scipy(fn, *, warmup: int, iters: int) -> float:
+    for _ in range(warmup):
+        _force_numpy(fn())
+    start = time.perf_counter()
+    for _ in range(iters):
+        _force_numpy(fn())
+    end = time.perf_counter()
+    return 1000.0 * (end - start) / iters
+
+
+def _force_numpy(result):
+    if isinstance(result, tuple | list):
+        for value in result:
+            _force_numpy(value)
+    else:
+        np.asarray(result)
+    return result
 
 
 def make_sym_csr(n: int, density: float, rng) -> scipy.sparse.csr_matrix:
@@ -173,6 +193,21 @@ def main() -> None:
         warmup=args.warmup,
         iters=args.iters,
     )
+    scipy_eigsh_ms = bench_scipy(
+        lambda: scipy.sparse.linalg.eigsh(sym_csr, k=k, which="LM")[0],
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+    scipy_eigs_ms = bench_scipy(
+        lambda: scipy.sparse.linalg.eigs(sym_csr, k=k, which="LM")[0],
+        warmup=args.warmup,
+        iters=args.iters,
+    )
+    scipy_svds_ms = bench_scipy(
+        lambda: scipy.sparse.linalg.svds(rect_csr, k=k, which="LM")[1],
+        warmup=args.warmup,
+        iters=args.iters,
+    )
     dense_eigh_ms = bench(
         lambda: mx.linalg.eigh(A_sym_dense)[0],
         warmup=args.warmup,
@@ -196,14 +231,20 @@ def main() -> None:
             # eigsh
             "eigsh_rel_error": round(err_eigsh, 8),
             "eigsh_ms": round(eigsh_ms, 4),
+            "scipy_eigsh_ms": round(scipy_eigsh_ms, 4),
+            "eigsh_speedup_vs_scipy": round(scipy_eigsh_ms / eigsh_ms, 2),
             "eigsh_speedup_vs_dense_eigh": round(dense_eigh_ms / eigsh_ms, 2),
             # eigs
             "eigs_rel_error": round(err_eigs, 8),
             "eigs_ms": round(eigs_ms, 4),
+            "scipy_eigs_ms": round(scipy_eigs_ms, 4),
+            "eigs_speedup_vs_scipy": round(scipy_eigs_ms / eigs_ms, 2),
             "eigs_speedup_vs_dense_eigh": round(dense_eigh_ms / eigs_ms, 2),
             # svds
             "svds_rel_error": round(err_svds, 8),
             "svds_ms": round(svds_ms, 4),
+            "scipy_svds_ms": round(scipy_svds_ms, 4),
+            "svds_speedup_vs_scipy": round(scipy_svds_ms / svds_ms, 2),
             "svds_speedup_vs_dense_svd": round(dense_svd_ms / svds_ms, 2),
             # Dense baselines (compute all values)
             "dense_eigh_ms": round(dense_eigh_ms, 4),

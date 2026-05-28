@@ -1,0 +1,17 @@
+device: Device(cpu, 0)
+matrix: 4096 x 4096, nnz=32768, dtype=float32
+
+| operation | legacy conversion ms | native ms | SciPy ms | native vs legacy | native vs SciPy |
+|---|---:|---:|---:|---:|---:|
+| coo_row_sums | 1.767 | 0.022 | 0.023 | 78.67x | 1.04x |
+| coo_col_sums | 1.712 | 0.022 | 0.038 | 76.38x | 1.72x |
+| coo_row_norms_canonical | 0.247 | 0.112 | 0.106 | 2.21x | 0.95x |
+| coo_col_norms_canonical | 0.624 | 0.025 | 0.060 | 24.54x | 2.35x |
+| coo_diagonal | 1.696 | 0.025 | 0.026 | 67.51x | 1.04x |
+| coo_trace | 1.746 | 0.021 | 0.033 | 83.49x | 1.60x |
+| csc_row_sums | 0.087 | 0.029 | 0.021 | 3.02x | 0.72x |
+| csc_col_sums | 0.091 | 0.023 | 0.045 | 3.99x | 1.95x |
+| csc_row_norms_canonical | 0.231 | 0.025 | 0.032 | 9.39x | 1.31x |
+| csc_col_norms_canonical | 0.897 | 0.029 | 0.025 | 30.39x | 0.86x |
+| csc_diagonal | 0.094 | 0.038 | 0.020 | 2.51x | 0.53x |
+| csc_trace | 0.094 | 0.029 | 0.024 | 3.29x | 0.83x |
