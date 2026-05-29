@@ -284,18 +284,27 @@ availability fallback, not a dtype-specific path in normal wheels.
 
 **CPU backends**
 
-The CPU backends use MLX's command encoder dispatch model. They are correct
-and readable but not hand-tuned (**yet**):
+The CPU backends use MLX's command encoder dispatch model. Fixed-shape
+CSR sparse-dense products now have native CPU tuning in the row-owned path,
+while other CPU kernels are still being optimized incrementally:
 
-* No SIMD intrinsics.
-* No parallelism over rows (serial dispatch).
+* ``csr_matvec`` uses a short-row serial fast path and fixed-worker row
+  partitioning when ``MLX_SPARSE_CPU_THREADS`` resolves above one.
+* ``csr_matmul`` and ``csr_batched_matmul`` specialize common RHS widths
+  ``1``, ``2``, ``4``, ``8``, and ``16`` with stack accumulators to reduce
+  per-row temporary traffic.
+* ``csr_batched_matvec`` uses fixed-worker batch-row partitions when more than
+  one CPU worker is configured.
+* The worker count is the configured runtime value. It is not changed
+  heuristically from matrix shape, density, or nnz.
+* No architecture-specific SIMD intrinsics are required in the default build.
 * ``float16`` and ``bfloat16`` use ``float32`` accumulators.
 * ``complex64`` uses standard ``complex64`` arithmetic.
 
-For reference: a hand-tuned MKL or BLAS SpMV on a 12-core M-series chip will
-typically be faster than this CPU backend at the same problem size.
-The MLX CPU backend is a correctness baseline, not a performance product. Use
-the Metal path for CPU+GPU comparison.
+For reference: hand-tuned Sparse BLAS libraries may still be faster at the
+same problem size, especially on small sparse-dense products where fixed
+worker launch overhead dominates. Set ``MLX_SPARSE_CPU_THREADS=1`` when
+measuring the serial native CPU path.
 
 Measuring effective bandwidth
 ------------------------------

@@ -56,6 +56,11 @@ def main() -> None:
     parser.add_argument("--device", choices=("cpu", "gpu"), default="gpu")
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--iters", type=int, default=30)
+    parser.add_argument(
+        "--skip-dense",
+        action="store_true",
+        help="Do not materialize the dense MLX baseline matrix.",
+    )
     args = parser.parse_args()
 
     ms.use_device(args.device)
@@ -89,7 +94,9 @@ def main() -> None:
         canonical=True,
     )
     rhs = mx.array(rhs_np)
-    dense = mx.array(scipy_csr.toarray().astype(value_dtype))
+    dense = (
+        None if args.skip_dense else mx.array(scipy_csr.toarray().astype(value_dtype))
+    )
 
     sparse_ms = bench(lambda: csr @ rhs, warmup=args.warmup, iters=args.iters)
     scipy_ms = bench_scipy(
@@ -97,7 +104,11 @@ def main() -> None:
         warmup=args.warmup,
         iters=args.iters,
     )
-    dense_ms = bench(lambda: dense @ rhs, warmup=args.warmup, iters=args.iters)
+    dense_ms = (
+        None
+        if dense is None
+        else bench(lambda: dense @ rhs, warmup=args.warmup, iters=args.iters)
+    )
 
     print(
         {

@@ -76,6 +76,14 @@ estimated work; very small outputs may assign empty worker ranges instead of
 silently reducing the configured count. Set ``SPGEMM_THREADS=1`` or
 ``SPGEMM_PARALLEL=False`` for the serial Gustavson/SPA path.
 
+Native CPU CSR sparse-dense products use the package-wide ``CPU_THREADS``
+setting directly for row-owned ``csr_matvec``, ``csr_matmul``,
+``csr_batched_matvec``, and ``csr_batched_matmul`` work. Set
+``CPU_THREADS=1`` or ``ms.runtime.N_THREADS = 1`` to force the serial path.
+As with SpGEMM, the implementation does not choose a different worker count
+from matrix size or density; small sparse-dense products can pay thread-launch
+overhead when more than one worker is configured.
+
 Experimental controls
 ---------------------
 
