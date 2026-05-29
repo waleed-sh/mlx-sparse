@@ -64,6 +64,14 @@ Benchmarks
 Improvements
 ~~~~~~~~~~~~
 
+* Added fixed-worker native CPU parallel SpGEMM implementations for same-format
+  CSR, COO, and CSC sparse-sparse products. The host paths split independent
+  output rows or columns across the configured ``SPGEMM_THREADS`` workers,
+  reuse private per-worker accumulator workspaces, stitch results
+  deterministically, and preserve canonical ordering plus exact
+  zero-cancellation semantics. Setting ``SPGEMM_THREADS=1`` or disabling
+  ``SPGEMM_PARALLEL`` keeps the serial Gustavson/SPA path.
+
 * Improved serial host CSR/COO/CSC SpGEMM assembly by writing only final
   nonzero entries after each row or column accumulation, avoiding the previous
   candidate-value materialization and separate prune pass on the native CPU

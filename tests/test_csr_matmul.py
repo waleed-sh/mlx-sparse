@@ -311,6 +311,52 @@ def test_csr_spgemm_prunes_exact_cancellation_and_keeps_sorted_rows(mx, scipy_sp
         assert np.unique(row_indices).size == row_indices.size
 
 
+@pytest.mark.cpu_only
+def test_csr_spgemm_fixed_parallel_matches_serial_and_scipy(mx, scipy_sparse):
+    lhs_data = np.array(
+        [1.0, 1.0, 3.0, -2.0, 4.0, -1.0, 0.5, 2.5, -3.0, 1.5],
+        dtype=np.float32,
+    )
+    lhs_indices = np.array([0, 1, 1, 4, 2, 3, 5, 0, 4, 5], dtype=np.int32)
+    lhs_indptr = np.array([0, 2, 4, 6, 7, 10], dtype=np.int32)
+    rhs_data = np.array(
+        [2.0, -2.0, 1.5, -0.5, 3.0, 4.0, -4.0, 2.0, -1.0, 0.25, 5.0],
+        dtype=np.float32,
+    )
+    rhs_indices = np.array([0, 0, 2, 5, 1, 3, 3, 0, 4, 5, 2], dtype=np.int32)
+    rhs_indptr = np.array([0, 1, 4, 5, 7, 9, 11], dtype=np.int32)
+
+    scipy_lhs = scipy_sparse.csr_matrix(
+        (lhs_data, lhs_indices, lhs_indptr), shape=(5, 6)
+    )
+    scipy_rhs = scipy_sparse.csr_matrix(
+        (rhs_data, rhs_indices, rhs_indptr), shape=(6, 6)
+    )
+    expected = scipy_lhs @ scipy_rhs
+    expected.eliminate_zeros()
+    lhs = ms.from_scipy(scipy_lhs)
+    rhs = ms.from_scipy(scipy_rhs)
+
+    with ms.runtime.context(spgemm_parallel=False):
+        serial = lhs @ rhs
+    with ms.runtime.context(spgemm_parallel=True, spgemm_threads=2):
+        parallel = lhs @ rhs
+
+    assert serial.sorted_indices
+    assert serial.has_canonical_format
+    assert parallel.sorted_indices
+    assert parallel.has_canonical_format
+    np.testing.assert_allclose(
+        to_numpy(serial.todense()), expected.toarray(), rtol=1e-5, atol=1e-5
+    )
+    np.testing.assert_allclose(
+        to_numpy(parallel.todense()), expected.toarray(), rtol=1e-5, atol=1e-5
+    )
+    np.testing.assert_array_equal(to_numpy(parallel.indptr), to_numpy(serial.indptr))
+    np.testing.assert_array_equal(to_numpy(parallel.indices), to_numpy(serial.indices))
+    np.testing.assert_allclose(to_numpy(parallel.data), to_numpy(serial.data))
+
+
 def test_csr_spgemm_dense_ordered_extraction_keeps_sorted_rows(mx, scipy_sparse):
     block = 8
     blocks = 16

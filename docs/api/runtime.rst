@@ -33,6 +33,14 @@ effective value that kernels should use. Assigning them validates and updates
 the underlying package configuration and synchronized ``MLX_SPARSE_*``
 environment variable.
 
+For native CPU same-format CSR, COO, and CSC sparse-sparse products,
+``SPGEMM_THREADS`` is a fixed worker count. The implementation partitions
+independent output rows or columns across that count and does not change the
+number of workers based on matrix size, density, or estimated work. Very small
+outputs may assign empty ranges to some workers rather than silently reducing
+the configured count. Use ``SPGEMM_THREADS = 1`` or
+``SPGEMM_PARALLEL = False`` to force the serial Gustavson/SPA path.
+
 .. list-table::
    :header-rows: 1
 

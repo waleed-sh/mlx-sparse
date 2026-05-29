@@ -319,6 +319,62 @@ def test_coo_spgemm_duplicate_cancellation_and_rectangular_output(mx, scipy_spar
     np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.cpu_only
+def test_coo_csc_spgemm_fixed_parallel_matches_serial_and_scipy(mx, scipy_sparse):
+    lhs_row = np.array([0, 0, 1, 1, 2, 2, 3, 4, 4, 4], dtype=np.int32)
+    lhs_col = np.array([0, 1, 1, 4, 2, 3, 5, 0, 4, 5], dtype=np.int32)
+    lhs_data = np.array(
+        [1.0, 1.0, 3.0, -2.0, 4.0, -1.0, 0.5, 2.5, -3.0, 1.5],
+        dtype=np.float32,
+    )
+    rhs_row = np.array([0, 1, 1, 1, 2, 3, 3, 4, 4, 5, 5], dtype=np.int32)
+    rhs_col = np.array([0, 0, 2, 5, 1, 3, 3, 0, 4, 5, 2], dtype=np.int32)
+    rhs_data = np.array(
+        [2.0, -2.0, 1.5, -0.5, 3.0, 4.0, -4.0, 2.0, -1.0, 0.25, 5.0],
+        dtype=np.float32,
+    )
+    scipy_lhs = scipy_sparse.coo_matrix((lhs_data, (lhs_row, lhs_col)), shape=(5, 6))
+    scipy_rhs = scipy_sparse.coo_matrix((rhs_data, (rhs_row, rhs_col)), shape=(6, 6))
+    expected = scipy_lhs @ scipy_rhs
+    expected.eliminate_zeros()
+
+    lhs_coo = ms.from_scipy(scipy_lhs, format="coo")
+    rhs_coo = ms.from_scipy(scipy_rhs, format="coo")
+    with ms.runtime.context(spgemm_parallel=False):
+        serial_coo = lhs_coo @ rhs_coo
+    with ms.runtime.context(spgemm_parallel=True, spgemm_threads=2):
+        parallel_coo = lhs_coo @ rhs_coo
+
+    _assert_canonical_coo(serial_coo)
+    _assert_canonical_coo(parallel_coo)
+    np.testing.assert_allclose(
+        to_numpy(parallel_coo.todense()), expected.toarray(), rtol=1e-5, atol=1e-5
+    )
+    np.testing.assert_array_equal(to_numpy(parallel_coo.row), to_numpy(serial_coo.row))
+    np.testing.assert_array_equal(to_numpy(parallel_coo.col), to_numpy(serial_coo.col))
+    np.testing.assert_allclose(to_numpy(parallel_coo.data), to_numpy(serial_coo.data))
+
+    lhs_csc = ms.from_scipy(scipy_lhs, format="csc")
+    rhs_csc = ms.from_scipy(scipy_rhs, format="csc")
+    with ms.runtime.context(spgemm_parallel=False):
+        serial_csc = lhs_csc @ rhs_csc
+    with ms.runtime.context(spgemm_parallel=True, spgemm_threads=2):
+        parallel_csc = lhs_csc @ rhs_csc
+
+    _assert_canonical_csc(serial_csc)
+    _assert_canonical_csc(parallel_csc)
+    np.testing.assert_allclose(
+        to_numpy(parallel_csc.todense()), expected.toarray(), rtol=1e-5, atol=1e-5
+    )
+    np.testing.assert_array_equal(
+        to_numpy(parallel_csc.indptr), to_numpy(serial_csc.indptr)
+    )
+    np.testing.assert_array_equal(
+        to_numpy(parallel_csc.indices), to_numpy(serial_csc.indices)
+    )
+    np.testing.assert_allclose(to_numpy(parallel_csc.data), to_numpy(serial_csc.data))
+
+
 def test_coo_spgemm_dense_ordered_extraction_keeps_canonical(mx, scipy_sparse):
     block = 8
     blocks = 16

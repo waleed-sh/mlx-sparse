@@ -48,8 +48,8 @@ They are exposed through both :data:`config` and :mod:`mlx_sparse.runtime`.
    * - ``SPGEMM_PARALLEL``
      - ``MLX_SPARSE_SPGEMM_PARALLEL``
      - ``True``
-     - Enables CPU parallel sparse-sparse products when parallel kernels are
-       available.
+     - Enables fixed-worker CPU parallel sparse-sparse products for native
+       same-format CSR, COO, and CSC SpGEMM.
    * - ``SPGEMM_THREADS``
      - ``MLX_SPARSE_SPGEMM_THREADS``
      - ``"inherit"``
@@ -69,6 +69,12 @@ They are exposed through both :data:`config` and :mod:`mlx_sparse.runtime`.
 ``CPU_THREADS`` also accepts ``MLX_SPARSE_N_THREADS`` as a compatibility alias
 at import time. The canonical synchronized variable is
 ``MLX_SPARSE_CPU_THREADS``.
+
+The native CPU SpGEMM implementation uses the resolved ``SPGEMM_THREADS``
+count directly. It does not vary the worker count by matrix shape, density, or
+estimated work; very small outputs may assign empty worker ranges instead of
+silently reducing the configured count. Set ``SPGEMM_THREADS=1`` or
+``SPGEMM_PARALLEL=False`` for the serial Gustavson/SPA path.
 
 Experimental controls
 ---------------------

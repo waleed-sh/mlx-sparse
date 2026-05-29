@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -497,6 +498,60 @@ void check_output_nnz(size_t nnz, const char *op_name) {
   }
 }
 
+int64_t saturated_add(int64_t lhs, int64_t rhs) {
+  if (rhs > 0 && lhs > std::numeric_limits<int64_t>::max() - rhs) {
+    return std::numeric_limits<int64_t>::max();
+  }
+  if (rhs < 0 && lhs < std::numeric_limits<int64_t>::min() - rhs) {
+    return std::numeric_limits<int64_t>::min();
+  }
+  return lhs + rhs;
+}
+
+size_t local_reserve_hint(size_t global_hint, int64_t local_work,
+                          int64_t total_work) {
+  if (global_hint == 0 || local_work <= 0 || total_work <= 0) {
+    return 0;
+  }
+  const long double fraction = static_cast<long double>(local_work) /
+                               static_cast<long double>(total_work);
+  const auto estimate =
+      static_cast<size_t>(std::max<long double>(1.0L, global_hint * fraction));
+  return std::min(global_hint, estimate);
+}
+
+template <typename T, typename OutI> struct LocalCooSpgemmOutput {
+  std::vector<T> data;
+  std::vector<OutI> col;
+};
+
+template <typename LhsI>
+std::vector<int64_t> coo_row_work(const std::vector<int> &lhs_offsets,
+                                  const std::vector<int> &lhs_positions,
+                                  const LhsI *lhs_col_ptr,
+                                  const std::vector<int> &rhs_offsets,
+                                  int lhs_n_rows, int rhs_n_rows) {
+  std::vector<int64_t> work(static_cast<size_t>(lhs_n_rows), 0);
+  for (int row = 0; row < lhs_n_rows; ++row) {
+    int64_t row_work = 0;
+    for (int lp = lhs_offsets[static_cast<size_t>(row)];
+         lp < lhs_offsets[static_cast<size_t>(row) + 1]; ++lp) {
+      const int lhs_pos = lhs_positions[static_cast<size_t>(lp)];
+      const int rhs_row = static_cast<int>(lhs_col_ptr[lhs_pos]);
+      if (rhs_row < 0 || rhs_row >= rhs_n_rows) {
+        throw std::invalid_argument(
+            "coo_matmat lhs coordinates contain an out-of-bounds column.");
+      }
+      row_work = saturated_add(
+          row_work,
+          static_cast<int64_t>(rhs_offsets[static_cast<size_t>(rhs_row) + 1] -
+                               rhs_offsets[static_cast<size_t>(rhs_row)]));
+    }
+    work[static_cast<size_t>(row)] = row_work;
+  }
+  return work;
+}
+
 template <typename T, typename LhsI, typename RhsI, typename OutI>
 std::tuple<mx::array, mx::array, mx::array>
 coo_matmat_impl(mx::array lhs_data, mx::array lhs_row, mx::array lhs_col,
@@ -644,17 +699,232 @@ coo_matmat_impl(mx::array lhs_data, mx::array lhs_row, mx::array lhs_col,
           mx::array(out_col.begin(), mx::Shape{out_nnz}, out_index_dtype)};
 }
 
+template <typename T, typename LhsI, typename RhsI, typename OutI>
+std::tuple<mx::array, mx::array, mx::array>
+coo_matmat_parallel_impl(mx::array lhs_data, mx::array lhs_row,
+                         mx::array lhs_col, mx::array rhs_data,
+                         mx::array rhs_row, mx::array rhs_col, int lhs_n_rows,
+                         int lhs_n_cols, int rhs_n_rows, int rhs_n_cols,
+                         mx::Dtype out_index_dtype, int requested_workers) {
+  using AccT = typename Accumulator<T>::Type;
+
+  lhs_data.eval();
+  lhs_row.eval();
+  lhs_col.eval();
+  rhs_data.eval();
+  rhs_row.eval();
+  rhs_col.eval();
+
+  if (lhs_data.size() > static_cast<size_t>(std::numeric_limits<int>::max()) ||
+      rhs_data.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    throw std::overflow_error("coo_matmat input nnz exceeds supported limits.");
+  }
+
+  const int lhs_nnz = static_cast<int>(lhs_data.size());
+  const int rhs_nnz = static_cast<int>(rhs_data.size());
+  const auto *lhs_data_ptr = lhs_data.data<T>();
+  const auto *lhs_row_ptr = lhs_row.data<LhsI>();
+  const auto *lhs_col_ptr = lhs_col.data<LhsI>();
+  const auto *rhs_data_ptr = rhs_data.data<T>();
+  const auto *rhs_row_ptr = rhs_row.data<RhsI>();
+  const auto *rhs_col_ptr = rhs_col.data<RhsI>();
+
+  std::vector<int> lhs_counts(static_cast<size_t>(lhs_n_rows), 0);
+  std::vector<int> rhs_counts(static_cast<size_t>(rhs_n_rows), 0);
+  for (int p = 0; p < lhs_nnz; ++p) {
+    const int row = static_cast<int>(lhs_row_ptr[p]);
+    const int col = static_cast<int>(lhs_col_ptr[p]);
+    if (row < 0 || row >= lhs_n_rows || col < 0 || col >= lhs_n_cols) {
+      throw std::invalid_argument(
+          "coo_matmat lhs coordinates contain an out-of-bounds entry.");
+    }
+    lhs_counts[static_cast<size_t>(row)] += 1;
+  }
+  for (int p = 0; p < rhs_nnz; ++p) {
+    const int row = static_cast<int>(rhs_row_ptr[p]);
+    const int col = static_cast<int>(rhs_col_ptr[p]);
+    if (row < 0 || row >= rhs_n_rows || col < 0 || col >= rhs_n_cols) {
+      throw std::invalid_argument(
+          "coo_matmat rhs coordinates contain an out-of-bounds entry.");
+    }
+    rhs_counts[static_cast<size_t>(row)] += 1;
+  }
+
+  const auto lhs_offsets = offsets_from_counts(lhs_counts);
+  const auto rhs_offsets = offsets_from_counts(rhs_counts);
+  std::vector<int> lhs_positions(static_cast<size_t>(lhs_nnz));
+  std::vector<int> rhs_positions(static_cast<size_t>(rhs_nnz));
+  auto lhs_cursor = lhs_offsets;
+  auto rhs_cursor = rhs_offsets;
+  for (int p = 0; p < lhs_nnz; ++p) {
+    const int row = static_cast<int>(lhs_row_ptr[p]);
+    lhs_positions[static_cast<size_t>(lhs_cursor[static_cast<size_t>(row)]++)] =
+        p;
+  }
+  for (int p = 0; p < rhs_nnz; ++p) {
+    const int row = static_cast<int>(rhs_row_ptr[p]);
+    rhs_positions[static_cast<size_t>(rhs_cursor[static_cast<size_t>(row)]++)] =
+        p;
+  }
+
+  const auto row_work = coo_row_work(lhs_offsets, lhs_positions, lhs_col_ptr,
+                                     rhs_offsets, lhs_n_rows, rhs_n_rows);
+  const auto ranges = cpu_ranges_for_output_work(row_work, requested_workers);
+  std::vector<OutI> row_counts(static_cast<size_t>(lhs_n_rows), OutI{0});
+  std::vector<LocalCooSpgemmOutput<T, OutI>> local_outputs(ranges.size());
+  const size_t reserve_hint = spgemm_reserve_hint(
+      lhs_n_rows, rhs_n_rows, rhs_n_cols, lhs_data.size(), rhs_data.size());
+  int64_t total_work = 0;
+  for (const auto work : row_work) {
+    total_work = saturated_add(total_work, work);
+  }
+
+  parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+    auto &local = local_outputs[worker];
+    int64_t local_work = 0;
+    for (int row = range.begin; row < range.end; ++row) {
+      local_work =
+          saturated_add(local_work, row_work[static_cast<size_t>(row)]);
+    }
+    const auto reserve =
+        local_reserve_hint(reserve_hint, local_work, total_work);
+    local.data.reserve(reserve);
+    local.col.reserve(reserve);
+
+    std::vector<int> marker(static_cast<size_t>(rhs_n_cols), -1);
+    std::vector<AccT> accum(static_cast<size_t>(rhs_n_cols),
+                            Accumulator<T>::zero());
+    std::vector<int> columns;
+
+    for (int row = range.begin; row < range.end; ++row) {
+      columns.clear();
+      bool columns_sorted = true;
+      int disorder_count = 0;
+      const auto before = local.data.size();
+      for (int lp = lhs_offsets[static_cast<size_t>(row)];
+           lp < lhs_offsets[static_cast<size_t>(row) + 1]; ++lp) {
+        const int lhs_pos = lhs_positions[static_cast<size_t>(lp)];
+        const int rhs_row = static_cast<int>(lhs_col_ptr[lhs_pos]);
+        const T lhs_value = lhs_data_ptr[lhs_pos];
+        for (int rp = rhs_offsets[static_cast<size_t>(rhs_row)];
+             rp < rhs_offsets[static_cast<size_t>(rhs_row) + 1]; ++rp) {
+          const int rhs_pos = rhs_positions[static_cast<size_t>(rp)];
+          const int col = static_cast<int>(rhs_col_ptr[rhs_pos]);
+          const auto col_index = static_cast<size_t>(col);
+          const AccT product =
+              multiply_accumulate<T>(lhs_value, rhs_data_ptr[rhs_pos]);
+          if (marker[col_index] != row) {
+            marker[col_index] = row;
+            accum[col_index] = product;
+            if (!columns.empty() && col < columns.back()) {
+              columns_sorted = false;
+              disorder_count += 1;
+            }
+            columns.push_back(col);
+          } else {
+            accum[col_index] += product;
+          }
+        }
+      }
+
+      if (!columns_sorted &&
+          use_dense_ordered_scan(columns.size(), rhs_n_cols, disorder_count)) {
+        for (int col = 0; col < rhs_n_cols; ++col) {
+          const auto col_index = static_cast<size_t>(col);
+          if (marker[col_index] != row) {
+            continue;
+          }
+          const auto value = Accumulator<T>::cast(accum[col_index]);
+          if (nonzero(value)) {
+            local.data.push_back(value);
+            local.col.push_back(static_cast<OutI>(col));
+          }
+        }
+      } else {
+        if (!columns_sorted) {
+          sort_touched_indices(columns);
+        }
+        for (int col : columns) {
+          const auto value =
+              Accumulator<T>::cast(accum[static_cast<size_t>(col)]);
+          if (nonzero(value)) {
+            local.data.push_back(value);
+            local.col.push_back(static_cast<OutI>(col));
+          }
+        }
+      }
+
+      const auto row_nnz = local.data.size() - before;
+      check_output_nnz<OutI>(row_nnz, "coo_matmat row");
+      row_counts[static_cast<size_t>(row)] = static_cast<OutI>(row_nnz);
+    }
+  });
+
+  size_t total_nnz = 0;
+  std::vector<size_t> row_offsets(static_cast<size_t>(lhs_n_rows) + 1, 0);
+  for (int row = 0; row < lhs_n_rows; ++row) {
+    total_nnz += static_cast<size_t>(row_counts[static_cast<size_t>(row)]);
+    check_output_nnz<OutI>(total_nnz, "coo_matmat");
+    row_offsets[static_cast<size_t>(row) + 1] = total_nnz;
+  }
+
+  std::vector<T> out_data(total_nnz);
+  std::vector<OutI> out_row(total_nnz);
+  std::vector<OutI> out_col(total_nnz);
+  for (size_t worker = 0; worker < ranges.size(); ++worker) {
+    const auto &range = ranges[worker];
+    const auto &local = local_outputs[worker];
+    size_t read = 0;
+    for (int row = range.begin; row < range.end; ++row) {
+      const auto count =
+          static_cast<size_t>(row_counts[static_cast<size_t>(row)]);
+      const auto write = row_offsets[static_cast<size_t>(row)];
+      std::copy(local.data.begin() + static_cast<std::ptrdiff_t>(read),
+                local.data.begin() + static_cast<std::ptrdiff_t>(read + count),
+                out_data.begin() + static_cast<std::ptrdiff_t>(write));
+      std::fill(out_row.begin() + static_cast<std::ptrdiff_t>(write),
+                out_row.begin() + static_cast<std::ptrdiff_t>(write + count),
+                static_cast<OutI>(row));
+      std::copy(local.col.begin() + static_cast<std::ptrdiff_t>(read),
+                local.col.begin() + static_cast<std::ptrdiff_t>(read + count),
+                out_col.begin() + static_cast<std::ptrdiff_t>(write));
+      read += count;
+    }
+    if (read != local.data.size() || read != local.col.size()) {
+      throw std::runtime_error("coo_matmat internal parallel count mismatch.");
+    }
+  }
+
+  const int out_nnz = static_cast<int>(total_nnz);
+  return {mx::array(out_data.begin(), mx::Shape{out_nnz}, lhs_data.dtype()),
+          mx::array(out_row.begin(), mx::Shape{out_nnz}, out_index_dtype),
+          mx::array(out_col.begin(), mx::Shape{out_nnz}, out_index_dtype)};
+}
+
 template <typename T, typename LhsI, typename RhsI>
 std::tuple<mx::array, mx::array, mx::array>
 dispatch_out(mx::array lhs_data, mx::array lhs_row, mx::array lhs_col,
              mx::array rhs_data, mx::array rhs_row, mx::array rhs_col,
              int lhs_n_rows, int lhs_n_cols, int rhs_n_rows, int rhs_n_cols,
-             mx::Dtype out_index_dtype) {
+             mx::Dtype out_index_dtype, int requested_workers) {
   if (out_index_dtype == mx::int32) {
+    if (requested_workers > 1) {
+      return coo_matmat_parallel_impl<T, LhsI, RhsI, int32_t>(
+          std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
+          std::move(rhs_data), std::move(rhs_row), std::move(rhs_col),
+          lhs_n_rows, lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype,
+          requested_workers);
+    }
     return coo_matmat_impl<T, LhsI, RhsI, int32_t>(
         std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
         std::move(rhs_data), std::move(rhs_row), std::move(rhs_col), lhs_n_rows,
         lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
+  }
+  if (requested_workers > 1) {
+    return coo_matmat_parallel_impl<T, LhsI, RhsI, int64_t>(
+        std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
+        std::move(rhs_data), std::move(rhs_row), std::move(rhs_col), lhs_n_rows,
+        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
   }
   return coo_matmat_impl<T, LhsI, RhsI, int64_t>(
       std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
@@ -667,17 +937,17 @@ std::tuple<mx::array, mx::array, mx::array>
 dispatch_rhs(mx::array lhs_data, mx::array lhs_row, mx::array lhs_col,
              mx::array rhs_data, mx::array rhs_row, mx::array rhs_col,
              int lhs_n_rows, int lhs_n_cols, int rhs_n_rows, int rhs_n_cols,
-             mx::Dtype out_index_dtype) {
+             mx::Dtype out_index_dtype, int requested_workers) {
   if (rhs_row.dtype() == mx::int32) {
     return dispatch_out<T, LhsI, int32_t>(
         std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
         std::move(rhs_data), std::move(rhs_row), std::move(rhs_col), lhs_n_rows,
-        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
+        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
   }
   return dispatch_out<T, LhsI, int64_t>(
       std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
       std::move(rhs_data), std::move(rhs_row), std::move(rhs_col), lhs_n_rows,
-      lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
+      lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
 }
 
 template <typename T>
@@ -685,17 +955,17 @@ std::tuple<mx::array, mx::array, mx::array>
 dispatch_lhs(mx::array lhs_data, mx::array lhs_row, mx::array lhs_col,
              mx::array rhs_data, mx::array rhs_row, mx::array rhs_col,
              int lhs_n_rows, int lhs_n_cols, int rhs_n_rows, int rhs_n_cols,
-             mx::Dtype out_index_dtype) {
+             mx::Dtype out_index_dtype, int requested_workers) {
   if (lhs_row.dtype() == mx::int32) {
     return dispatch_rhs<T, int32_t>(
         std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
         std::move(rhs_data), std::move(rhs_row), std::move(rhs_col), lhs_n_rows,
-        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
+        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
   }
   return dispatch_rhs<T, int64_t>(
       std::move(lhs_data), std::move(lhs_row), std::move(lhs_col),
       std::move(rhs_data), std::move(rhs_row), std::move(rhs_col), lhs_n_rows,
-      lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
+      lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
 }
 
 mx::array symbolic_counts(const mx::array &lhs_indices,
@@ -1228,25 +1498,26 @@ coo_matmat(const mx::array &lhs_data, const mx::array &lhs_row,
                              rhs_n_cols, out_index_dtype);
   }
 
+  const int requested_workers = configured_spgemm_worker_count();
   if (lhs_data.dtype() == mx::float32) {
     return dispatch_lhs<float>(lhs_data, lhs_row, lhs_col, rhs_data, rhs_row,
                                rhs_col, lhs_n_rows, lhs_n_cols, rhs_n_rows,
-                               rhs_n_cols, out_index_dtype);
+                               rhs_n_cols, out_index_dtype, requested_workers);
   }
   if (lhs_data.dtype() == mx::float16) {
-    return dispatch_lhs<mx::float16_t>(lhs_data, lhs_row, lhs_col, rhs_data,
-                                       rhs_row, rhs_col, lhs_n_rows, lhs_n_cols,
-                                       rhs_n_rows, rhs_n_cols, out_index_dtype);
+    return dispatch_lhs<mx::float16_t>(
+        lhs_data, lhs_row, lhs_col, rhs_data, rhs_row, rhs_col, lhs_n_rows,
+        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
   }
   if (lhs_data.dtype() == mx::bfloat16) {
     return dispatch_lhs<mx::bfloat16_t>(
         lhs_data, lhs_row, lhs_col, rhs_data, rhs_row, rhs_col, lhs_n_rows,
-        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
+        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
   }
   if (lhs_data.dtype() == mx::complex64) {
     return dispatch_lhs<mx::complex64_t>(
         lhs_data, lhs_row, lhs_col, rhs_data, rhs_row, rhs_col, lhs_n_rows,
-        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype);
+        lhs_n_cols, rhs_n_rows, rhs_n_cols, out_index_dtype, requested_workers);
   }
   throw std::runtime_error("coo_matmat unsupported value dtype.");
 }
