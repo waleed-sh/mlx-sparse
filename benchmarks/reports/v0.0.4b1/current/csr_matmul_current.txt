@@ -1,1 +1,0 @@
-{'backend': 'cpu', 'shape': (2048, 2048), 'rhs_cols': 16, 'nnz': 8389, 'density': 0.002, 'dtype': "<class 'numpy.float32'>", 'csr_matmul_ms': 0.0664334002067335, 'scipy_csr_matmul_ms': 0.01718340063234791, 'speedup_vs_scipy': 0.25865604618874005, 'dense_matmul_ms': 0.5068999991635792}
