@@ -8,6 +8,7 @@ API reference
    constructors
    operations
    configuration
+   runtime
    linalg
    device
 

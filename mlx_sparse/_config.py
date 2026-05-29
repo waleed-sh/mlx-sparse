@@ -145,6 +145,44 @@ def parse_bool(value: Any) -> bool:
     raise ConfigValidationError(f"Cannot parse boolean from value {value!r}.")
 
 
+def parse_thread_count(value: Any) -> int | str:
+    """Parse a positive thread count or the ``"auto"`` sentinel."""
+
+    if isinstance(value, bool):
+        raise ConfigValidationError(
+            f"Thread count must be a positive integer or 'auto', got {value!r}."
+        )
+    if isinstance(value, int):
+        if value >= 1:
+            return value
+        raise ConfigValidationError(
+            f"Thread count must be a positive integer or 'auto', got {value!r}."
+        )
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "auto":
+            return "auto"
+        try:
+            parsed = int(normalized, 10)
+        except ValueError as exc:
+            raise ConfigValidationError(
+                f"Thread count must be a positive integer or 'auto', got {value!r}."
+            ) from exc
+        if parsed >= 1:
+            return parsed
+    raise ConfigValidationError(
+        f"Thread count must be a positive integer or 'auto', got {value!r}."
+    )
+
+
+def parse_thread_count_or_inherit(value: Any) -> int | str:
+    """Parse a positive thread count, ``"auto"``, or ``"inherit"``."""
+
+    if isinstance(value, str) and value.strip().lower() == "inherit":
+        return "inherit"
+    return parse_thread_count(value)
+
+
 def _format_env_value(value: Any) -> str:
     if isinstance(value, bool):
         return "1" if value else "0"
@@ -611,6 +649,71 @@ class ConfigManager:
         return dict(arg1)
 
     def _register_default_options(self) -> None:
+        self.define_option(
+            "CPU_THREADS",
+            default="auto",
+            doc=(
+                "Package-wide CPU worker setting. Use a positive integer for an "
+                "explicit worker count, or 'auto' to resolve from standard "
+                "threading and scheduler environment variables, process affinity, "
+                "and hardware concurrency."
+            ),
+            value_type=(int, str),
+            parser=parse_thread_count,
+            env_default=("MLX_SPARSE_CPU_THREADS", "MLX_SPARSE_N_THREADS"),
+            role="runtime",
+            mutability=ConfigMutability.RUNTIME,
+        )
+        self.define_bool(
+            "SPGEMM_PARALLEL",
+            default=True,
+            doc=(
+                "Enable package-level CPU parallel execution for sparse-sparse "
+                "matrix products when a parallel implementation is available."
+            ),
+            env_default="MLX_SPARSE_SPGEMM_PARALLEL",
+            role="runtime",
+            mutability=ConfigMutability.RUNTIME,
+        )
+        self.define_option(
+            "SPGEMM_THREADS",
+            default="inherit",
+            doc=(
+                "CPU worker setting for sparse-sparse matrix products. Use a "
+                "positive integer for an explicit family-specific count, 'auto' "
+                "for dynamic runtime resolution, or 'inherit' to use CPU_THREADS."
+            ),
+            value_type=(int, str),
+            parser=parse_thread_count_or_inherit,
+            env_default="MLX_SPARSE_SPGEMM_THREADS",
+            role="runtime",
+            mutability=ConfigMutability.RUNTIME,
+        )
+        self.define_bool(
+            "SOLVER_PARALLEL",
+            default=False,
+            doc=(
+                "Enable package-level CPU parallel execution for solver routines "
+                "when a parallel implementation is available."
+            ),
+            env_default="MLX_SPARSE_SOLVER_PARALLEL",
+            role="runtime",
+            mutability=ConfigMutability.RUNTIME,
+        )
+        self.define_option(
+            "SOLVER_THREADS",
+            default="inherit",
+            doc=(
+                "CPU worker setting for solver routines. Use a positive integer "
+                "for an explicit family-specific count, 'auto' for dynamic "
+                "runtime resolution, or 'inherit' to use CPU_THREADS."
+            ),
+            value_type=(int, str),
+            parser=parse_thread_count_or_inherit,
+            env_default="MLX_SPARSE_SOLVER_THREADS",
+            role="runtime",
+            mutability=ConfigMutability.RUNTIME,
+        )
         self.define_bool(
             "EXPERIMENTAL_METAL_SPGEMM",
             default=False,
@@ -655,5 +758,7 @@ __all__ = [
     "config_context",
     "get_config",
     "parse_bool",
+    "parse_thread_count",
+    "parse_thread_count_or_inherit",
     "set_config",
 ]

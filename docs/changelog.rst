@@ -9,6 +9,19 @@ mlx-sparse v0.0.4b1 (Unreleased)
     Unlike the previous release which targetted Accelerate integration, this release targets
     native CPU performance when Metal and Accelerate are unavailable, disabled, or intentionally avoided.
 
+New Features
+~~~~~~~~~~~~~~~~~~~~~
+
+* Added enum-backed :mod:`mlx_sparse.runtime` controls for package-wide CPU
+  worker settings, per-family SpGEMM/solver worker overrides, and separate
+  SpGEMM/solver parallel gates, including direct attribute reads/writes such as
+  ``ms.runtime.N_THREADS = 8``, temporary context-manager overrides, and
+  structured ``runtime.info()`` diagnostics for benchmark reports.
+
+* Added documented runtime configuration variables for ``CPU_THREADS``,
+  ``SPGEMM_PARALLEL``, ``SPGEMM_THREADS``, ``SOLVER_PARALLEL``, and
+  ``SOLVER_THREADS`` alongside the existing experimental Metal SpGEMM flag.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -36,9 +49,7 @@ Benchmarks
   dense materialization limits for ``fromdense`` cases, and explicit-density
   compatibility flags for ad-hoc runs.
 
-* Recorded the first v0.0.4b1 native CPU current-performance report under
-  ``benchmarks/reports/v0.0.4b1/current`` to guide subsequent optimization
-  work.
+* ~~Recorded the first v0.0.4b1 native CPU current-performance report under ``benchmarks/reports/v0.0.4b1/current`` to guide subsequent optimization work.~~
 
 * Added SciPy reference timings to every benchmark entrypoint, with
   speedup-versus-SciPy fields in machine-readable reports and text summaries.
@@ -46,12 +57,32 @@ Benchmarks
   instead of using a misleading substitute, while LU records compare against
   SciPy SuperLU.
 
-* Refreshed the v0.0.4b1 current-performance reports with SciPy as the primary
-  CPU comparison target for sparse operations, direct solvers, fixed-shape CSR
-  products, reductions, linalg solvers, spectral routines, and README CG.
+* ~~Refreshed the v0.0.4b1 current-performance reports with SciPy as the primary CPU comparison target for sparse operations, direct solvers, fixed-shape CSR products, reductions, linalg solvers, spectral routines, and README CG.~~
 
-* Added structured before/after report support with loose local-regression
-  comparison thresholds for optimized native CPU families.
+* ~~Added structured before/after report support with loose local-regression comparison thresholds for optimized native CPU families.~~
+
+Improvements
+~~~~~~~~~~~~
+
+* Added fixed-worker native CPU parallel SpGEMM implementations for same-format
+  CSR, COO, and CSC sparse-sparse products. The host paths split independent
+  output rows or columns across the configured ``SPGEMM_THREADS`` workers,
+  reuse private per-worker accumulator workspaces, stitch results
+  deterministically, and preserve canonical ordering plus exact
+  zero-cancellation semantics. Setting ``SPGEMM_THREADS=1`` or disabling
+  ``SPGEMM_PARALLEL`` keeps the serial Gustavson/SPA path.
+
+* Improved serial host CSR/COO/CSC SpGEMM assembly by writing only final
+  nonzero entries after each row or column accumulation, avoiding the previous
+  candidate-value materialization and separate prune pass on the native CPU
+  host path while preserving canonical ordering and exact zero-cancellation
+  semantics.
+
+* Improved the serial host CSR/COO/CSC SpGEMM hot path by removing the default
+  symbolic upper-bound pass, initializing newly touched accumulator slots
+  directly with the first product, using insertion sort for tiny touched lists,
+  and adaptively scanning dense markers for disordered high-output rows to
+  reduce memory traffic and canonical-output sorting overhead.
 
 
 
