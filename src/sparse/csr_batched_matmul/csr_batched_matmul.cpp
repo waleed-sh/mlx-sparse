@@ -17,9 +17,12 @@
 #include "sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.h"
 #include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
 #include <algorithm>
+#include <array>
 #include <stdexcept>
 #include <vector>
 
+#include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -78,6 +81,114 @@ private:
   int rhs_cols_;
 };
 
+template <typename T, typename I, int RHSCols>
+void csr_batched_matmul_small_rhs_cpu_impl(const T *data_ptr,
+                                           const I *indices_ptr,
+                                           const I *indptr_ptr,
+                                           const T *rhs_ptr, T *out_ptr,
+                                           int n_rows, int n_cols,
+                                           int item_begin, int item_end) {
+  using AccT = typename Accumulator<T>::Type;
+
+  for (int item = item_begin; item < item_end; ++item) {
+    const int batch = item / n_rows;
+    const int row = item - batch * n_rows;
+    const auto rhs_batch =
+        static_cast<size_t>(batch) * static_cast<size_t>(n_cols) * RHSCols;
+    const auto out_batch =
+        static_cast<size_t>(batch) * static_cast<size_t>(n_rows) * RHSCols;
+    std::array<AccT, RHSCols> acc{};
+    for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+      const auto rhs_offset =
+          rhs_batch + static_cast<size_t>(indices_ptr[p]) * RHSCols;
+      const auto value = data_ptr[p];
+      for (int k = 0; k < RHSCols; ++k) {
+        acc[static_cast<size_t>(k)] +=
+            multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
+      }
+    }
+    const auto out_offset = out_batch + static_cast<size_t>(row) * RHSCols;
+    for (int k = 0; k < RHSCols; ++k) {
+      out_ptr[out_offset + k] =
+          Accumulator<T>::cast(acc[static_cast<size_t>(k)]);
+    }
+  }
+}
+
+template <typename T, typename I>
+void csr_batched_matmul_generic_cpu_impl(const T *data_ptr,
+                                         const I *indices_ptr,
+                                         const I *indptr_ptr, const T *rhs_ptr,
+                                         T *out_ptr, int n_rows, int n_cols,
+                                         int item_begin, int item_end,
+                                         int rhs_cols) {
+  using AccT = typename Accumulator<T>::Type;
+  std::vector<AccT> row_acc(static_cast<size_t>(rhs_cols));
+
+  for (int item = item_begin; item < item_end; ++item) {
+    const int batch = item / n_rows;
+    const int row = item - batch * n_rows;
+    const auto rhs_batch =
+        static_cast<size_t>(batch) * static_cast<size_t>(n_cols) * rhs_cols;
+    const auto out_batch =
+        static_cast<size_t>(batch) * static_cast<size_t>(n_rows) * rhs_cols;
+    std::fill(row_acc.begin(), row_acc.end(), Accumulator<T>::zero());
+    for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+      const auto col = static_cast<size_t>(indices_ptr[p]);
+      const auto rhs_offset = rhs_batch + col * rhs_cols;
+      const auto value = data_ptr[p];
+      for (int k = 0; k < rhs_cols; ++k) {
+        row_acc[static_cast<size_t>(k)] +=
+            multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
+      }
+    }
+    const auto out_offset = out_batch + static_cast<size_t>(row) * rhs_cols;
+    for (int k = 0; k < rhs_cols; ++k) {
+      out_ptr[out_offset + k] =
+          Accumulator<T>::cast(row_acc[static_cast<size_t>(k)]);
+    }
+  }
+}
+
+template <typename T, typename I>
+void csr_batched_matmul_rows_cpu_impl(const T *data_ptr, const I *indices_ptr,
+                                      const I *indptr_ptr, const T *rhs_ptr,
+                                      T *out_ptr, int n_rows, int n_cols,
+                                      int item_begin, int item_end,
+                                      int rhs_cols) {
+  switch (rhs_cols) {
+  case 1:
+    csr_batched_matmul_small_rhs_cpu_impl<T, I, 1>(
+        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
+        item_begin, item_end);
+    return;
+  case 2:
+    csr_batched_matmul_small_rhs_cpu_impl<T, I, 2>(
+        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
+        item_begin, item_end);
+    return;
+  case 4:
+    csr_batched_matmul_small_rhs_cpu_impl<T, I, 4>(
+        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
+        item_begin, item_end);
+    return;
+  case 8:
+    csr_batched_matmul_small_rhs_cpu_impl<T, I, 8>(
+        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
+        item_begin, item_end);
+    return;
+  case 16:
+    csr_batched_matmul_small_rhs_cpu_impl<T, I, 16>(
+        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
+        item_begin, item_end);
+    return;
+  default:
+    csr_batched_matmul_generic_cpu_impl<T, I>(data_ptr, indices_ptr, indptr_ptr,
+                                              rhs_ptr, out_ptr, n_rows, n_cols,
+                                              item_begin, item_end, rhs_cols);
+  }
+}
+
 template <typename T, typename I>
 void csr_batched_matmul_cpu_impl(const mx::array &data,
                                  const mx::array &indices,
@@ -86,6 +197,7 @@ void csr_batched_matmul_cpu_impl(const mx::array &data,
                                  int batch_size, int rhs_cols,
                                  mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
+  const int requested_workers = configured_cpu_worker_count();
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
   encoder.set_input_array(data);
@@ -99,36 +211,39 @@ void csr_batched_matmul_cpu_impl(const mx::array &data,
                     indptr = mx::array::unsafe_weak_copy(indptr),
                     rhs = mx::array::unsafe_weak_copy(rhs),
                     out = mx::array::unsafe_weak_copy(out), n_rows, n_cols,
-                    batch_size, rhs_cols]() mutable {
+                    batch_size, rhs_cols, requested_workers]() mutable {
     const auto *data_ptr = data.data<T>();
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
     const auto *rhs_ptr = rhs.data<T>();
     auto *out_ptr = out.data<T>();
-    std::vector<typename Accumulator<T>::Type> row_acc(
-        static_cast<size_t>(rhs_cols));
 
-    for (int batch = 0; batch < batch_size; ++batch) {
-      const auto rhs_batch = static_cast<size_t>(batch) * n_cols * rhs_cols;
-      const auto out_batch = static_cast<size_t>(batch) * n_rows * rhs_cols;
-      for (int row = 0; row < n_rows; ++row) {
-        std::fill(row_acc.begin(), row_acc.end(), Accumulator<T>::zero());
-        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-          const auto col = static_cast<size_t>(indices_ptr[p]);
-          const auto rhs_offset = rhs_batch + col * rhs_cols;
-          const auto value = data_ptr[p];
-          for (int k = 0; k < rhs_cols; ++k) {
-            row_acc[static_cast<size_t>(k)] +=
-                multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
-          }
-        }
-        const auto out_offset = out_batch + static_cast<size_t>(row) * rhs_cols;
-        for (int k = 0; k < rhs_cols; ++k) {
-          out_ptr[out_offset + k] =
-              Accumulator<T>::cast(row_acc[static_cast<size_t>(k)]);
-        }
-      }
+    auto compute_items = [&](CpuRange range) {
+      csr_batched_matmul_rows_cpu_impl<T, I>(data_ptr, indices_ptr, indptr_ptr,
+                                             rhs_ptr, out_ptr, n_rows, n_cols,
+                                             range.begin, range.end, rhs_cols);
+    };
+
+    const int total_items = n_rows * batch_size;
+    if (requested_workers <= 1 || total_items <= 0) {
+      compute_items({0, total_items});
+      return;
     }
+
+    std::vector<int64_t> item_work(static_cast<size_t>(total_items));
+    for (int item = 0; item < total_items; ++item) {
+      const int row = item % n_rows;
+      item_work[static_cast<size_t>(item)] =
+          static_cast<int64_t>(indptr_ptr[row + 1] - indptr_ptr[row]) *
+          std::max<int64_t>(rhs_cols, 1);
+    }
+    const auto ranges =
+        cpu_ranges_for_output_work(item_work, requested_workers);
+    if (ranges.size() <= 1) {
+      compute_items({0, total_items});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_items);
   });
 }
 

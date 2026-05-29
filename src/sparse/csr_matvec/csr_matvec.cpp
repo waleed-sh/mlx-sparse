@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -75,10 +76,48 @@ private:
 };
 
 template <typename T, typename I>
+typename Accumulator<T>::Type
+csr_matvec_row_accum(const T *data_ptr, const I *indices_ptr, I begin, I end,
+                     const T *x_ptr) {
+  using AccT = typename Accumulator<T>::Type;
+  switch (end - begin) {
+  case 0:
+    return Accumulator<T>::zero();
+  case 1:
+    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]);
+  case 2:
+    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]) +
+           multiply_accumulate<T>(data_ptr[begin + 1],
+                                  x_ptr[indices_ptr[begin + 1]]);
+  case 3:
+    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]) +
+           multiply_accumulate<T>(data_ptr[begin + 1],
+                                  x_ptr[indices_ptr[begin + 1]]) +
+           multiply_accumulate<T>(data_ptr[begin + 2],
+                                  x_ptr[indices_ptr[begin + 2]]);
+  case 4:
+    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]) +
+           multiply_accumulate<T>(data_ptr[begin + 1],
+                                  x_ptr[indices_ptr[begin + 1]]) +
+           multiply_accumulate<T>(data_ptr[begin + 2],
+                                  x_ptr[indices_ptr[begin + 2]]) +
+           multiply_accumulate<T>(data_ptr[begin + 3],
+                                  x_ptr[indices_ptr[begin + 3]]);
+  default:
+    AccT acc = Accumulator<T>::zero();
+    for (I p = begin; p < end; ++p) {
+      acc += multiply_accumulate<T>(data_ptr[p], x_ptr[indices_ptr[p]]);
+    }
+    return acc;
+  }
+}
+
+template <typename T, typename I>
 void csr_matvec_cpu_impl(const mx::array &data, const mx::array &indices,
                          const mx::array &indptr, const mx::array &x,
                          mx::array &out, int n_rows, mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
+  const int requested_workers = configured_cpu_worker_count();
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
   encoder.set_input_array(data);
@@ -91,7 +130,8 @@ void csr_matvec_cpu_impl(const mx::array &data, const mx::array &indices,
                     indices = mx::array::unsafe_weak_copy(indices),
                     indptr = mx::array::unsafe_weak_copy(indptr),
                     x = mx::array::unsafe_weak_copy(x),
-                    out = mx::array::unsafe_weak_copy(out), n_rows]() mutable {
+                    out = mx::array::unsafe_weak_copy(out), n_rows,
+                    requested_workers]() mutable {
     using AccT = typename Accumulator<T>::Type;
     const auto *data_ptr = data.data<T>();
     const auto *indices_ptr = indices.data<I>();
@@ -99,13 +139,30 @@ void csr_matvec_cpu_impl(const mx::array &data, const mx::array &indices,
     const auto *x_ptr = x.data<T>();
     auto *out_ptr = out.data<T>();
 
-    for (int row = 0; row < n_rows; ++row) {
-      auto acc = Accumulator<T>::zero();
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-        acc += multiply_accumulate<T>(data_ptr[p], x_ptr[indices_ptr[p]]);
+    auto compute_rows = [&](CpuRange range) {
+      for (int row = range.begin; row < range.end; ++row) {
+        const auto acc = csr_matvec_row_accum<T, I>(
+            data_ptr, indices_ptr, indptr_ptr[row], indptr_ptr[row + 1], x_ptr);
+        out_ptr[row] = Accumulator<T>::cast(static_cast<AccT>(acc));
       }
-      out_ptr[row] = Accumulator<T>::cast(static_cast<AccT>(acc));
+    };
+
+    if (requested_workers <= 1 || n_rows <= 0) {
+      compute_rows({0, n_rows});
+      return;
     }
+
+    std::vector<int64_t> row_work(static_cast<size_t>(n_rows));
+    for (int row = 0; row < n_rows; ++row) {
+      row_work[static_cast<size_t>(row)] =
+          static_cast<int64_t>(indptr_ptr[row + 1] - indptr_ptr[row]);
+    }
+    const auto ranges = cpu_ranges_for_output_work(row_work, requested_workers);
+    if (ranges.size() <= 1) {
+      compute_rows({0, n_rows});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_rows);
   });
 }
 

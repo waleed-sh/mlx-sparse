@@ -20,6 +20,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -83,6 +85,7 @@ void csr_batched_matvec_cpu_impl(const mx::array &data,
                                  mx::array &out, int n_rows, int n_cols,
                                  int batch_size, mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
+  const int requested_workers = configured_cpu_worker_count();
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
   encoder.set_input_array(data);
@@ -96,18 +99,20 @@ void csr_batched_matvec_cpu_impl(const mx::array &data,
                     indptr = mx::array::unsafe_weak_copy(indptr),
                     rhs = mx::array::unsafe_weak_copy(rhs),
                     out = mx::array::unsafe_weak_copy(out), n_rows, n_cols,
-                    batch_size]() mutable {
+                    batch_size, requested_workers]() mutable {
     const auto *data_ptr = data.data<T>();
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
     const auto *rhs_ptr = rhs.data<T>();
     auto *out_ptr = out.data<T>();
 
-    for (int batch = 0; batch < batch_size; ++batch) {
-      const auto rhs_batch = static_cast<size_t>(batch) * n_cols;
-      const auto out_batch = static_cast<size_t>(batch) * n_rows;
-      for (int row = 0; row < n_rows; ++row) {
-        auto acc = Accumulator<T>::zero();
+    auto compute_items = [&](CpuRange range) {
+      for (int item = range.begin; item < range.end; ++item) {
+        const int batch = item / n_rows;
+        const int row = item - batch * n_rows;
+        const auto rhs_batch = static_cast<size_t>(batch) * n_cols;
+        const auto out_batch = static_cast<size_t>(batch) * n_rows;
+        typename Accumulator<T>::Type acc = Accumulator<T>::zero();
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
           acc += multiply_accumulate<T>(
               data_ptr[p],
@@ -115,7 +120,27 @@ void csr_batched_matvec_cpu_impl(const mx::array &data,
         }
         out_ptr[out_batch + row] = Accumulator<T>::cast(acc);
       }
+    };
+
+    const int total_items = n_rows * batch_size;
+    if (requested_workers <= 1 || total_items <= 0) {
+      compute_items({0, total_items});
+      return;
     }
+
+    std::vector<int64_t> item_work(static_cast<size_t>(total_items));
+    for (int item = 0; item < total_items; ++item) {
+      const int row = item % n_rows;
+      item_work[static_cast<size_t>(item)] =
+          static_cast<int64_t>(indptr_ptr[row + 1] - indptr_ptr[row]);
+    }
+    const auto ranges =
+        cpu_ranges_for_output_work(item_work, requested_workers);
+    if (ranges.size() <= 1) {
+      compute_items({0, total_items});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_items);
   });
 }
 

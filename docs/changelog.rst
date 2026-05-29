@@ -8,6 +8,7 @@ mlx-sparse v0.0.4b1 (Unreleased)
 
     Unlike the previous release which targetted Accelerate integration, this release targets
     native CPU performance when Metal and Accelerate are unavailable, disabled, or intentionally avoided.
+    See the roadmap `here <https://github.com/waleed-sh/mlx-sparse/issues/13>`_.
 
 New Features
 ~~~~~~~~~~~~~~~~~~~~~
@@ -91,6 +92,11 @@ Improvements
   and adaptively scanning dense markers for disordered high-output rows to
   reduce memory traffic and canonical-output sorting overhead
   (`PR #15 <https://github.com/waleed-sh/mlx-sparse/pull/15>`_).
+
+* Improved native CPU CSR sparse-dense products. ``csr_matvec`` now has a
+  short-row serial path, ``csr_matmul`` and ``csr_batched_matmul`` specialize
+  common RHS widths with stack accumulators, and row-owned CSR matvec/matmul
+  batch-row work can use the fixed package-wide ``CPU_THREADS`` worker count.
 
 
 

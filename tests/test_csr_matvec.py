@@ -97,6 +97,70 @@ def test_csr_batched_matvec_matches_dense_and_scipy(mx, scipy_sparse):
     np.testing.assert_allclose(to_numpy(out), scipy_expected, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.cpu_only
+def test_csr_matvec_fixed_parallel_matches_serial_and_scipy(mx, scipy_sparse):
+    data_np = np.array(
+        [2.0, -1.0, 0.5, 3.0, -4.0, 1.25, 2.5, -0.75, 4.0],
+        dtype=np.float32,
+    )
+    indices_np = np.array([0, 3, 1, 2, 5, 0, 4, 1, 5], dtype=np.int64)
+    indptr_np = np.array([0, 2, 2, 5, 6, 9], dtype=np.int64)
+    x_np = np.array([1.0, -2.0, 0.5, 3.0, -1.5, 2.5], dtype=np.float32)
+    scipy_csr = scipy_sparse.csr_matrix(
+        (data_np, indices_np.astype(np.int32), indptr_np.astype(np.int32)),
+        shape=(5, 6),
+    )
+    csr = ms.csr_array(
+        (
+            mx.array(data_np),
+            mx.array(indices_np),
+            mx.array(indptr_np),
+        ),
+        shape=scipy_csr.shape,
+        sorted_indices=False,
+        canonical=True,
+    )
+    x = mx.array(x_np)
+
+    with ms.runtime.context(n_threads=1):
+        serial_np = to_numpy(csr @ x)
+    with ms.runtime.context(n_threads=3):
+        parallel_np = to_numpy(csr @ x)
+
+    expected = scipy_csr @ x_np
+    np.testing.assert_allclose(serial_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, serial_np, rtol=0, atol=0)
+
+
+@pytest.mark.cpu_only
+def test_csr_batched_matvec_fixed_parallel_matches_serial(mx, scipy_sparse):
+    rng = np.random.default_rng(459)
+    scipy_csr = scipy_sparse.random(
+        24,
+        32,
+        density=0.09,
+        format="csr",
+        dtype=np.float32,
+        random_state=rng,
+    )
+    scipy_csr.sum_duplicates()
+    scipy_csr.sort_indices()
+    rhs_np = rng.normal(size=(4, 32)).astype(np.float32)
+    csr = ms.from_scipy(scipy_csr)
+    rhs = mx.array(rhs_np)
+
+    with ms.runtime.context(n_threads=1):
+        serial_np = to_numpy(ms.csr_batched_matvec(csr, rhs))
+    with ms.runtime.context(n_threads=3):
+        parallel_np = to_numpy(ms.csr_batched_matvec(csr, rhs))
+
+    expected = rhs_np @ scipy_csr.T
+    np.testing.assert_allclose(serial_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, serial_np, rtol=0, atol=0)
+
+
 def test_native_csr_transpose_matvec_matches_dense_and_scipy(mx, scipy_sparse):
     rng = np.random.default_rng(458)
     scipy_csr = scipy_sparse.random(

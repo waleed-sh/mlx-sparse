@@ -109,7 +109,7 @@ int auto_worker_count() {
   return hardware_worker_count();
 }
 
-int configured_cpu_worker_count() {
+int resolved_cpu_worker_count() {
   const char *raw = std::getenv(kCpuThreadsEnv);
   if (raw == nullptr || *raw == '\0') {
     raw = std::getenv(kCpuThreadsAliasEnv);
@@ -126,6 +126,8 @@ bool spgemm_parallel_enabled() {
   return parse_bool_env(kSpgemmParallelEnv, true);
 }
 
+int configured_cpu_worker_count() { return resolved_cpu_worker_count(); }
+
 int configured_spgemm_worker_count() {
   if (!spgemm_parallel_enabled()) {
     return 1;
@@ -138,7 +140,7 @@ int configured_spgemm_worker_count() {
 
   const auto value = lower_ascii(raw);
   if (value == "inherit") {
-    return configured_cpu_worker_count();
+    return resolved_cpu_worker_count();
   }
   if (value == "auto") {
     return auto_worker_count();
@@ -146,7 +148,7 @@ int configured_spgemm_worker_count() {
   if (const int count = parse_positive_int(raw); count > 0) {
     return count;
   }
-  return configured_cpu_worker_count();
+  return resolved_cpu_worker_count();
 }
 
 std::vector<CpuRange> equal_cpu_ranges(int n_items, int partitions) {

@@ -125,6 +125,126 @@ def test_explicit_csr_batched_matmul_matches_dense_and_scipy(mx, scipy_sparse):
     np.testing.assert_allclose(to_numpy(out), scipy_expected, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("rhs_cols", [1, 2, 4, 8, 16, 32])
+def test_csr_matmul_rhs_widths_match_scipy_and_parallel(mx, scipy_sparse, rhs_cols):
+    rng = np.random.default_rng(792 + rhs_cols)
+    scipy_csr = scipy_sparse.random(
+        28,
+        35,
+        density=0.11,
+        format="csr",
+        dtype=np.float32,
+        random_state=rng,
+    )
+    scipy_csr.sum_duplicates()
+    scipy_csr.sort_indices()
+    rhs_np = rng.normal(size=(35, rhs_cols)).astype(np.float32)
+    csr = ms.from_scipy(scipy_csr)
+    rhs = mx.array(rhs_np)
+
+    with ms.runtime.context(n_threads=1):
+        serial_np = to_numpy(csr @ rhs)
+    with ms.runtime.context(n_threads=3):
+        parallel_np = to_numpy(csr @ rhs)
+
+    expected = scipy_csr @ rhs_np
+    np.testing.assert_allclose(serial_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, serial_np, rtol=0, atol=0)
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize(
+    ("dtype_name", "rtol", "atol"),
+    [
+        ("float16", 5e-3, 5e-3),
+        ("bfloat16", 3e-2, 3e-2),
+        ("complex64", 1e-5, 1e-5),
+    ],
+)
+def test_csr_matmul_parallel_preserves_accumulation_dtypes(
+    mx, scipy_sparse, dtype_name, rtol, atol
+):
+    data_np = np.array([0.5, -2.0, 3.0, 1.25, -0.75, 4.0], dtype=np.float32)
+    indices_np = np.array([0, 3, 1, 4, 2, 3], dtype=np.int32)
+    indptr_np = np.array([0, 2, 4, 6], dtype=np.int32)
+    rhs_np = np.array(
+        [
+            [1.0, -0.5, 2.0, 0.25],
+            [-1.5, 0.75, 1.25, 2.5],
+            [0.5, -2.0, 3.0, -0.75],
+            [2.0, 1.5, -1.0, 0.5],
+            [-0.25, 1.0, 0.75, -1.25],
+        ],
+        dtype=np.float32,
+    )
+    if dtype_name == "complex64":
+        data_np = data_np.astype(np.complex64) + 1j * np.array(
+            [0.25, -0.5, 0.75, 1.0, -1.25, 0.5], dtype=np.float32
+        )
+        rhs_np = rhs_np.astype(np.complex64) + 1j * np.flip(rhs_np, axis=1)
+
+    dtype = getattr(mx, dtype_name)
+    csr = ms.csr_array(
+        (
+            mx.array(data_np).astype(dtype),
+            mx.array(indices_np),
+            mx.array(indptr_np),
+        ),
+        shape=(3, 5),
+        sorted_indices=True,
+        canonical=True,
+    )
+    rhs = mx.array(rhs_np).astype(dtype)
+
+    with ms.runtime.context(n_threads=1):
+        serial_np = to_numpy(csr @ rhs)
+    with ms.runtime.context(n_threads=2):
+        parallel_np = to_numpy(csr @ rhs)
+
+    scipy_expected = (
+        scipy_sparse.csr_matrix((data_np, indices_np, indptr_np), shape=csr.shape)
+        @ rhs_np
+    )
+    if dtype_name != "complex64":
+        serial_np = serial_np.astype(np.float32)
+        parallel_np = parallel_np.astype(np.float32)
+        scipy_expected = np.asarray(scipy_expected, dtype=np.float32)
+
+    np.testing.assert_allclose(serial_np, scipy_expected, rtol=rtol, atol=atol)
+    np.testing.assert_allclose(parallel_np, scipy_expected, rtol=rtol, atol=atol)
+    np.testing.assert_allclose(parallel_np, serial_np, rtol=0, atol=0)
+
+
+@pytest.mark.cpu_only
+def test_csr_batched_matmul_fixed_parallel_matches_serial(mx, scipy_sparse):
+    rng = np.random.default_rng(793)
+    scipy_csr = scipy_sparse.random(
+        20,
+        26,
+        density=0.13,
+        format="csr",
+        dtype=np.float32,
+        random_state=rng,
+    )
+    scipy_csr.sum_duplicates()
+    scipy_csr.sort_indices()
+    rhs_np = rng.normal(size=(3, 26, 8)).astype(np.float32)
+    csr = ms.from_scipy(scipy_csr)
+    rhs = mx.array(rhs_np)
+
+    with ms.runtime.context(n_threads=1):
+        serial_np = to_numpy(ms.csr_batched_matmul(csr, rhs))
+    with ms.runtime.context(n_threads=3):
+        parallel_np = to_numpy(ms.csr_batched_matmul(csr, rhs))
+
+    expected = np.stack([scipy_csr @ rhs_np[i] for i in range(rhs_np.shape[0])])
+    np.testing.assert_allclose(serial_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(parallel_np, serial_np, rtol=0, atol=0)
+
+
 def test_native_csr_transpose_matmul_matches_dense_and_scipy(mx, scipy_sparse):
     rng = np.random.default_rng(791)
     scipy_csr = scipy_sparse.random(

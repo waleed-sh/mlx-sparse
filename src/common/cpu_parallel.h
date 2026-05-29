@@ -31,6 +31,7 @@ struct CpuRange {
 };
 
 bool spgemm_parallel_enabled();
+int configured_cpu_worker_count();
 int configured_spgemm_worker_count();
 std::vector<CpuRange> equal_cpu_ranges(int n_items, int partitions);
 std::vector<CpuRange> weighted_cpu_ranges(const std::vector<int64_t> &row_work,
