@@ -16,50 +16,56 @@ New Features
   worker settings, per-family SpGEMM/solver worker overrides, and separate
   SpGEMM/solver parallel gates, including direct attribute reads/writes such as
   ``ms.runtime.N_THREADS = 8``, temporary context-manager overrides, and
-  structured ``runtime.info()`` diagnostics for benchmark reports.
+  structured ``runtime.info()`` diagnostics for benchmark reports
+  (`PR #15 <https://github.com/waleed-sh/mlx-sparse/pull/15>`_).
 
 * Added documented runtime configuration variables for ``CPU_THREADS``,
   ``SPGEMM_PARALLEL``, ``SPGEMM_THREADS``, ``SOLVER_PARALLEL``, and
-  ``SOLVER_THREADS`` alongside the existing experimental Metal SpGEMM flag.
+  ``SOLVER_THREADS`` alongside the existing experimental Metal SpGEMM flag
+  (`PR #15 <https://github.com/waleed-sh/mlx-sparse/pull/15>`_).
 
 Benchmarks
 ~~~~~~~~~~
 
 * Added shared benchmark helpers that evaluate dense MLX results and force all
-  structural buffers for sparse containers before timing.
+  structural buffers for sparse containers before timing
+  (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
 * Added a native CPU direct-solver benchmark that records runtime capability,
   device, hardware, worker-count, matrix-structure, dtype, warmup, and
-  iteration metadata for reproducible non-Accelerate baselines.
+  iteration metadata for reproducible non-Accelerate baselines
+  (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
 * Split native LU and Cholesky direct-solver timings into ``factor_only``,
-  ``solve_only``, and ``factor_plus_solve`` phases.
+  ``solve_only``, and ``factor_plus_solve`` phases
+  (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
 * Added native CPU sparse-operation benchmark suites for ``fromdense``,
   compressed ``sort_indices`` and ``sum_duplicates``, COO-to-CSR/CSC
   conversion, CSR/COO/CSC sparse-sparse products, CSR/CSC transpose products,
-  and COO/CSC dense products.
+  and COO/CSC dense products
+  (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
 * Added benchmark matrix families for uniformly short rows, highly imbalanced
   rows, banded matrices, diagonal-dominant matrices, duplicate-heavy COO and
-  compressed inputs, exact-cancellation SpGEMM, and output-density sweeps.
+  compressed inputs, exact-cancellation SpGEMM, and output-density sweeps
+  (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
 * Expanded native CPU benchmarks to sweep matrix dimensions, target nonzeros
   per row, and short-row occupancies, with a hard 32k maximum dimension guard,
   dense materialization limits for ``fromdense`` cases, and explicit-density
-  compatibility flags for ad-hoc runs.
-
-* ~~Recorded the first v0.0.4b1 native CPU current-performance report under ``benchmarks/reports/v0.0.4b1/current`` to guide subsequent optimization work.~~
+  compatibility flags for ad-hoc runs
+  (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
 * Added SciPy reference timings to every benchmark entrypoint, with
   speedup-versus-SciPy fields in machine-readable reports and text summaries.
   Native Cholesky records explicitly mark SciPy sparse Cholesky as unavailable
   instead of using a misleading substitute, while LU records compare against
-  SciPy SuperLU.
+  SciPy SuperLU (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
-* ~~Refreshed the v0.0.4b1 current-performance reports with SciPy as the primary CPU comparison target for sparse operations, direct solvers, fixed-shape CSR products, reductions, linalg solvers, spectral routines, and README CG.~~
-
-* ~~Added structured before/after report support with loose local-regression comparison thresholds for optimized native CPU families.~~
+* Added structured before/after report support with loose local-regression
+  comparison thresholds for optimized native CPU families
+  (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
 Improvements
 ~~~~~~~~~~~~
@@ -70,19 +76,21 @@ Improvements
   reuse private per-worker accumulator workspaces, stitch results
   deterministically, and preserve canonical ordering plus exact
   zero-cancellation semantics. Setting ``SPGEMM_THREADS=1`` or disabling
-  ``SPGEMM_PARALLEL`` keeps the serial Gustavson/SPA path.
+  ``SPGEMM_PARALLEL`` keeps the serial Gustavson/SPA path
+  (`PR #15 <https://github.com/waleed-sh/mlx-sparse/pull/15>`_).
 
 * Improved serial host CSR/COO/CSC SpGEMM assembly by writing only final
   nonzero entries after each row or column accumulation, avoiding the previous
   candidate-value materialization and separate prune pass on the native CPU
   host path while preserving canonical ordering and exact zero-cancellation
-  semantics.
+  semantics (`PR #15 <https://github.com/waleed-sh/mlx-sparse/pull/15>`_).
 
 * Improved the serial host CSR/COO/CSC SpGEMM hot path by removing the default
   symbolic upper-bound pass, initializing newly touched accumulator slots
   directly with the first product, using insertion sort for tiny touched lists,
   and adaptively scanning dense markers for disordered high-output rows to
-  reduce memory traffic and canonical-output sorting overhead.
+  reduce memory traffic and canonical-output sorting overhead
+  (`PR #15 <https://github.com/waleed-sh/mlx-sparse/pull/15>`_).
 
 
 
