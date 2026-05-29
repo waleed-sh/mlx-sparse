@@ -109,6 +109,7 @@ from mlx_sparse._ops import (
     todense,
 )
 from mlx_sparse._typing import is_available
+from mlx_sparse import runtime
 
 try:
     from mlx_sparse._version import __version__
@@ -200,6 +201,7 @@ __all__ = [
     "is_available",
     "issparse",
     "linalg",
+    "runtime",
     "has_capability",
     "get_config",
     "set_config",
