@@ -414,24 +414,76 @@ std::pair<mx::array, int> build_indptr_from_counts(const mx::array &counts,
   return build_indptr_from_counts<int64_t>(counts, n_rows, index_dtype);
 }
 
-template <typename I>
-int prefix_counts(const std::vector<I> &counts, std::vector<I> &indptr) {
-  indptr.resize(counts.size() + 1);
-  indptr[0] = I{0};
-  int64_t total = 0;
-  for (size_t row = 0; row < counts.size(); ++row) {
-    total += static_cast<int64_t>(counts[row]);
-    if (total > std::numeric_limits<int>::max()) {
-      throw std::overflow_error(
-          "csr_matmat output nnz exceeds MLX shape limits.");
-    }
-    if (total > static_cast<int64_t>(std::numeric_limits<I>::max())) {
-      throw std::overflow_error(
-          "csr_matmat output nnz exceeds index dtype capacity.");
-    }
-    indptr[row + 1] = static_cast<I>(total);
+void sort_touched_indices(std::vector<int> &indices) {
+  constexpr size_t kInsertionSortLimit = 32;
+  if (indices.size() <= 1) {
+    return;
   }
-  return static_cast<int>(total);
+  if (indices.size() <= kInsertionSortLimit) {
+    for (size_t i = 1; i < indices.size(); ++i) {
+      const int value = indices[i];
+      size_t j = i;
+      while (j > 0 && value < indices[j - 1]) {
+        indices[j] = indices[j - 1];
+        --j;
+      }
+      indices[j] = value;
+    }
+    return;
+  }
+  std::sort(indices.begin(), indices.end());
+}
+
+bool use_dense_ordered_scan(size_t touched_count, int dimension,
+                            int disorder_count) {
+  constexpr size_t kMinDenseScanTouched = 64;
+  constexpr size_t kDenseScanFactor = 32;
+  constexpr int kMinDenseScanDisorder = 8;
+  return touched_count >= kMinDenseScanTouched && dimension > 0 &&
+         disorder_count >= kMinDenseScanDisorder &&
+         static_cast<size_t>(dimension) <= touched_count * kDenseScanFactor;
+}
+
+size_t spgemm_reserve_hint(int outer_dim, int inner_dim, int result_dim,
+                           size_t lhs_nnz, size_t rhs_nnz) {
+  if (outer_dim <= 0 || inner_dim <= 0 || result_dim <= 0 || lhs_nnz == 0 ||
+      rhs_nnz == 0) {
+    return 0;
+  }
+
+  constexpr long double kPathologicalWorkFactor = 32.0L;
+  constexpr long double kMaxReserveHint = 64.0L * 1024.0L * 1024.0L;
+
+  const long double linear_input =
+      static_cast<long double>(lhs_nnz) + static_cast<long double>(rhs_nnz);
+  const long double average_rhs_row_nnz =
+      static_cast<long double>(rhs_nnz) / static_cast<long double>(inner_dim);
+  const long double estimated_products =
+      static_cast<long double>(lhs_nnz) * average_rhs_row_nnz;
+  const long double dense_bound = static_cast<long double>(outer_dim) *
+                                  static_cast<long double>(result_dim);
+
+  long double estimate = std::min(estimated_products, dense_bound);
+  if (estimate > kPathologicalWorkFactor * linear_input) {
+    estimate = linear_input;
+  }
+  estimate = std::min(estimate, kMaxReserveHint);
+  if (estimate <= 0.0L) {
+    return 0;
+  }
+  return static_cast<size_t>(estimate);
+}
+
+template <typename OutI>
+void check_output_nnz(size_t nnz, const char *op_name) {
+  if (nnz > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    throw std::overflow_error(std::string(op_name) +
+                              " output nnz exceeds MLX shape limits.");
+  }
+  if (nnz > static_cast<size_t>(std::numeric_limits<OutI>::max())) {
+    throw std::overflow_error(std::string(op_name) +
+                              " output nnz exceeds index dtype capacity.");
+  }
 }
 
 template <typename T, typename LhsI, typename RhsI, typename OutI>
@@ -456,10 +508,21 @@ std::tuple<mx::array, mx::array, mx::array> csr_matmat_host_impl(
   const auto *rhs_indptr_ptr = rhs_indptr.data<RhsI>();
 
   std::vector<int> marker(static_cast<size_t>(rhs_n_cols), -1);
-  std::vector<OutI> candidate_counts(static_cast<size_t>(lhs_n_rows), OutI{0});
+  std::vector<AccT> accum(static_cast<size_t>(rhs_n_cols),
+                          Accumulator<T>::zero());
+  std::vector<int> columns;
+  std::vector<OutI> out_indptr(static_cast<size_t>(lhs_n_rows) + 1, OutI{0});
+  std::vector<T> out_data;
+  std::vector<OutI> out_indices;
+  const size_t reserve_hint = spgemm_reserve_hint(
+      lhs_n_rows, rhs_n_rows, rhs_n_cols, lhs_data.size(), rhs_data.size());
+  out_data.reserve(reserve_hint);
+  out_indices.reserve(reserve_hint);
 
   for (int row = 0; row < lhs_n_rows; ++row) {
-    int row_count = 0;
+    columns.clear();
+    bool columns_sorted = true;
+    int disorder_count = 0;
     for (LhsI lhs_pos = lhs_indptr_ptr[row]; lhs_pos < lhs_indptr_ptr[row + 1];
          ++lhs_pos) {
       const int rhs_row = static_cast<int>(lhs_indices_ptr[lhs_pos]);
@@ -467,6 +530,7 @@ std::tuple<mx::array, mx::array, mx::array> csr_matmat_host_impl(
         throw std::invalid_argument(
             "csr_matmat lhs indices contain an out-of-bounds column.");
       }
+      const auto lhs_value = lhs_data_ptr[lhs_pos];
       for (RhsI rhs_pos = rhs_indptr_ptr[rhs_row];
            rhs_pos < rhs_indptr_ptr[rhs_row + 1]; ++rhs_pos) {
         const int col = static_cast<int>(rhs_indices_ptr[rhs_pos]);
@@ -475,84 +539,54 @@ std::tuple<mx::array, mx::array, mx::array> csr_matmat_host_impl(
               "csr_matmat rhs indices contain an out-of-bounds column.");
         }
         const auto col_index = static_cast<size_t>(col);
+        const AccT product =
+            multiply_accumulate<T>(lhs_value, rhs_data_ptr[rhs_pos]);
         if (marker[col_index] != row) {
           marker[col_index] = row;
-          row_count += 1;
+          accum[col_index] = product;
+          if (!columns.empty() && col < columns.back()) {
+            columns_sorted = false;
+            disorder_count += 1;
+          }
+          columns.push_back(col);
+        } else {
+          accum[col_index] += product;
         }
       }
     }
-    candidate_counts[static_cast<size_t>(row)] = static_cast<OutI>(row_count);
-  }
 
-  std::vector<OutI> candidate_indptr;
-  const int candidate_nnz = prefix_counts(candidate_counts, candidate_indptr);
-  std::vector<T> candidate_data(static_cast<size_t>(candidate_nnz));
-  std::vector<OutI> candidate_indices(static_cast<size_t>(candidate_nnz));
-
-  std::fill(marker.begin(), marker.end(), -1);
-  std::vector<AccT> accum(static_cast<size_t>(rhs_n_cols),
-                          Accumulator<T>::zero());
-  std::vector<int> columns;
-  for (int row = 0; row < lhs_n_rows; ++row) {
-    columns.clear();
-    for (LhsI lhs_pos = lhs_indptr_ptr[row]; lhs_pos < lhs_indptr_ptr[row + 1];
-         ++lhs_pos) {
-      const int rhs_row = static_cast<int>(lhs_indices_ptr[lhs_pos]);
-      const auto lhs_value = lhs_data_ptr[lhs_pos];
-      for (RhsI rhs_pos = rhs_indptr_ptr[rhs_row];
-           rhs_pos < rhs_indptr_ptr[rhs_row + 1]; ++rhs_pos) {
-        const int col = static_cast<int>(rhs_indices_ptr[rhs_pos]);
+    if (!columns_sorted &&
+        use_dense_ordered_scan(columns.size(), rhs_n_cols, disorder_count)) {
+      for (int col = 0; col < rhs_n_cols; ++col) {
         const auto col_index = static_cast<size_t>(col);
         if (marker[col_index] != row) {
-          marker[col_index] = row;
-          accum[col_index] = Accumulator<T>::zero();
-          columns.push_back(col);
+          continue;
         }
-        accum[col_index] +=
-            multiply_accumulate<T>(lhs_value, rhs_data_ptr[rhs_pos]);
+        const T value = Accumulator<T>::cast(accum[col_index]);
+        if (value != T{}) {
+          out_indices.push_back(static_cast<OutI>(col));
+          out_data.push_back(value);
+        }
+      }
+    } else {
+      if (!columns_sorted) {
+        sort_touched_indices(columns);
+      }
+      for (int col : columns) {
+        const auto col_index = static_cast<size_t>(col);
+        const T value = Accumulator<T>::cast(accum[col_index]);
+        if (value != T{}) {
+          out_indices.push_back(static_cast<OutI>(col));
+          out_data.push_back(value);
+        }
       }
     }
-
-    std::sort(columns.begin(), columns.end());
-    OutI write = candidate_indptr[static_cast<size_t>(row)];
-    for (int col : columns) {
-      const auto col_index = static_cast<size_t>(col);
-      candidate_indices[static_cast<size_t>(write)] = static_cast<OutI>(col);
-      candidate_data[static_cast<size_t>(write)] =
-          Accumulator<T>::cast(accum[col_index]);
-      ++write;
-    }
+    check_output_nnz<OutI>(out_data.size(), "csr_matmat");
+    out_indptr[static_cast<size_t>(row) + 1] =
+        static_cast<OutI>(out_data.size());
   }
 
-  std::vector<OutI> out_counts(static_cast<size_t>(lhs_n_rows), OutI{0});
-  for (int row = 0; row < lhs_n_rows; ++row) {
-    OutI count = OutI{0};
-    for (OutI p = candidate_indptr[static_cast<size_t>(row)];
-         p < candidate_indptr[static_cast<size_t>(row) + 1]; ++p) {
-      if (candidate_data[static_cast<size_t>(p)] != T{}) {
-        count += OutI{1};
-      }
-    }
-    out_counts[static_cast<size_t>(row)] = count;
-  }
-
-  std::vector<OutI> out_indptr;
-  const int out_nnz = prefix_counts(out_counts, out_indptr);
-  std::vector<T> out_data;
-  std::vector<OutI> out_indices;
-  out_data.reserve(static_cast<size_t>(out_nnz));
-  out_indices.reserve(static_cast<size_t>(out_nnz));
-  for (int row = 0; row < lhs_n_rows; ++row) {
-    for (OutI p = candidate_indptr[static_cast<size_t>(row)];
-         p < candidate_indptr[static_cast<size_t>(row) + 1]; ++p) {
-      const auto value = candidate_data[static_cast<size_t>(p)];
-      if (value != T{}) {
-        out_data.push_back(value);
-        out_indices.push_back(candidate_indices[static_cast<size_t>(p)]);
-      }
-    }
-  }
-
+  const int out_nnz = static_cast<int>(out_data.size());
   return {mx::array(out_data.begin(), mx::Shape{out_nnz}, lhs_data.dtype()),
           mx::array(out_indices.begin(), mx::Shape{out_nnz}, out_index_dtype),
           mx::array(out_indptr.begin(),

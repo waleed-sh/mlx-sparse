@@ -53,6 +53,21 @@ Benchmarks
 * Added structured before/after report support with loose local-regression
   comparison thresholds for optimized native CPU families.
 
+Improvements
+~~~~~~~~~~~~
+
+* Improved serial host CSR/COO/CSC SpGEMM assembly by writing only final
+  nonzero entries after each row or column accumulation, avoiding the previous
+  candidate-value materialization and separate prune pass on the native CPU
+  host path while preserving canonical ordering and exact zero-cancellation
+  semantics.
+
+* Improved the serial host CSR/COO/CSC SpGEMM hot path by removing the default
+  symbolic upper-bound pass, initializing newly touched accumulator slots
+  directly with the first product, using insertion sort for tiny touched lists,
+  and adaptively scanning dense markers for disordered high-output rows to
+  reduce memory traffic and canonical-output sorting overhead.
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)

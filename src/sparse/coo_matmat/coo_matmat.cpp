@@ -412,31 +412,6 @@ std::pair<mx::array, int> build_indptr_from_counts(const mx::array &counts,
   return build_indptr_from_counts<int64_t>(counts, n_rows, index_dtype);
 }
 
-template <typename I>
-int prefix_counts(const std::vector<I> &counts, std::vector<I> &indptr) {
-  indptr.resize(counts.size() + 1);
-  indptr[0] = I{0};
-  long long total = 0;
-  for (size_t i = 0; i < counts.size(); ++i) {
-    if (counts[i] < I{0}) {
-      throw std::runtime_error("coo_matmat produced a negative row count.");
-    }
-    total += static_cast<long long>(counts[i]);
-    if (total > static_cast<long long>(std::numeric_limits<int>::max())) {
-      throw std::overflow_error(
-          "coo_matmat output nnz exceeds MLX shape limits.");
-    }
-    if constexpr (std::is_same_v<I, int32_t>) {
-      if (total > static_cast<long long>(std::numeric_limits<int32_t>::max())) {
-        throw std::overflow_error(
-            "coo_matmat output nnz exceeds int32 index capacity.");
-      }
-    }
-    indptr[i + 1] = static_cast<I>(total);
-  }
-  return static_cast<int>(total);
-}
-
 std::vector<int> offsets_from_counts(const std::vector<int> &counts) {
   std::vector<int> offsets(counts.size() + 1, 0);
   for (size_t i = 0; i < counts.size(); ++i) {
@@ -448,6 +423,78 @@ std::vector<int> offsets_from_counts(const std::vector<int> &counts) {
     offsets[i + 1] = static_cast<int>(next);
   }
   return offsets;
+}
+
+void sort_touched_indices(std::vector<int> &indices) {
+  constexpr size_t kInsertionSortLimit = 32;
+  if (indices.size() <= 1) {
+    return;
+  }
+  if (indices.size() <= kInsertionSortLimit) {
+    for (size_t i = 1; i < indices.size(); ++i) {
+      const int value = indices[i];
+      size_t j = i;
+      while (j > 0 && value < indices[j - 1]) {
+        indices[j] = indices[j - 1];
+        --j;
+      }
+      indices[j] = value;
+    }
+    return;
+  }
+  std::sort(indices.begin(), indices.end());
+}
+
+bool use_dense_ordered_scan(size_t touched_count, int dimension,
+                            int disorder_count) {
+  constexpr size_t kMinDenseScanTouched = 64;
+  constexpr size_t kDenseScanFactor = 32;
+  constexpr int kMinDenseScanDisorder = 8;
+  return touched_count >= kMinDenseScanTouched && dimension > 0 &&
+         disorder_count >= kMinDenseScanDisorder &&
+         static_cast<size_t>(dimension) <= touched_count * kDenseScanFactor;
+}
+
+size_t spgemm_reserve_hint(int outer_dim, int inner_dim, int result_dim,
+                           size_t lhs_nnz, size_t rhs_nnz) {
+  if (outer_dim <= 0 || inner_dim <= 0 || result_dim <= 0 || lhs_nnz == 0 ||
+      rhs_nnz == 0) {
+    return 0;
+  }
+
+  constexpr long double kPathologicalWorkFactor = 32.0L;
+  constexpr long double kMaxReserveHint = 64.0L * 1024.0L * 1024.0L;
+
+  const long double linear_input =
+      static_cast<long double>(lhs_nnz) + static_cast<long double>(rhs_nnz);
+  const long double average_rhs_row_nnz =
+      static_cast<long double>(rhs_nnz) / static_cast<long double>(inner_dim);
+  const long double estimated_products =
+      static_cast<long double>(lhs_nnz) * average_rhs_row_nnz;
+  const long double dense_bound = static_cast<long double>(outer_dim) *
+                                  static_cast<long double>(result_dim);
+
+  long double estimate = std::min(estimated_products, dense_bound);
+  if (estimate > kPathologicalWorkFactor * linear_input) {
+    estimate = linear_input;
+  }
+  estimate = std::min(estimate, kMaxReserveHint);
+  if (estimate <= 0.0L) {
+    return 0;
+  }
+  return static_cast<size_t>(estimate);
+}
+
+template <typename OutI>
+void check_output_nnz(size_t nnz, const char *op_name) {
+  if (nnz > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    throw std::overflow_error(std::string(op_name) +
+                              " output nnz exceeds MLX shape limits.");
+  }
+  if (nnz > static_cast<size_t>(std::numeric_limits<OutI>::max())) {
+    throw std::overflow_error(std::string(op_name) +
+                              " output nnz exceeds index dtype capacity.");
+  }
 }
 
 template <typename T, typename LhsI, typename RhsI, typename OutI>
@@ -518,37 +565,22 @@ coo_matmat_impl(mx::array lhs_data, mx::array lhs_row, mx::array lhs_col,
   }
 
   std::vector<int> marker(static_cast<size_t>(rhs_n_cols), -1);
-  std::vector<OutI> candidate_counts(static_cast<size_t>(lhs_n_rows), OutI{0});
-  std::vector<int> columns;
-  for (int row = 0; row < lhs_n_rows; ++row) {
-    int row_count = 0;
-    for (int lp = lhs_offsets[static_cast<size_t>(row)];
-         lp < lhs_offsets[static_cast<size_t>(row) + 1]; ++lp) {
-      const int lhs_pos = lhs_positions[static_cast<size_t>(lp)];
-      const int rhs_row = static_cast<int>(lhs_col_ptr[lhs_pos]);
-      for (int rp = rhs_offsets[static_cast<size_t>(rhs_row)];
-           rp < rhs_offsets[static_cast<size_t>(rhs_row) + 1]; ++rp) {
-        const int rhs_pos = rhs_positions[static_cast<size_t>(rp)];
-        const int col = static_cast<int>(rhs_col_ptr[rhs_pos]);
-        if (marker[static_cast<size_t>(col)] != row) {
-          marker[static_cast<size_t>(col)] = row;
-          row_count += 1;
-        }
-      }
-    }
-    candidate_counts[static_cast<size_t>(row)] = static_cast<OutI>(row_count);
-  }
-
-  std::vector<OutI> candidate_indptr;
-  const int candidate_nnz = prefix_counts(candidate_counts, candidate_indptr);
-  std::vector<T> candidate_data(static_cast<size_t>(candidate_nnz));
-  std::vector<OutI> candidate_col(static_cast<size_t>(candidate_nnz));
-
-  std::fill(marker.begin(), marker.end(), -1);
   std::vector<AccT> accum(static_cast<size_t>(rhs_n_cols),
                           Accumulator<T>::zero());
+  std::vector<int> columns;
+  std::vector<T> out_data;
+  std::vector<OutI> out_row;
+  std::vector<OutI> out_col;
+  const size_t reserve_hint = spgemm_reserve_hint(
+      lhs_n_rows, rhs_n_rows, rhs_n_cols, lhs_data.size(), rhs_data.size());
+  out_data.reserve(reserve_hint);
+  out_row.reserve(reserve_hint);
+  out_col.reserve(reserve_hint);
+
   for (int row = 0; row < lhs_n_rows; ++row) {
     columns.clear();
+    bool columns_sorted = true;
+    int disorder_count = 0;
     for (int lp = lhs_offsets[static_cast<size_t>(row)];
          lp < lhs_offsets[static_cast<size_t>(row) + 1]; ++lp) {
       const int lhs_pos = lhs_positions[static_cast<size_t>(lp)];
@@ -559,58 +591,54 @@ coo_matmat_impl(mx::array lhs_data, mx::array lhs_row, mx::array lhs_col,
         const int rhs_pos = rhs_positions[static_cast<size_t>(rp)];
         const int col = static_cast<int>(rhs_col_ptr[rhs_pos]);
         const auto col_index = static_cast<size_t>(col);
+        const AccT product =
+            multiply_accumulate<T>(lhs_value, rhs_data_ptr[rhs_pos]);
         if (marker[col_index] != row) {
           marker[col_index] = row;
-          accum[col_index] = Accumulator<T>::zero();
+          accum[col_index] = product;
+          if (!columns.empty() && col < columns.back()) {
+            columns_sorted = false;
+            disorder_count += 1;
+          }
           columns.push_back(col);
+        } else {
+          accum[col_index] += product;
         }
-        accum[col_index] +=
-            multiply_accumulate<T>(lhs_value, rhs_data_ptr[rhs_pos]);
       }
     }
 
-    std::sort(columns.begin(), columns.end());
-    OutI write = candidate_indptr[static_cast<size_t>(row)];
-    for (int col : columns) {
-      candidate_col[static_cast<size_t>(write)] = static_cast<OutI>(col);
-      candidate_data[static_cast<size_t>(write)] =
-          Accumulator<T>::cast(accum[static_cast<size_t>(col)]);
-      ++write;
-    }
-  }
-
-  std::vector<OutI> out_counts(static_cast<size_t>(lhs_n_rows), OutI{0});
-  for (int row = 0; row < lhs_n_rows; ++row) {
-    OutI count = OutI{0};
-    for (OutI p = candidate_indptr[static_cast<size_t>(row)];
-         p < candidate_indptr[static_cast<size_t>(row) + 1]; ++p) {
-      if (nonzero(candidate_data[static_cast<size_t>(p)])) {
-        count += OutI{1};
+    if (!columns_sorted &&
+        use_dense_ordered_scan(columns.size(), rhs_n_cols, disorder_count)) {
+      for (int col = 0; col < rhs_n_cols; ++col) {
+        const auto col_index = static_cast<size_t>(col);
+        if (marker[col_index] != row) {
+          continue;
+        }
+        const auto value = Accumulator<T>::cast(accum[col_index]);
+        if (nonzero(value)) {
+          out_data.push_back(value);
+          out_row.push_back(static_cast<OutI>(row));
+          out_col.push_back(static_cast<OutI>(col));
+        }
+      }
+    } else {
+      if (!columns_sorted) {
+        sort_touched_indices(columns);
+      }
+      for (int col : columns) {
+        const auto value =
+            Accumulator<T>::cast(accum[static_cast<size_t>(col)]);
+        if (nonzero(value)) {
+          out_data.push_back(value);
+          out_row.push_back(static_cast<OutI>(row));
+          out_col.push_back(static_cast<OutI>(col));
+        }
       }
     }
-    out_counts[static_cast<size_t>(row)] = count;
+    check_output_nnz<OutI>(out_data.size(), "coo_matmat");
   }
 
-  std::vector<OutI> out_indptr;
-  const int out_nnz = prefix_counts(out_counts, out_indptr);
-  std::vector<T> out_data;
-  std::vector<OutI> out_row;
-  std::vector<OutI> out_col;
-  out_data.reserve(static_cast<size_t>(out_nnz));
-  out_row.reserve(static_cast<size_t>(out_nnz));
-  out_col.reserve(static_cast<size_t>(out_nnz));
-  for (int row = 0; row < lhs_n_rows; ++row) {
-    for (OutI p = candidate_indptr[static_cast<size_t>(row)];
-         p < candidate_indptr[static_cast<size_t>(row) + 1]; ++p) {
-      const auto value = candidate_data[static_cast<size_t>(p)];
-      if (nonzero(value)) {
-        out_data.push_back(value);
-        out_row.push_back(static_cast<OutI>(row));
-        out_col.push_back(candidate_col[static_cast<size_t>(p)]);
-      }
-    }
-  }
-
+  const int out_nnz = static_cast<int>(out_data.size());
   return {mx::array(out_data.begin(), mx::Shape{out_nnz}, lhs_data.dtype()),
           mx::array(out_row.begin(), mx::Shape{out_nnz}, out_index_dtype),
           mx::array(out_col.begin(), mx::Shape{out_nnz}, out_index_dtype)};

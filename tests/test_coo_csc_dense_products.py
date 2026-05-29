@@ -319,6 +319,41 @@ def test_coo_spgemm_duplicate_cancellation_and_rectangular_output(mx, scipy_spar
     np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
 
 
+def test_coo_spgemm_dense_ordered_extraction_keeps_canonical(mx, scipy_sparse):
+    block = 8
+    blocks = 16
+    n_cols = block * blocks
+    lhs_row = np.zeros(blocks, dtype=np.int32)
+    lhs_col = np.arange(blocks, dtype=np.int32)
+    lhs_data = np.ones(blocks, dtype=np.float32)
+
+    rhs_row = np.repeat(np.arange(blocks, dtype=np.int32), block)
+    rhs_col_parts = []
+    for rhs_row_index in range(blocks):
+        start = (blocks - rhs_row_index - 1) * block
+        rhs_col_parts.append(np.arange(start, start + block, dtype=np.int32))
+    rhs_col = np.concatenate(rhs_col_parts)
+    rhs_data = np.linspace(0.25, 1.5, rhs_col.size, dtype=np.float32)
+
+    lhs = ms.coo_array(
+        (mx.array(lhs_data), (mx.array(lhs_row), mx.array(lhs_col))),
+        shape=(1, blocks),
+    )
+    rhs = ms.coo_array(
+        (mx.array(rhs_data), (mx.array(rhs_row), mx.array(rhs_col))),
+        shape=(blocks, n_cols),
+    )
+    expected = scipy_sparse.coo_matrix(
+        (lhs_data, (lhs_row, lhs_col)), shape=lhs.shape
+    ) @ scipy_sparse.coo_matrix((rhs_data, (rhs_row, rhs_col)), shape=rhs.shape)
+
+    out = lhs @ rhs
+
+    _assert_canonical_coo(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected.toarray())
+    np.testing.assert_array_equal(to_numpy(out.col), np.arange(n_cols))
+
+
 def test_coo_spgemm_empty_product_preserves_output_shape_and_dtype(mx):
     lhs = ms.coo_array(
         (
@@ -461,6 +496,43 @@ def test_csc_spgemm_duplicate_cancellation_and_rectangular_output(mx, scipy_spar
     assert out.shape == (4, 4)
     _assert_canonical_csc(out)
     np.testing.assert_allclose(to_numpy(out.todense()), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_csc_spgemm_dense_ordered_extraction_keeps_canonical(mx, scipy_sparse):
+    block = 8
+    blocks = 16
+    n_rows = block * blocks
+    lhs_indices_parts = []
+    for lhs_col_index in range(blocks):
+        start = (blocks - lhs_col_index - 1) * block
+        lhs_indices_parts.append(np.arange(start, start + block, dtype=np.int32))
+    lhs_indices = np.concatenate(lhs_indices_parts)
+    lhs_data = np.linspace(0.25, 1.5, lhs_indices.size, dtype=np.float32)
+    lhs_indptr = np.arange(blocks + 1, dtype=np.int32) * block
+
+    rhs_indices = np.arange(blocks, dtype=np.int32)
+    rhs_indptr = np.array([0, blocks], dtype=np.int32)
+    rhs_data = np.ones(blocks, dtype=np.float32)
+
+    lhs = ms.csc_array(
+        (mx.array(lhs_data), mx.array(lhs_indices), mx.array(lhs_indptr)),
+        shape=(n_rows, blocks),
+        sorted_indices=True,
+    )
+    rhs = ms.csc_array(
+        (mx.array(rhs_data), mx.array(rhs_indices), mx.array(rhs_indptr)),
+        shape=(blocks, 1),
+        sorted_indices=True,
+    )
+    expected = scipy_sparse.csc_matrix(
+        (lhs_data, lhs_indices, lhs_indptr), shape=lhs.shape
+    ) @ scipy_sparse.csc_matrix((rhs_data, rhs_indices, rhs_indptr), shape=rhs.shape)
+
+    out = lhs @ rhs
+
+    _assert_canonical_csc(out)
+    np.testing.assert_allclose(to_numpy(out.todense()), expected.toarray())
+    np.testing.assert_array_equal(to_numpy(out.indices), np.arange(n_rows))
 
 
 def test_csc_spgemm_empty_product_preserves_output_shape_and_dtype(mx):
