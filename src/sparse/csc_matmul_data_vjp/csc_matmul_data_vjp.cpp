@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -72,18 +73,34 @@ void csc_matmul_data_vjp_cpu_impl(const mx::array &indices,
     const auto *cotangent_ptr = cotangent.data<T>();
     auto *out_ptr = out.data<T>();
 
-    for (int col = 0; col < n_cols; ++col) {
-      const auto rhs_offset = static_cast<size_t>(col) * rhs_cols;
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        const auto cot_offset = static_cast<size_t>(indices_ptr[p]) * rhs_cols;
-        auto acc = Accumulator<T>::zero();
-        for (int k = 0; k < rhs_cols; ++k) {
-          acc += multiply_accumulate<T>(cotangent_ptr[cot_offset + k],
-                                        rhs_ptr[rhs_offset + k]);
+    auto compute_cols = [&](CpuRange range) {
+      for (int col = range.begin; col < range.end; ++col) {
+        const auto rhs_offset = static_cast<size_t>(col) * rhs_cols;
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          const auto cot_offset =
+              static_cast<size_t>(indices_ptr[p]) * rhs_cols;
+          auto acc = Accumulator<T>::zero();
+          for (int k = 0; k < rhs_cols; ++k) {
+            acc += multiply_accumulate<T>(cotangent_ptr[cot_offset + k],
+                                          rhs_ptr[rhs_offset + k]);
+          }
+          out_ptr[p] = Accumulator<T>::cast(acc);
         }
-        out_ptr[p] = Accumulator<T>::cast(acc);
       }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_cols <= 0) {
+      compute_cols({0, n_cols});
+      return;
     }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+    if (ranges.size() <= 1) {
+      compute_cols({0, n_cols});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_cols);
   });
 }
 

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -124,16 +125,26 @@ void fromdense_counts_cpu_impl(const mx::array &dense, mx::array &counts,
     auto *counts_ptr = counts.data<I>();
     const int n_rows = static_cast<int>(dense.shape(0));
 
-    for (int row = 0; row < n_rows; ++row) {
-      I count = I{0};
-      const size_t base = static_cast<size_t>(row) * n_cols;
-      for (int col = 0; col < n_cols; ++col) {
-        if (keep_dense_value<T>(dense_ptr[base + col], threshold)) {
-          count += I{1};
+    auto count_rows = [&](CpuRange range) {
+      for (int row = range.begin; row < range.end; ++row) {
+        I count = I{0};
+        const size_t base = static_cast<size_t>(row) * n_cols;
+        for (int col = 0; col < n_cols; ++col) {
+          if (keep_dense_value<T>(dense_ptr[base + col], threshold)) {
+            count += I{1};
+          }
         }
+        counts_ptr[row] = count;
       }
-      counts_ptr[row] = count;
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0) {
+      count_rows({0, n_rows});
+      return;
     }
+    const auto ranges = equal_cpu_ranges(n_rows, workers);
+    parallel_for_cpu_ranges(ranges, count_rows);
   });
 }
 
@@ -162,18 +173,28 @@ void fromdense_fill_cpu_impl(const mx::array &dense,
     auto *out_indices_ptr = out_indices.data<I>();
     const int n_rows = static_cast<int>(dense.shape(0));
 
-    for (int row = 0; row < n_rows; ++row) {
-      I write = out_indptr_ptr[row];
-      const size_t base = static_cast<size_t>(row) * n_cols;
-      for (int col = 0; col < n_cols; ++col) {
-        const T value = dense_ptr[base + col];
-        if (keep_dense_value<T>(value, threshold)) {
-          out_data_ptr[write] = value;
-          out_indices_ptr[write] = static_cast<I>(col);
-          ++write;
+    auto fill_rows = [&](CpuRange range) {
+      for (int row = range.begin; row < range.end; ++row) {
+        I write = out_indptr_ptr[row];
+        const size_t base = static_cast<size_t>(row) * n_cols;
+        for (int col = 0; col < n_cols; ++col) {
+          const T value = dense_ptr[base + col];
+          if (keep_dense_value<T>(value, threshold)) {
+            out_data_ptr[write] = value;
+            out_indices_ptr[write] = static_cast<I>(col);
+            ++write;
+          }
         }
       }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0) {
+      fill_rows({0, n_rows});
+      return;
     }
+    const auto ranges = equal_cpu_ranges(n_rows, workers);
+    parallel_for_cpu_ranges(ranges, fill_rows);
   });
 }
 

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -87,23 +88,81 @@ void csr_tocsc_cpu_impl(const mx::array &data, const mx::array &indices,
     auto *out_indptr_ptr = out_indptr.data<I>();
     const auto nnz = data.size();
 
-    std::fill(out_indptr_ptr, out_indptr_ptr + n_cols + 1, I{0});
-    for (size_t p = 0; p < nnz; ++p) {
-      out_indptr_ptr[static_cast<size_t>(indices_ptr[p]) + 1] += I{1};
-    }
-    for (int col = 0; col < n_cols; ++col) {
-      out_indptr_ptr[col + 1] += out_indptr_ptr[col];
+    auto run_serial = [&]() {
+      std::fill(out_indptr_ptr, out_indptr_ptr + n_cols + 1, I{0});
+      for (size_t p = 0; p < nnz; ++p) {
+        out_indptr_ptr[static_cast<size_t>(indices_ptr[p]) + 1] += I{1};
+      }
+      for (int col = 0; col < n_cols; ++col) {
+        out_indptr_ptr[col + 1] += out_indptr_ptr[col];
+      }
+
+      std::vector<I> next(out_indptr_ptr, out_indptr_ptr + n_cols);
+      for (int row = 0; row < n_rows; ++row) {
+        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          const auto col = static_cast<size_t>(indices_ptr[p]);
+          const auto dst = static_cast<size_t>(next[col]++);
+          out_data_ptr[dst] = data_ptr[p];
+          out_indices_ptr[dst] = static_cast<I>(row);
+        }
+      }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0 || n_cols <= 0) {
+      run_serial();
+      return;
     }
 
-    std::vector<I> next(out_indptr_ptr, out_indptr_ptr + n_cols);
-    for (int row = 0; row < n_rows; ++row) {
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-        const auto col = static_cast<size_t>(indices_ptr[p]);
-        const auto dst = static_cast<size_t>(next[col]++);
-        out_data_ptr[dst] = data_ptr[p];
-        out_indices_ptr[dst] = static_cast<I>(row);
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_rows, workers);
+    if (ranges.size() <= 1) {
+      run_serial();
+      return;
+    }
+
+    const auto n_partitions = ranges.size();
+    const size_t counts_stride = static_cast<size_t>(n_cols);
+    std::vector<I> local_counts(n_partitions * counts_stride, I{0});
+    parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+      auto *counts = local_counts.data() + worker * counts_stride;
+      for (int row = range.begin; row < range.end; ++row) {
+        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          counts[static_cast<size_t>(indices_ptr[p])] += I{1};
+        }
+      }
+    });
+
+    out_indptr_ptr[0] = I{0};
+    for (int col = 0; col < n_cols; ++col) {
+      I count = I{0};
+      for (size_t worker = 0; worker < n_partitions; ++worker) {
+        count += local_counts[worker * counts_stride + col];
+      }
+      out_indptr_ptr[col + 1] = out_indptr_ptr[col] + count;
+    }
+
+    std::vector<I> next(n_partitions * counts_stride, I{0});
+    for (int col = 0; col < n_cols; ++col) {
+      I write = out_indptr_ptr[col];
+      for (size_t worker = 0; worker < n_partitions; ++worker) {
+        const size_t offset = worker * counts_stride + col;
+        next[offset] = write;
+        write += local_counts[offset];
       }
     }
+
+    parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+      auto *worker_next = next.data() + worker * counts_stride;
+      for (int row = range.begin; row < range.end; ++row) {
+        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          const auto col = static_cast<size_t>(indices_ptr[p]);
+          const auto dst = static_cast<size_t>(worker_next[col]++);
+          out_data_ptr[dst] = data_ptr[p];
+          out_indices_ptr[dst] = static_cast<I>(row);
+        }
+      }
+    });
   });
 }
 

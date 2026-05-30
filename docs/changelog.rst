@@ -68,6 +68,10 @@ Benchmarks
   comparison thresholds for optimized native CPU families
   (`PR #14 <https://github.com/waleed-sh/mlx-sparse/pull/14>`_).
 
+* Expanded the reductions benchmark so standalone CPU runs honor
+  ``MLX_SPARSE_TEST_DEVICE=cpu`` and include CSR row reductions plus CSR/CSC
+  dense-conversion timings alongside SciPy references.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -104,6 +108,18 @@ Improvements
   products remain serial because they scatter into shared dense output rows.
   The native CPU sparse-operation benchmark suite now records COO/CSC batched
   matvec and matmul timings with SciPy references.
+
+* Added fixed-worker native CPU partitions for additional race-free
+  disjoint-output kernels: CSR row sums/norms/diagonal/dense conversion, CSC
+  column sums/norms/diagonal/dense conversion, staged ``fromdense`` row
+  count/fill, compressed CSR/CSC ``sort_indices`` and ``sum_duplicates``, and
+  CSR/COO/CSC sparse-value VJP kernels.  The serial path remains the
+  ``CPU_THREADS=1`` regression target.
+
+* Reworked CPU CSR-to-CSC and CSC-to-CSR conversion fills to use private
+  per-worker histograms and per-worker write offsets when more than one CPU
+  worker is configured.  The implementation avoids shared mutable
+  ``next`` counters and preserves deterministic compressed output ordering.
 
 
 
