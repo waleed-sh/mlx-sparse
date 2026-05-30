@@ -149,6 +149,51 @@ def test_iterative_solvers_match_scipy_sparse(mx, scipy_sparse, to_numpy):
     np.testing.assert_allclose(to_numpy(x), expected, rtol=1e-4, atol=1e-4)
 
 
+def test_iterative_solver_parallel_matches_serial(mx, scipy_sparse, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_a = scipy_sparse.diags(
+        [
+            -np.ones(6, dtype=np.float32),
+            4.0 * np.ones(7, dtype=np.float32),
+            -np.ones(6, dtype=np.float32),
+        ],
+        offsets=[-1, 0, 1],
+        format="csr",
+    )
+    a = ms.from_scipy(scipy_a)
+    b = mx.array(np.arange(1, 8, dtype=np.float32))
+
+    with ms.runtime.context(n_threads=1, solver_parallel=False):
+        serial = {
+            name: solver(a, b, rtol=1e-7, atol=1e-7, maxiter=64)
+            for name, solver in {
+                "cg": linalg.cg,
+                "gmres": linalg.gmres,
+                "minres": linalg.minres,
+            }.items()
+        }
+
+    with ms.runtime.context(n_threads=3, solver_parallel=True, solver_threads=3):
+        parallel = {
+            name: solver(a, b, rtol=1e-7, atol=1e-7, maxiter=64)
+            for name, solver in {
+                "cg": linalg.cg,
+                "gmres": linalg.gmres,
+                "minres": linalg.minres,
+            }.items()
+        }
+
+    for name, (serial_x, serial_info) in serial.items():
+        parallel_x, parallel_info = parallel[name]
+        assert parallel_info == serial_info
+        if name in {"cg", "gmres"}:
+            assert serial_info == 0
+        np.testing.assert_allclose(
+            to_numpy(parallel_x), to_numpy(serial_x), rtol=5e-5, atol=5e-5
+        )
+
+
 def test_sparse_cholesky_factor_and_solve(mx, to_numpy):
     if not extension_available():
         pytest.skip("native extension unavailable")
@@ -331,3 +376,48 @@ def test_spectral_routines_match_scipy_sparse(mx, scipy_sparse, to_numpy):
     expected_s = scipy_linalg.svds(scipy_a, k=1, return_singular_vectors=False)[0]
     got_s = linalg.svds(a, k=1, which="LM", ncv=5, return_singular_vectors=False)
     np.testing.assert_allclose(to_numpy(got_s)[0], expected_s, rtol=5e-2, atol=5e-2)
+
+
+def test_spectral_solver_parallel_matches_serial(mx, scipy_sparse, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_a = scipy_sparse.diags(
+        [
+            -np.ones(7, dtype=np.float32),
+            3.0 * np.ones(8, dtype=np.float32),
+            -np.ones(7, dtype=np.float32),
+        ],
+        offsets=[-1, 0, 1],
+        format="csr",
+    )
+    a = ms.from_scipy(scipy_a)
+
+    with ms.runtime.context(n_threads=1, solver_parallel=False):
+        serial_eigsh = linalg.eigsh(
+            a, k=1, which="LM", ncv=5, return_eigenvectors=False
+        )
+        serial_eigs = linalg.eigs(a, k=1, which="LM", ncv=5, return_eigenvectors=False)
+        serial_svds = linalg.svds(
+            a, k=1, which="LM", ncv=5, return_singular_vectors=False
+        )
+
+    with ms.runtime.context(n_threads=3, solver_parallel=True, solver_threads=3):
+        parallel_eigsh = linalg.eigsh(
+            a, k=1, which="LM", ncv=5, return_eigenvectors=False
+        )
+        parallel_eigs = linalg.eigs(
+            a, k=1, which="LM", ncv=5, return_eigenvectors=False
+        )
+        parallel_svds = linalg.svds(
+            a, k=1, which="LM", ncv=5, return_singular_vectors=False
+        )
+
+    np.testing.assert_allclose(
+        to_numpy(parallel_eigsh), to_numpy(serial_eigsh), rtol=5e-5, atol=5e-5
+    )
+    np.testing.assert_allclose(
+        to_numpy(parallel_eigs), to_numpy(serial_eigs), rtol=5e-5, atol=5e-5
+    )
+    np.testing.assert_allclose(
+        to_numpy(parallel_svds), to_numpy(serial_svds), rtol=5e-5, atol=5e-5
+    )

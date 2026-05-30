@@ -133,19 +133,21 @@ Improvements
   CSR transpose products and axis-mismatched reductions use deterministic
   private accumulators, and non-batched COO/CSC forward dense products remain
   measured serial fallbacks rather than introducing unsynchronized scatter
-  writes.
+  writes (`PR #19 <https://github.com/waleed-sh/mlx-sparse/pull/19>`_).
 
 * Added a CPU-only immediate host assembly fast path for ``fromdense``. CPU
   streams now scan dense rows directly into canonical CSR buffers, while GPU
   streams keep the staged count/prefix/fill implementation. Immediate host
   assembly was also measured for compressed ``sum_duplicates`` and deliberately
-  not adopted because it did not beat the existing staged CPU path.
+  not adopted because it did not beat the existing staged CPU path
+  (`PR #20 <https://github.com/waleed-sh/mlx-sparse/pull/20>`_).
 
 * Added native rank-2 RHS support for explicit-factor CPU solves.  Native
   Cholesky and LU reuse now apply CSR triangular solves to dense RHS matrices
   in one native call sequence, LU row permutation accepts matrix RHS inputs,
   and solver CPU parallelism is separated behind ``MLX_SPARSE_SOLVER_PARALLEL``
-  / ``MLX_SPARSE_SOLVER_THREADS``.
+  / ``MLX_SPARSE_SOLVER_THREADS``
+  (`PR #21 <https://github.com/waleed-sh/mlx-sparse/pull/21>`_).
 
 * Added native CSR triangular-solve structural analysis primitives for
   diagonal-position lookup and dependency-level schedules, plus an analyzed
@@ -155,7 +157,8 @@ Improvements
   row-order path because cached diagonal positions and fixed-worker level
   scheduling did not improve the single-thread regression target.  Cholesky
   solves cache the transposed upper factor without changing the public factor
-  dataclass constructor.
+  dataclass constructor
+  (`PR #22 <https://github.com/waleed-sh/mlx-sparse/pull/22>`_).
 
 
 
