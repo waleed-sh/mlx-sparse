@@ -1,17 +1,3 @@
-# Copyright (c) 2026 The mlx-sparse contributors - All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """Microbenchmark COO/CSC sparse reductions.
 
 Run as a script when MLX devices are directly available::
@@ -27,6 +13,7 @@ usable MLX device::
 
 from __future__ import annotations
 
+import os
 import time
 
 import mlx.core as mx
@@ -37,10 +24,24 @@ import scipy.sparse as sp
 import mlx_sparse as ms
 
 
+def _device_candidates():
+    requested = os.environ.get("MLX_SPARSE_TEST_DEVICE", "auto").lower()
+    if requested == "cpu":
+        return (("cpu", mx.cpu),)
+    if requested == "gpu":
+        return (("gpu", mx.gpu),)
+    if requested != "auto":
+        raise ValueError(
+            "MLX_SPARSE_TEST_DEVICE must be 'auto', 'cpu', or 'gpu', "
+            f"got {requested!r}."
+        )
+    return (("gpu", mx.gpu), ("cpu", mx.cpu))
+
+
 @pytest.fixture
 def mlx_benchmark_device():
     failures = []
-    for name, kind in (("gpu", mx.gpu), ("cpu", mx.cpu)):
+    for name, kind in _device_candidates():
         try:
             device = mx.Device(kind, 0)
             if not mx.is_available(device):
@@ -62,7 +63,7 @@ def mx_module(mlx_benchmark_device):
 
 
 def _select_device():
-    for name, kind in (("gpu", mx.gpu), ("cpu", mx.cpu)):
+    for name, kind in _device_candidates():
         try:
             device = mx.Device(kind, 0)
             if not mx.is_available(device):
@@ -88,7 +89,9 @@ def _make_matrix(*, n_rows=4096, n_cols=4096, nnz=32768, seed=20260525):
         shape=(n_rows, n_cols),
         canonical=False,
     )
+    csr = coo.tocsr(canonical=False)
     csc = coo.tocsc(canonical=False)
+    scipy_csr = scipy_coo.tocsr(copy=True)
 
     unique_nnz = min(nnz, n_rows * 8)
     canonical_row = np.repeat(np.arange(n_rows, dtype=np.int32), 8)[:unique_nnz]
@@ -107,24 +110,43 @@ def _make_matrix(*, n_rows=4096, n_cols=4096, nnz=32768, seed=20260525):
         shape=(n_rows, n_cols),
         canonical=True,
     )
+    canonical_csr = canonical_coo.tocsr(canonical=True)
     canonical_csc = canonical_coo.tocsc(canonical=True)
-    mx.eval(coo.data, coo.row, coo.col, csc.data, csc.indices, csc.indptr)
+    canonical_scipy_csr = canonical_scipy_coo.tocsr(copy=True)
+    mx.eval(
+        coo.data,
+        coo.row,
+        coo.col,
+        csr.data,
+        csr.indices,
+        csr.indptr,
+        csc.data,
+        csc.indices,
+        csc.indptr,
+    )
     mx.eval(
         canonical_coo.data,
         canonical_coo.row,
         canonical_coo.col,
+        canonical_csr.data,
+        canonical_csr.indices,
+        canonical_csr.indptr,
         canonical_csc.data,
         canonical_csc.indices,
         canonical_csc.indptr,
     )
     return (
         coo,
+        csr,
         csc,
         canonical_coo,
+        canonical_csr,
         canonical_csc,
         scipy_coo,
+        scipy_csr,
         scipy_csc,
         canonical_scipy_coo,
+        canonical_scipy_csr,
         canonical_scipy_csc,
     )
 
@@ -193,15 +215,43 @@ def _scipy_col_norms(matrix):
 def run_benchmark():
     (
         coo,
+        csr,
         csc,
         canonical_coo,
+        canonical_csr,
         canonical_csc,
         scipy_coo,
+        scipy_csr,
         scipy_csc,
         canonical_scipy_coo,
+        canonical_scipy_csr,
         canonical_scipy_csc,
     ) = _make_matrix()
     ops = [
+        (
+            "csr_row_sums",
+            lambda: coo.row_sums(),
+            lambda: csr.row_sums(),
+            lambda: _scipy_row_sums(scipy_csr),
+        ),
+        (
+            "csr_row_norms_canonical",
+            lambda: canonical_coo.row_norms(),
+            lambda: canonical_csr.row_norms(),
+            lambda: _scipy_row_norms(canonical_scipy_csr),
+        ),
+        (
+            "csr_diagonal",
+            lambda: coo.diagonal(),
+            lambda: csr.diagonal(),
+            lambda: scipy_csr.diagonal(),
+        ),
+        (
+            "csr_todense",
+            lambda: coo.todense(),
+            lambda: csr.todense(),
+            lambda: scipy_csr.toarray(),
+        ),
         (
             "coo_row_sums",
             lambda: coo.tocsr(canonical=False).row_sums(),
@@ -275,6 +325,12 @@ def run_benchmark():
             lambda: csc.tocsr(canonical=False).trace(),
             lambda: csc.trace(),
             lambda: scipy_csc.diagonal().sum(),
+        ),
+        (
+            "csc_todense",
+            lambda: csc.tocsr(canonical=False).todense(),
+            lambda: csc.todense(),
+            lambda: scipy_csc.toarray(),
         ),
     ]
     rows = []

@@ -70,7 +70,8 @@ Benchmarks
 
 * Expanded the reductions benchmark so standalone CPU runs honor
   ``MLX_SPARSE_TEST_DEVICE=cpu`` and include CSR row reductions plus CSR/CSC
-  dense-conversion timings alongside SciPy references.
+  dense-conversion timings alongside SciPy references
+  (`PR #18 <https://github.com/waleed-sh/mlx-sparse/pull/18>`_).
 
 Improvements
 ~~~~~~~~~~~~
@@ -100,26 +101,30 @@ Improvements
 * Improved native CPU CSR sparse-dense products. ``csr_matvec`` now has a
   short-row serial path, ``csr_matmul`` and ``csr_batched_matmul`` specialize
   common RHS widths with stack accumulators, and row-owned CSR matvec/matmul
-  batch-row work can use the fixed package-wide ``CPU_THREADS`` worker count.
+  batch-row work can use the fixed package-wide ``CPU_THREADS`` worker count
+  (`PR #16 <https://github.com/waleed-sh/mlx-sparse/pull/16>`_).
 
 * Improved native CPU COO/CSC batched sparse-dense products. Batched COO and
   CSC matmul now use fixed-worker batch-owned CPU partitions when
   ``CPU_THREADS`` resolves above one, while non-batched COO/CSC forward dense
   products remain serial because they scatter into shared dense output rows.
   The native CPU sparse-operation benchmark suite now records COO/CSC batched
-  matvec and matmul timings with SciPy references.
+  matvec and matmul timings with SciPy references
+  (`PR #17 <https://github.com/waleed-sh/mlx-sparse/pull/17>`_).
 
 * Added fixed-worker native CPU partitions for additional race-free
   disjoint-output kernels: CSR row sums/norms/diagonal/dense conversion, CSC
   column sums/norms/diagonal/dense conversion, staged ``fromdense`` row
   count/fill, compressed CSR/CSC ``sort_indices`` and ``sum_duplicates``, and
   CSR/COO/CSC sparse-value VJP kernels.  The serial path remains the
-  ``CPU_THREADS=1`` regression target.
+  ``CPU_THREADS=1`` regression target
+  (`PR #18 <https://github.com/waleed-sh/mlx-sparse/pull/18>`_).
 
 * Reworked CPU CSR-to-CSC and CSC-to-CSR conversion fills to use private
   per-worker histograms and per-worker write offsets when more than one CPU
   worker is configured.  The implementation avoids shared mutable
-  ``next`` counters and preserves deterministic compressed output ordering.
+  ``next`` counters and preserves deterministic compressed output ordering
+  (`PR #18 <https://github.com/waleed-sh/mlx-sparse/pull/18>`_).
 
 
 
