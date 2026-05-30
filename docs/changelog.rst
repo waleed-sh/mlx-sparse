@@ -135,6 +135,12 @@ Improvements
   measured serial fallbacks rather than introducing unsynchronized scatter
   writes.
 
+* Added a CPU-only immediate host assembly fast path for ``fromdense``. CPU
+  streams now scan dense rows directly into canonical CSR buffers, while GPU
+  streams keep the staged count/prefix/fill implementation. Immediate host
+  assembly was also measured for compressed ``sum_duplicates`` and deliberately
+  not adopted because it did not beat the existing staged CPU path.
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)
