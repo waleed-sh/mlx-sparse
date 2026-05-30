@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -89,22 +90,72 @@ void csr_matmul_transpose_cpu_impl(const mx::array &data,
     const auto *rhs_ptr = rhs.data<T>();
     auto *out_ptr = out.data<T>();
 
-    std::vector<AccT> accum(static_cast<size_t>(n_cols) * rhs_cols,
-                            Accumulator<T>::zero());
-    for (int row = 0; row < n_rows; ++row) {
-      const auto rhs_offset = static_cast<size_t>(row) * rhs_cols;
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-        const auto col = static_cast<size_t>(indices_ptr[p]);
-        const auto out_offset = col * static_cast<size_t>(rhs_cols);
-        const auto data_value = data_ptr[p];
-        for (int k = 0; k < rhs_cols; ++k) {
-          accum[out_offset + k] +=
-              multiply_accumulate<T>(data_value, rhs_ptr[rhs_offset + k]);
+    const size_t out_size = static_cast<size_t>(n_cols) * rhs_cols;
+
+    auto run_serial = [&]() {
+      std::vector<AccT> accum(out_size, Accumulator<T>::zero());
+      for (int row = 0; row < n_rows; ++row) {
+        const auto rhs_offset = static_cast<size_t>(row) * rhs_cols;
+        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          const auto col = static_cast<size_t>(indices_ptr[p]);
+          const auto out_offset = col * static_cast<size_t>(rhs_cols);
+          const auto data_value = data_ptr[p];
+          for (int k = 0; k < rhs_cols; ++k) {
+            accum[out_offset + k] +=
+                multiply_accumulate<T>(data_value, rhs_ptr[rhs_offset + k]);
+          }
         }
       }
+      for (size_t i = 0; i < accum.size(); ++i) {
+        out_ptr[i] = Accumulator<T>::cast(accum[i]);
+      }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0 || n_cols <= 0 || rhs_cols <= 0) {
+      run_serial();
+      return;
     }
-    for (size_t i = 0; i < accum.size(); ++i) {
-      out_ptr[i] = Accumulator<T>::cast(accum[i]);
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_rows, workers);
+    if (ranges.size() <= 1) {
+      run_serial();
+      return;
+    }
+
+    const auto n_partitions = ranges.size();
+    std::vector<AccT> partial(n_partitions * out_size, Accumulator<T>::zero());
+    parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+      auto *accum = partial.data() + worker * out_size;
+      for (int row = range.begin; row < range.end; ++row) {
+        const auto rhs_offset = static_cast<size_t>(row) * rhs_cols;
+        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          const auto col = static_cast<size_t>(indices_ptr[p]);
+          const auto out_offset = col * static_cast<size_t>(rhs_cols);
+          const auto data_value = data_ptr[p];
+          for (int k = 0; k < rhs_cols; ++k) {
+            accum[out_offset + k] +=
+                multiply_accumulate<T>(data_value, rhs_ptr[rhs_offset + k]);
+          }
+        }
+      }
+    });
+
+    auto reduce_output = [&](CpuRange range) {
+      for (int item = range.begin; item < range.end; ++item) {
+        AccT total = Accumulator<T>::zero();
+        for (size_t worker = 0; worker < n_partitions; ++worker) {
+          total += partial[worker * out_size + static_cast<size_t>(item)];
+        }
+        out_ptr[item] = Accumulator<T>::cast(total);
+      }
+    };
+    const auto output_ranges =
+        equal_cpu_ranges(static_cast<int>(out_size), workers);
+    if (output_ranges.size() <= 1) {
+      reduce_output({0, static_cast<int>(out_size)});
+    } else {
+      parallel_for_cpu_ranges(output_ranges, reduce_output);
     }
   });
 }

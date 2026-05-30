@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -96,13 +97,28 @@ void csc_matvec_transpose_cpu_impl(const mx::array &data,
     const auto *x_ptr = x.data<T>();
     auto *out_ptr = out.data<T>();
 
-    for (int col = 0; col < n_cols; ++col) {
-      auto acc = Accumulator<T>::zero();
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        acc += multiply_accumulate<T>(data_ptr[p], x_ptr[indices_ptr[p]]);
+    auto compute_cols = [&](CpuRange range) {
+      for (int col = range.begin; col < range.end; ++col) {
+        auto acc = Accumulator<T>::zero();
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          acc += multiply_accumulate<T>(data_ptr[p], x_ptr[indices_ptr[p]]);
+        }
+        out_ptr[col] = Accumulator<T>::cast(static_cast<AccT>(acc));
       }
-      out_ptr[col] = Accumulator<T>::cast(static_cast<AccT>(acc));
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_cols <= 0) {
+      compute_cols({0, n_cols});
+      return;
     }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+    if (ranges.size() <= 1) {
+      compute_cols({0, n_cols});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_cols);
   });
 }
 

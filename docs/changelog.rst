@@ -126,6 +126,15 @@ Improvements
   ``next`` counters and preserves deterministic compressed output ordering
   (`PR #18 <https://github.com/waleed-sh/mlx-sparse/pull/18>`_).
 
+* Reworked the remaining native CPU compressed transpose/conversion and
+  scatter-style reduction/product paths. COO-to-CSR/CSC conversion and CSR
+  transpose now use histogram-prefix-scatter style assembly with private
+  worker write offsets, CSC transpose products use output-column ownership,
+  CSR transpose products and axis-mismatched reductions use deterministic
+  private accumulators, and non-batched COO/CSC forward dense products remain
+  measured serial fallbacks rather than introducing unsynchronized scatter
+  writes.
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)

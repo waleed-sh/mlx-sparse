@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -74,21 +75,62 @@ void coo_row_sums_cpu_impl(const mx::array &data, const mx::array &row,
     const auto *row_ptr = row.data<I>();
     auto *out_ptr = out.data<T>();
 
-    if constexpr (std::is_same_v<AccT, T>) {
-      std::fill(out_ptr, out_ptr + n_rows, T{});
-      for (size_t p = 0; p < data.size(); ++p) {
-        out_ptr[row_ptr[p]] += data_ptr[p];
+    const int nnz = static_cast<int>(data.size());
+    auto run_serial = [&]() {
+      if constexpr (std::is_same_v<AccT, T>) {
+        std::fill(out_ptr, out_ptr + n_rows, T{});
+        for (size_t p = 0; p < data.size(); ++p) {
+          out_ptr[row_ptr[p]] += data_ptr[p];
+        }
+      } else {
+        std::vector<AccT> accum(static_cast<size_t>(n_rows),
+                                Accumulator<T>::zero());
+        for (size_t p = 0; p < data.size(); ++p) {
+          accum[static_cast<size_t>(row_ptr[p])] +=
+              static_cast<AccT>(data_ptr[p]);
+        }
+        for (int r = 0; r < n_rows; ++r) {
+          out_ptr[r] = Accumulator<T>::cast(accum[static_cast<size_t>(r)]);
+        }
       }
-    } else {
-      std::vector<AccT> accum(static_cast<size_t>(n_rows),
-                              Accumulator<T>::zero());
-      for (size_t p = 0; p < data.size(); ++p) {
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0 || nnz == 0) {
+      run_serial();
+      return;
+    }
+    const auto ranges = equal_cpu_ranges(nnz, workers);
+    if (ranges.size() <= 1) {
+      run_serial();
+      return;
+    }
+
+    const auto n_partitions = ranges.size();
+    const size_t stride = static_cast<size_t>(n_rows);
+    std::vector<AccT> partial(n_partitions * stride, Accumulator<T>::zero());
+    parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+      auto *accum = partial.data() + worker * stride;
+      for (int p = range.begin; p < range.end; ++p) {
         accum[static_cast<size_t>(row_ptr[p])] +=
             static_cast<AccT>(data_ptr[p]);
       }
-      for (int r = 0; r < n_rows; ++r) {
-        out_ptr[r] = Accumulator<T>::cast(accum[static_cast<size_t>(r)]);
+    });
+
+    auto reduce_rows = [&](CpuRange range) {
+      for (int row = range.begin; row < range.end; ++row) {
+        AccT total = Accumulator<T>::zero();
+        for (size_t worker = 0; worker < n_partitions; ++worker) {
+          total += partial[worker * stride + row];
+        }
+        out_ptr[row] = Accumulator<T>::cast(total);
       }
+    };
+    const auto row_ranges = equal_cpu_ranges(n_rows, workers);
+    if (row_ranges.size() <= 1) {
+      reduce_rows({0, n_rows});
+    } else {
+      parallel_for_cpu_ranges(row_ranges, reduce_rows);
     }
   });
 }

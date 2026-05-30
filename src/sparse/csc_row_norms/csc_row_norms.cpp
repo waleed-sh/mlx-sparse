@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -88,19 +89,61 @@ void csc_row_norms_cpu_impl(const mx::array &data, const mx::array &indices,
     const auto *data_ptr = data.data<T>();
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
-    std::vector<double> accum(static_cast<size_t>(n_rows), 0.0);
-
-    for (int col = 0; col < n_cols; ++col) {
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        accum[static_cast<size_t>(indices_ptr[p])] +=
-            norm_square<T>(data_ptr[p]);
+    auto *out_ptr = out.data<float>();
+    auto run_serial = [&]() {
+      std::vector<double> accum(static_cast<size_t>(n_rows), 0.0);
+      for (int col = 0; col < n_cols; ++col) {
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          accum[static_cast<size_t>(indices_ptr[p])] +=
+              norm_square<T>(data_ptr[p]);
+        }
       }
+
+      for (int row = 0; row < n_rows; ++row) {
+        out_ptr[row] =
+            static_cast<float>(std::sqrt(accum[static_cast<size_t>(row)]));
+      }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0 || n_cols <= 0) {
+      run_serial();
+      return;
+    }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+    if (ranges.size() <= 1) {
+      run_serial();
+      return;
     }
 
-    auto *out_ptr = out.data<float>();
-    for (int row = 0; row < n_rows; ++row) {
-      out_ptr[row] =
-          static_cast<float>(std::sqrt(accum[static_cast<size_t>(row)]));
+    const auto n_partitions = ranges.size();
+    const size_t stride = static_cast<size_t>(n_rows);
+    std::vector<double> partial(n_partitions * stride, 0.0);
+    parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+      auto *accum = partial.data() + worker * stride;
+      for (int col = range.begin; col < range.end; ++col) {
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          accum[static_cast<size_t>(indices_ptr[p])] +=
+              norm_square<T>(data_ptr[p]);
+        }
+      }
+    });
+
+    auto reduce_rows = [&](CpuRange range) {
+      for (int row = range.begin; row < range.end; ++row) {
+        double total = 0.0;
+        for (size_t worker = 0; worker < n_partitions; ++worker) {
+          total += partial[worker * stride + row];
+        }
+        out_ptr[row] = static_cast<float>(std::sqrt(total));
+      }
+    };
+    const auto row_ranges = equal_cpu_ranges(n_rows, workers);
+    if (row_ranges.size() <= 1) {
+      reduce_rows({0, n_rows});
+    } else {
+      parallel_for_cpu_ranges(row_ranges, reduce_rows);
     }
   });
 }
