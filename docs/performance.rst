@@ -295,6 +295,13 @@ while other CPU kernels are still being optimized incrementally:
   per-row temporary traffic.
 * ``csr_batched_matvec`` uses fixed-worker batch-row partitions when more than
   one CPU worker is configured.
+* ``coo_batched_matmul`` and ``csc_batched_matmul`` use fixed-worker
+  batch-owned partitions on CPU.  Batched matvec wrappers use the same native
+  path with a single RHS column.
+* Non-batched COO/CSC forward dense products remain serial on CPU because they
+  scatter into shared dense output rows.  Parallelizing those paths requires a
+  measured race-free design such as output ownership or private accumulators;
+  unsynchronized scatter writes are not used.
 * The worker count is the configured runtime value. It is not changed
   heuristically from matrix shape, density, or nnz.
 * No architecture-specific SIMD intrinsics are required in the default build.

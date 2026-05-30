@@ -66,6 +66,33 @@ def _assert_canonical_csc(csc):
             assert np.unique(rows).size == rows.size
 
 
+def _from_scipy_as_mx_format(matrix, fmt: str, mx_module, mx_dtype):
+    if fmt == "coo":
+        coo = matrix.tocoo(copy=True)
+        return ms.coo_array(
+            (
+                mx_module.array(coo.data).astype(mx_dtype),
+                (
+                    mx_module.array(coo.row.astype(np.int32, copy=False)),
+                    mx_module.array(coo.col.astype(np.int32, copy=False)),
+                ),
+            ),
+            shape=coo.shape,
+        )
+
+    csc = matrix.tocsc(copy=True)
+    csc.sort_indices()
+    return ms.csc_array(
+        (
+            mx_module.array(csc.data).astype(mx_dtype),
+            mx_module.array(csc.indices.astype(np.int32, copy=False)),
+            mx_module.array(csc.indptr.astype(np.int32, copy=False)),
+        ),
+        shape=csc.shape,
+        sorted_indices=True,
+    )
+
+
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
 @pytest.mark.parametrize(
     ("dtype", "rtol", "atol"),
@@ -210,6 +237,119 @@ def test_csc_dense_products_match_dense_and_scipy(
         rtol=rtol,
         atol=atol,
     )
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("fmt", ["coo", "csc"])
+@pytest.mark.parametrize("rhs_cols", [1, 2, 4, 8, 16, 32])
+def test_coo_csc_matmul_rhs_widths_match_scipy_under_cpu_thread_settings(
+    mx, scipy_sparse, fmt, rhs_cols
+):
+    rng = np.random.default_rng(1800 + rhs_cols + (0 if fmt == "coo" else 100))
+    matrix = scipy_sparse.random(
+        31,
+        37,
+        density=0.18,
+        format=fmt,
+        dtype=np.float32,
+        random_state=rng,
+    )
+    matrix.sum_duplicates()
+    if fmt == "csc":
+        matrix.sort_indices()
+
+    sparse = ms.from_scipy(matrix, format=fmt)
+    rhs_np = rng.normal(size=(37, rhs_cols)).astype(np.float32)
+    rhs = mx.array(rhs_np)
+
+    with ms.runtime.context(n_threads=1):
+        serial_np = to_numpy(sparse @ rhs)
+    with ms.runtime.context(n_threads=3):
+        configured_np = to_numpy(sparse @ rhs)
+
+    expected = matrix @ rhs_np
+    np.testing.assert_allclose(serial_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(configured_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(configured_np, serial_np, rtol=0, atol=0)
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("fmt", ["coo", "csc"])
+@pytest.mark.parametrize("rhs_cols", [1, 2, 4, 8, 16, 32])
+def test_coo_csc_batched_matmul_rhs_widths_match_scipy(mx, scipy_sparse, fmt, rhs_cols):
+    rng = np.random.default_rng(2400 + rhs_cols + (0 if fmt == "coo" else 100))
+    matrix = scipy_sparse.random(
+        29,
+        41,
+        density=0.16,
+        format=fmt,
+        dtype=np.float32,
+        random_state=rng,
+    )
+    matrix.sum_duplicates()
+    if fmt == "csc":
+        matrix.sort_indices()
+
+    sparse = ms.from_scipy(matrix, format=fmt)
+    rhs_np = rng.normal(size=(3, 41, rhs_cols)).astype(np.float32)
+    rhs = mx.array(rhs_np)
+
+    with ms.runtime.context(n_threads=1):
+        serial_np = to_numpy(sparse @ rhs)
+    with ms.runtime.context(n_threads=3):
+        configured_np = to_numpy(sparse @ rhs)
+
+    expected = np.stack([matrix @ rhs_np[i] for i in range(rhs_np.shape[0])])
+    np.testing.assert_allclose(serial_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(configured_np, expected, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(configured_np, serial_np, rtol=0, atol=0)
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("fmt", ["coo", "csc"])
+@pytest.mark.parametrize(
+    ("dtype_name", "rtol", "atol"),
+    [
+        ("float16", 6e-3, 6e-3),
+        ("bfloat16", 3e-2, 3e-2),
+        ("complex64", 1e-5, 1e-5),
+    ],
+)
+def test_coo_csc_matmul_width_specializations_preserve_accumulation_dtypes(
+    mx, scipy_sparse, fmt, dtype_name, rtol, atol
+):
+    row = np.array([0, 0, 0, 1, 2, 2, 3, 3], dtype=np.int32)
+    col = np.array([0, 1, 3, 2, 1, 4, 0, 4], dtype=np.int32)
+    data = np.array([0.5, -1.5, 2.0, -0.75, 1.25, 3.0, -2.5, 0.25])
+    rhs = np.array(
+        [
+            [1.0, -0.5, 0.25, 2.0],
+            [-1.0, 0.75, 1.5, -0.25],
+            [0.5, 2.0, -1.25, 0.75],
+            [1.25, -1.5, 0.5, -2.0],
+            [-0.75, 0.25, 2.5, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    if dtype_name == "complex64":
+        data = data.astype(np.complex64) + 1j * np.linspace(
+            -0.5, 0.5, data.size, dtype=np.float32
+        )
+        rhs = rhs.astype(np.complex64) + 1j * np.flip(rhs, axis=1)
+        scipy_dtype = np.complex64
+    else:
+        data = data.astype(np.float32)
+        scipy_dtype = np.float32
+
+    scipy_matrix = scipy_sparse.coo_matrix(
+        (data.astype(scipy_dtype, copy=False), (row, col)), shape=(4, 5)
+    ).asformat(fmt)
+    sparse = _from_scipy_as_mx_format(scipy_matrix, fmt, mx, getattr(mx, dtype_name))
+    rhs_mx = mx.array(rhs).astype(getattr(mx, dtype_name))
+
+    out = to_numpy(sparse @ rhs_mx)
+    expected = scipy_matrix @ rhs
+    np.testing.assert_allclose(out, expected, rtol=rtol, atol=atol)
 
 
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])

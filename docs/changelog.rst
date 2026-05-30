@@ -98,6 +98,13 @@ Improvements
   common RHS widths with stack accumulators, and row-owned CSR matvec/matmul
   batch-row work can use the fixed package-wide ``CPU_THREADS`` worker count.
 
+* Improved native CPU COO/CSC batched sparse-dense products. Batched COO and
+  CSC matmul now use fixed-worker batch-owned CPU partitions when
+  ``CPU_THREADS`` resolves above one, while non-batched COO/CSC forward dense
+  products remain serial because they scatter into shared dense output rows.
+  The native CPU sparse-operation benchmark suite now records COO/CSC batched
+  matvec and matmul timings with SciPy references.
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)

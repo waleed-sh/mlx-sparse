@@ -143,11 +143,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help=(
-            "Matrix dimensions to sweep. Defaults to a broad grid up to 32k, "
+            "Matrix dimensions to sweep. Defaults to a broad grid up to 32k; "
             "values greater than 32768 are rejected."
         ),
     )
     parser.add_argument("--rhs-cols", type=int, default=8)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Batch size for batched COO/CSC dense-product benchmarks.",
+    )
     parser.add_argument(
         "--density",
         type=float,
@@ -309,6 +315,7 @@ def main() -> None:
             case=case,
             suites=args.suites,
             rhs_cols=args.rhs_cols,
+            batch_size=args.batch_size,
             index_dtype=index_dtype,
             warmup=args.warmup,
             iters=args.iters,
@@ -327,6 +334,7 @@ def main() -> None:
         "args": {
             "sizes": sizes,
             "rhs_cols": args.rhs_cols,
+            "batch_size": args.batch_size,
             "density_mode": (
                 "explicit_density"
                 if explicit_densities is not None
@@ -1005,6 +1013,7 @@ def _run_case_suites(
     case: MatrixCase,
     suites: list[str],
     rhs_cols: int,
+    batch_size: int,
     index_dtype,
     warmup: int,
     iters: int,
@@ -1053,6 +1062,7 @@ def _run_case_suites(
             records,
             case,
             rhs_cols,
+            batch_size,
             index_dtype,
             warmup,
             iters,
@@ -1387,6 +1397,7 @@ def _bench_coo_csc_dense_products(
     records: list[dict[str, Any]],
     case: MatrixCase,
     rhs_cols: int,
+    batch_size: int,
     index_dtype,
     warmup: int,
     iters: int,
@@ -1405,12 +1416,26 @@ def _bench_coo_csc_dense_products(
     )
     rhs_vec_np = rng.normal(size=(case.primary.shape[1],)).astype(np.float32)
     rhs_mat_np = rng.normal(size=(case.primary.shape[1], rhs_cols)).astype(np.float32)
+    batched_vec_np = rng.normal(size=(batch_size, case.primary.shape[1])).astype(
+        np.float32
+    )
+    batched_mat_np = rng.normal(
+        size=(batch_size, case.primary.shape[1], rhs_cols)
+    ).astype(np.float32)
     rhs_vec = mx.array(rhs_vec_np, dtype=mx.float32)
     rhs_mat = mx.array(rhs_mat_np, dtype=mx.float32)
+    batched_vec = mx.array(batched_vec_np, dtype=mx.float32)
+    batched_mat = mx.array(batched_mat_np, dtype=mx.float32)
     force_eval(rhs_vec)
     force_eval(rhs_mat)
+    force_eval(batched_vec)
+    force_eval(batched_mat)
     expected_vec = case.primary @ rhs_vec_np
     expected_mat = case.primary @ rhs_mat_np
+    expected_batched_vec = batched_vec_np @ case.primary.T
+    expected_batched_mat = np.stack(
+        [case.primary @ batched_mat_np[i] for i in range(batch_size)], axis=0
+    )
 
     for fmt, array in (("coo", coo), ("csc", csc)):
         scipy_matrix = case.primary.asformat(fmt)
@@ -1426,6 +1451,56 @@ def _bench_coo_csc_dense_products(
             fn=lambda array=array: array @ rhs_vec,
             scipy_fn=lambda matrix=scipy_matrix, rhs=rhs_vec_np: matrix @ rhs,
             expected_dense=np.asarray(expected_vec, dtype=np.float32),
+            warmup=warmup,
+            iters=iters,
+            verify=verify,
+            verify_max_elements=verify_max_elements,
+        )
+        _record_operation(
+            records,
+            case=case,
+            suite="coo_csc_dense_products",
+            operation=f"{fmt}_batched_matvec",
+            input_format=fmt,
+            output_format="dense",
+            matrix_meta=sparse_matrix_metadata(array),
+            rhs_meta={
+                "shape": [int(batched_vec.shape[0]), int(batched_vec.shape[1])],
+                "dtype": "float32",
+            },
+            fn=lambda array=array: (
+                ms.coo_batched_matvec(array, batched_vec)
+                if fmt == "coo"
+                else ms.csc_batched_matvec(array, batched_vec)
+            ),
+            scipy_fn=lambda matrix=scipy_matrix, rhs=batched_vec_np: rhs @ matrix.T,
+            expected_dense=np.asarray(expected_batched_vec, dtype=np.float32),
+            warmup=warmup,
+            iters=iters,
+            verify=verify,
+            verify_max_elements=verify_max_elements,
+        )
+        _record_operation(
+            records,
+            case=case,
+            suite="coo_csc_dense_products",
+            operation=f"{fmt}_batched_matmul",
+            input_format=fmt,
+            output_format="dense",
+            matrix_meta=sparse_matrix_metadata(array),
+            rhs_meta={
+                "shape": [
+                    int(batched_mat.shape[0]),
+                    int(batched_mat.shape[1]),
+                    int(batched_mat.shape[2]),
+                ],
+                "dtype": "float32",
+            },
+            fn=lambda array=array: array @ batched_mat,
+            scipy_fn=lambda matrix=scipy_matrix, rhs=batched_mat_np: np.stack(
+                [matrix @ rhs[i] for i in range(rhs.shape[0])], axis=0
+            ),
+            expected_dense=np.asarray(expected_batched_mat, dtype=np.float32),
             warmup=warmup,
             iters=iters,
             verify=verify,
@@ -2103,6 +2178,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         )
     if args.rhs_cols <= 0:
         raise ValueError("--rhs-cols must be positive.")
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be positive.")
     if densities is not None and any(
         density < 0.0 or density > 1.0 for density in densities
     ):
