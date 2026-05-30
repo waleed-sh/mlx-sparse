@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -78,15 +79,30 @@ void csc_diagonal_cpu_impl(const mx::array &data, const mx::array &indices,
     const auto *indptr_ptr = indptr.data<I>();
     auto *out_ptr = out.data<T>();
 
-    for (int col = 0; col < diag_size; ++col) {
-      auto acc = Accumulator<T>::zero();
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        if (indices_ptr[p] == static_cast<I>(col)) {
-          acc += static_cast<typename Accumulator<T>::Type>(data_ptr[p]);
+    auto compute_cols = [&](CpuRange range) {
+      for (int col = range.begin; col < range.end; ++col) {
+        auto acc = Accumulator<T>::zero();
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (indices_ptr[p] == static_cast<I>(col)) {
+            acc += static_cast<typename Accumulator<T>::Type>(data_ptr[p]);
+          }
         }
+        out_ptr[col] = Accumulator<T>::cast(acc);
       }
-      out_ptr[col] = Accumulator<T>::cast(acc);
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || diag_size <= 0) {
+      compute_cols({0, diag_size});
+      return;
     }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, diag_size, workers);
+    if (ranges.size() <= 1) {
+      compute_cols({0, diag_size});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_cols);
   });
 }
 

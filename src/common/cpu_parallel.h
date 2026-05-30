@@ -118,4 +118,32 @@ cpu_ranges_for_output_work(const std::vector<CountT> &work,
   return weighted_cpu_ranges(normalized, requested_workers);
 }
 
+template <typename IndexT>
+std::vector<int64_t> compressed_segment_work(const IndexT *indptr,
+                                             int n_segments) {
+  static_assert(std::is_integral_v<IndexT>,
+                "compressed indptr values must use an integral type.");
+  std::vector<int64_t> work(static_cast<size_t>(std::max(n_segments, 0)));
+  for (int segment = 0; segment < n_segments; ++segment) {
+    const auto begin = static_cast<int64_t>(indptr[segment]);
+    const auto end = static_cast<int64_t>(indptr[segment + 1]);
+    work[static_cast<size_t>(segment)] = std::max<int64_t>(0, end - begin);
+  }
+  return work;
+}
+
+template <typename IndexT>
+std::vector<CpuRange> cpu_ranges_for_compressed_segments(const IndexT *indptr,
+                                                         int n_segments,
+                                                         int workers) {
+  if (n_segments <= 0) {
+    return {};
+  }
+  if (workers <= 1) {
+    return {{0, n_segments}};
+  }
+  return cpu_ranges_for_output_work(compressed_segment_work(indptr, n_segments),
+                                    workers);
+}
+
 } // namespace mlx_sparse

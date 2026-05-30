@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -85,13 +86,28 @@ void csr_row_norms_cpu_impl(const mx::array &data, const mx::array &indptr,
     const auto *indptr_ptr = indptr.data<I>();
     auto *out_ptr = out.data<float>();
 
-    for (int row = 0; row < n_rows; ++row) {
-      double acc = 0.0;
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-        acc += norm_square<T>(data_ptr[p]);
+    auto compute_rows = [&](CpuRange range) {
+      for (int row = range.begin; row < range.end; ++row) {
+        double acc = 0.0;
+        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          acc += norm_square<T>(data_ptr[p]);
+        }
+        out_ptr[row] = static_cast<float>(std::sqrt(acc));
       }
-      out_ptr[row] = static_cast<float>(std::sqrt(acc));
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0) {
+      compute_rows({0, n_rows});
+      return;
     }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_rows, workers);
+    if (ranges.size() <= 1) {
+      compute_rows({0, n_rows});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_rows);
   });
 }
 

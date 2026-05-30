@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -65,39 +66,63 @@ void csc_sort_indices_cpu_impl(const mx::array &data, const mx::array &indices,
   encoder.set_output_array(out_indices);
   encoder.set_output_array(out_indptr);
 
-  encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
-                    indices = mx::array::unsafe_weak_copy(indices),
-                    indptr = mx::array::unsafe_weak_copy(indptr),
-                    out_data = mx::array::unsafe_weak_copy(out_data),
-                    out_indices = mx::array::unsafe_weak_copy(out_indices),
-                    out_indptr =
-                        mx::array::unsafe_weak_copy(out_indptr)]() mutable {
-    const auto *data_ptr = data.data<T>();
-    const auto *indices_ptr = indices.data<I>();
-    const auto *indptr_ptr = indptr.data<I>();
-    auto *out_data_ptr = out_data.data<T>();
-    auto *out_indices_ptr = out_indices.data<I>();
-    auto *out_indptr_ptr = out_indptr.data<I>();
+  encoder.dispatch(
+      [data = mx::array::unsafe_weak_copy(data),
+       indices = mx::array::unsafe_weak_copy(indices),
+       indptr = mx::array::unsafe_weak_copy(indptr),
+       out_data = mx::array::unsafe_weak_copy(out_data),
+       out_indices = mx::array::unsafe_weak_copy(out_indices),
+       out_indptr = mx::array::unsafe_weak_copy(out_indptr)]() mutable {
+        const auto *data_ptr = data.data<T>();
+        const auto *indices_ptr = indices.data<I>();
+        const auto *indptr_ptr = indptr.data<I>();
+        auto *out_data_ptr = out_data.data<T>();
+        auto *out_indices_ptr = out_indices.data<I>();
+        auto *out_indptr_ptr = out_indptr.data<I>();
 
-    std::copy(data_ptr, data_ptr + data.size(), out_data_ptr);
-    std::copy(indices_ptr, indices_ptr + indices.size(), out_indices_ptr);
-    std::copy(indptr_ptr, indptr_ptr + indptr.size(), out_indptr_ptr);
+        std::copy(indptr_ptr, indptr_ptr + indptr.size(), out_indptr_ptr);
 
-    const auto n_cols = static_cast<int>(indptr.size()) - 1;
-    for (int col = 0; col < n_cols; ++col) {
-      const auto start = static_cast<size_t>(indptr_ptr[col]);
-      const auto end = static_cast<size_t>(indptr_ptr[col + 1]);
-      std::vector<size_t> order(end - start);
-      std::iota(order.begin(), order.end(), start);
-      std::stable_sort(order.begin(), order.end(), [&](size_t lhs, size_t rhs) {
-        return indices_ptr[lhs] < indices_ptr[rhs];
+        const auto n_cols = static_cast<int>(indptr.size()) - 1;
+        auto sort_cols = [&](CpuRange range) {
+          std::vector<size_t> order;
+          for (int col = range.begin; col < range.end; ++col) {
+            const auto start = static_cast<size_t>(indptr_ptr[col]);
+            const auto end = static_cast<size_t>(indptr_ptr[col + 1]);
+            const auto length = end - start;
+            if (length == 0) {
+              continue;
+            }
+            if (length == 1) {
+              out_data_ptr[start] = data_ptr[start];
+              out_indices_ptr[start] = indices_ptr[start];
+              continue;
+            }
+            order.resize(length);
+            std::iota(order.begin(), order.end(), start);
+            std::stable_sort(order.begin(), order.end(),
+                             [&](size_t lhs, size_t rhs) {
+                               return indices_ptr[lhs] < indices_ptr[rhs];
+                             });
+            for (size_t offset = 0; offset < length; ++offset) {
+              out_data_ptr[start + offset] = data_ptr[order[offset]];
+              out_indices_ptr[start + offset] = indices_ptr[order[offset]];
+            }
+          }
+        };
+
+        const int workers = configured_cpu_worker_count();
+        if (workers <= 1 || n_cols <= 0) {
+          sort_cols({0, n_cols});
+          return;
+        }
+        const auto ranges =
+            cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+        if (ranges.size() <= 1) {
+          sort_cols({0, n_cols});
+          return;
+        }
+        parallel_for_cpu_ranges(ranges, sort_cols);
       });
-      for (size_t offset = 0; offset < order.size(); ++offset) {
-        out_data_ptr[start + offset] = data_ptr[order[offset]];
-        out_indices_ptr[start + offset] = indices_ptr[order[offset]];
-      }
-    }
-  });
 }
 
 } // namespace

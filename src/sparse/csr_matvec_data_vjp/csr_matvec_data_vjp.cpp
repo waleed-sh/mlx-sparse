@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -80,12 +81,27 @@ void csr_matvec_data_vjp_cpu_impl(const mx::array &indices,
     const auto *cotangent_ptr = cotangent.data<T>();
     auto *out_ptr = out.data<T>();
 
-    for (int row = 0; row < n_rows; ++row) {
-      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-        out_ptr[p] = Accumulator<T>::cast(
-            multiply_accumulate<T>(cotangent_ptr[row], x_ptr[indices_ptr[p]]));
+    auto compute_rows = [&](CpuRange range) {
+      for (int row = range.begin; row < range.end; ++row) {
+        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          out_ptr[p] = Accumulator<T>::cast(multiply_accumulate<T>(
+              cotangent_ptr[row], x_ptr[indices_ptr[p]]));
+        }
       }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0) {
+      compute_rows({0, n_rows});
+      return;
     }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_rows, workers);
+    if (ranges.size() <= 1) {
+      compute_rows({0, n_rows});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_rows);
   });
 }
 

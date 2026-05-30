@@ -15,10 +15,12 @@
 #include "sparse/csc_todense/csc_todense.h"
 
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -76,14 +78,39 @@ void csc_todense_cpu_impl(const mx::array &data, const mx::array &indices,
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
     auto *out_ptr = out.data<T>();
-    std::fill(out_ptr, out_ptr + out.size(), T{0});
 
-    for (int col = 0; col < n_cols; ++col) {
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        const auto row = static_cast<int>(indices_ptr[p]);
-        out_ptr[static_cast<size_t>(row) * n_cols + col] += data_ptr[p];
-      }
+    const int workers = configured_cpu_worker_count();
+    if (workers > 1 &&
+        out.size() <= static_cast<size_t>(std::numeric_limits<int>::max())) {
+      const auto fill_ranges =
+          equal_cpu_ranges(static_cast<int>(out.size()), workers);
+      parallel_for_cpu_ranges(fill_ranges, [&](CpuRange range) {
+        std::fill(out_ptr + range.begin, out_ptr + range.end, T{0});
+      });
+    } else {
+      std::fill(out_ptr, out_ptr + out.size(), T{0});
     }
+
+    auto fill_cols = [&](CpuRange range) {
+      for (int col = range.begin; col < range.end; ++col) {
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          const auto row = static_cast<int>(indices_ptr[p]);
+          out_ptr[static_cast<size_t>(row) * n_cols + col] += data_ptr[p];
+        }
+      }
+    };
+
+    if (workers <= 1 || n_cols <= 0) {
+      fill_cols({0, n_cols});
+      return;
+    }
+    const auto col_ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+    if (col_ranges.size() <= 1) {
+      fill_cols({0, n_cols});
+      return;
+    }
+    parallel_for_cpu_ranges(col_ranges, fill_cols);
   });
 }
 

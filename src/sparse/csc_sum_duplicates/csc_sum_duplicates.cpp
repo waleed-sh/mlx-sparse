@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -95,20 +96,35 @@ void duplicate_counts_cpu_impl(const mx::array &indices,
     auto *counts_ptr = counts.data<I>();
     const int n_cols = static_cast<int>(indptr.size()) - 1;
 
-    for (int col = 0; col < n_cols; ++col) {
-      I count = I{0};
-      I previous = I{0};
-      bool have_previous = false;
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        const I row = indices_ptr[p];
-        if (!have_previous || row != previous) {
-          count += I{1};
-          previous = row;
-          have_previous = true;
+    auto count_cols = [&](CpuRange range) {
+      for (int col = range.begin; col < range.end; ++col) {
+        I count = I{0};
+        I previous = I{0};
+        bool have_previous = false;
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          const I row = indices_ptr[p];
+          if (!have_previous || row != previous) {
+            count += I{1};
+            previous = row;
+            have_previous = true;
+          }
         }
+        counts_ptr[col] = count;
       }
-      counts_ptr[col] = count;
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_cols <= 0) {
+      count_cols({0, n_cols});
+      return;
     }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+    if (ranges.size() <= 1) {
+      count_cols({0, n_cols});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, count_cols);
   });
 }
 
@@ -145,21 +161,36 @@ void duplicate_fill_cpu_impl(const mx::array &data, const mx::array &indices,
         auto *out_indices_ptr = out_indices.data<I>();
         const int n_cols = static_cast<int>(indptr.size()) - 1;
 
-        for (int col = 0; col < n_cols; ++col) {
-          I write = out_indptr_ptr[col];
-          for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1];) {
-            const I row = indices_ptr[p];
-            AccT acc = Accumulator<T>::zero();
-            do {
-              acc += accumulator_value<T>(data_ptr[p]);
-              ++p;
-            } while (p < indptr_ptr[col + 1] && indices_ptr[p] == row);
+        auto fill_cols = [&](CpuRange range) {
+          for (int col = range.begin; col < range.end; ++col) {
+            I write = out_indptr_ptr[col];
+            for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1];) {
+              const I row = indices_ptr[p];
+              AccT acc = Accumulator<T>::zero();
+              do {
+                acc += accumulator_value<T>(data_ptr[p]);
+                ++p;
+              } while (p < indptr_ptr[col + 1] && indices_ptr[p] == row);
 
-            out_indices_ptr[write] = row;
-            out_data_ptr[write] = Accumulator<T>::cast(acc);
-            ++write;
+              out_indices_ptr[write] = row;
+              out_data_ptr[write] = Accumulator<T>::cast(acc);
+              ++write;
+            }
           }
+        };
+
+        const int workers = configured_cpu_worker_count();
+        if (workers <= 1 || n_cols <= 0) {
+          fill_cols({0, n_cols});
+          return;
         }
+        const auto ranges =
+            cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+        if (ranges.size() <= 1) {
+          fill_cols({0, n_cols});
+          return;
+        }
+        parallel_for_cpu_ranges(ranges, fill_cols);
       });
 }
 
