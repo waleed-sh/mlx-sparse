@@ -14,11 +14,14 @@
 
 #include "sparse/fromdense/fromdense.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "common/common.h"
@@ -61,6 +64,17 @@ mx::Dtype index_dtype_from_bits(int index_dtype_bits) {
   }
   throw std::invalid_argument(
       "csr_fromdense index dtype must be encoded as 32 or 64.");
+}
+
+template <typename I> void check_output_nnz(size_t nnz, const char *op_name) {
+  if (nnz > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    throw std::overflow_error(std::string(op_name) +
+                              " nnz exceeds MLX shape limits.");
+  }
+  if (nnz > static_cast<size_t>(std::numeric_limits<I>::max())) {
+    throw std::overflow_error(std::string(op_name) +
+                              " nnz exceeds index dtype capacity.");
+  }
 }
 
 class FromDenseCounts : public mx::Primitive {
@@ -234,6 +248,183 @@ std::pair<mx::array, int> build_indptr_from_counts(const mx::array &counts,
     return build_indptr_from_counts<int32_t>(counts, n_rows, index_dtype);
   }
   return build_indptr_from_counts<int64_t>(counts, n_rows, index_dtype);
+}
+
+template <typename T, typename I> struct LocalDenseCsr {
+  CpuRange range{0, 0};
+  std::vector<T> data;
+  std::vector<I> indices;
+  std::vector<I> row_counts;
+};
+
+template <typename T, typename I>
+std::tuple<mx::array, mx::array, mx::array>
+csr_fromdense_host_serial(const mx::array &dense, int n_rows, int n_cols,
+                          mx::Dtype index_dtype, float threshold) {
+  const auto *dense_ptr = dense.data<T>();
+  std::vector<I> out_indptr(static_cast<size_t>(n_rows) + 1, I{0});
+  std::vector<T> out_data;
+  std::vector<I> out_indices;
+
+  constexpr size_t kMaxInitialReserve = 1 << 20;
+  const auto dense_size = static_cast<size_t>(dense.size());
+  out_data.reserve(std::min(dense_size, kMaxInitialReserve));
+  out_indices.reserve(std::min(dense_size, kMaxInitialReserve));
+
+  for (int row = 0; row < n_rows; ++row) {
+    const size_t base = static_cast<size_t>(row) * n_cols;
+    for (int col = 0; col < n_cols; ++col) {
+      const T value = dense_ptr[base + col];
+      if (keep_dense_value<T>(value, threshold)) {
+        out_data.push_back(value);
+        out_indices.push_back(static_cast<I>(col));
+      }
+    }
+    check_output_nnz<I>(out_data.size(), "csr_fromdense");
+    out_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(out_data.size());
+  }
+
+  const int out_nnz = static_cast<int>(out_data.size());
+  return {mx::array(out_data.begin(), mx::Shape{out_nnz}, dense.dtype()),
+          mx::array(out_indices.begin(), mx::Shape{out_nnz}, index_dtype),
+          mx::array(out_indptr.begin(),
+                    mx::Shape{static_cast<int>(out_indptr.size())},
+                    index_dtype)};
+}
+
+template <typename T, typename I>
+std::tuple<mx::array, mx::array, mx::array>
+csr_fromdense_host_parallel(const mx::array &dense, int n_rows, int n_cols,
+                            mx::Dtype index_dtype, float threshold,
+                            int requested_workers) {
+  const auto ranges = equal_cpu_ranges(n_rows, requested_workers);
+  if (ranges.size() <= 1) {
+    return csr_fromdense_host_serial<T, I>(dense, n_rows, n_cols, index_dtype,
+                                           threshold);
+  }
+
+  const auto *dense_ptr = dense.data<T>();
+  std::vector<LocalDenseCsr<T, I>> local_outputs(ranges.size());
+
+  parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+    auto &local = local_outputs[worker];
+    local.range = range;
+    local.row_counts.resize(static_cast<size_t>(range.end - range.begin), I{0});
+
+    const auto local_rows = static_cast<size_t>(range.end - range.begin);
+    const auto dense_size = static_cast<size_t>(dense.size());
+    const auto reserve = std::min(
+        dense_size, std::min<size_t>(local_rows * static_cast<size_t>(n_cols),
+                                     size_t{1} << 20));
+    local.data.reserve(reserve);
+    local.indices.reserve(reserve);
+
+    for (int row = range.begin; row < range.end; ++row) {
+      const auto before = local.data.size();
+      const size_t base = static_cast<size_t>(row) * n_cols;
+      for (int col = 0; col < n_cols; ++col) {
+        const T value = dense_ptr[base + col];
+        if (keep_dense_value<T>(value, threshold)) {
+          local.data.push_back(value);
+          local.indices.push_back(static_cast<I>(col));
+        }
+      }
+      const auto row_nnz = local.data.size() - before;
+      check_output_nnz<I>(row_nnz, "csr_fromdense row");
+      local.row_counts[static_cast<size_t>(row - range.begin)] =
+          static_cast<I>(row_nnz);
+    }
+  });
+
+  std::vector<I> out_indptr(static_cast<size_t>(n_rows) + 1, I{0});
+  size_t total_nnz = 0;
+  for (const auto &local : local_outputs) {
+    for (int row = local.range.begin; row < local.range.end; ++row) {
+      const auto count = static_cast<size_t>(
+          local.row_counts[static_cast<size_t>(row - local.range.begin)]);
+      total_nnz += count;
+      check_output_nnz<I>(total_nnz, "csr_fromdense");
+      out_indptr[static_cast<size_t>(row) + 1] = static_cast<I>(total_nnz);
+    }
+  }
+
+  std::vector<T> out_data(total_nnz);
+  std::vector<I> out_indices(total_nnz);
+  for (const auto &local : local_outputs) {
+    size_t read = 0;
+    for (int row = local.range.begin; row < local.range.end; ++row) {
+      const auto count = static_cast<size_t>(
+          local.row_counts[static_cast<size_t>(row - local.range.begin)]);
+      const auto write = static_cast<size_t>(out_indptr[row]);
+      std::copy(local.data.begin() + static_cast<std::ptrdiff_t>(read),
+                local.data.begin() + static_cast<std::ptrdiff_t>(read + count),
+                out_data.begin() + static_cast<std::ptrdiff_t>(write));
+      std::copy(local.indices.begin() + static_cast<std::ptrdiff_t>(read),
+                local.indices.begin() +
+                    static_cast<std::ptrdiff_t>(read + count),
+                out_indices.begin() + static_cast<std::ptrdiff_t>(write));
+      read += count;
+    }
+    if (read != local.data.size() || read != local.indices.size()) {
+      throw std::runtime_error(
+          "csr_fromdense internal parallel count mismatch.");
+    }
+  }
+
+  const int out_nnz = static_cast<int>(total_nnz);
+  return {mx::array(out_data.begin(), mx::Shape{out_nnz}, dense.dtype()),
+          mx::array(out_indices.begin(), mx::Shape{out_nnz}, index_dtype),
+          mx::array(out_indptr.begin(),
+                    mx::Shape{static_cast<int>(out_indptr.size())},
+                    index_dtype)};
+}
+
+template <typename T, typename I>
+std::tuple<mx::array, mx::array, mx::array>
+csr_fromdense_host_typed(mx::array dense, int n_rows, int n_cols,
+                         mx::Dtype index_dtype, float threshold) {
+  dense.eval();
+  const int workers = configured_cpu_worker_count();
+  if (workers > 1 && n_rows > 0) {
+    return csr_fromdense_host_parallel<T, I>(dense, n_rows, n_cols, index_dtype,
+                                             threshold, workers);
+  }
+  return csr_fromdense_host_serial<T, I>(dense, n_rows, n_cols, index_dtype,
+                                         threshold);
+}
+
+template <typename T>
+std::tuple<mx::array, mx::array, mx::array>
+csr_fromdense_host_value(mx::array dense, int n_rows, int n_cols,
+                         mx::Dtype index_dtype, float threshold) {
+  if (index_dtype == mx::int32) {
+    return csr_fromdense_host_typed<T, int32_t>(std::move(dense), n_rows,
+                                                n_cols, index_dtype, threshold);
+  }
+  return csr_fromdense_host_typed<T, int64_t>(std::move(dense), n_rows, n_cols,
+                                              index_dtype, threshold);
+}
+
+std::tuple<mx::array, mx::array, mx::array>
+csr_fromdense_host(mx::array dense, int n_rows, int n_cols,
+                   mx::Dtype index_dtype, float threshold) {
+  if (dense.dtype() == mx::float32) {
+    return csr_fromdense_host_value<float>(std::move(dense), n_rows, n_cols,
+                                           index_dtype, threshold);
+  }
+  if (dense.dtype() == mx::float16) {
+    return csr_fromdense_host_value<mx::float16_t>(
+        std::move(dense), n_rows, n_cols, index_dtype, threshold);
+  }
+  if (dense.dtype() == mx::bfloat16) {
+    return csr_fromdense_host_value<mx::bfloat16_t>(
+        std::move(dense), n_rows, n_cols, index_dtype, threshold);
+  }
+  if (dense.dtype() == mx::complex64) {
+    return csr_fromdense_host_value<mx::complex64_t>(
+        std::move(dense), n_rows, n_cols, index_dtype, threshold);
+  }
+  throw std::runtime_error("csr_fromdense unsupported value dtype.");
 }
 
 mx::array fromdense_counts(const mx::array &dense, int n_rows,
@@ -410,6 +601,10 @@ csr_fromdense(const mx::array &dense, int index_dtype_bits, float threshold,
 
   auto stream = mx::to_stream(s);
   auto dense_contig = mx::contiguous(dense, false, stream);
+  if (stream.device == mx::Device::cpu) {
+    return csr_fromdense_host(std::move(dense_contig), n_rows, n_cols,
+                              index_dtype, threshold);
+  }
   auto counts = fromdense_counts(dense_contig, n_rows, index_dtype, n_cols,
                                  threshold, stream);
   mx::eval(counts);

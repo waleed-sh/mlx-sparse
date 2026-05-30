@@ -302,9 +302,14 @@ while other CPU kernels are still being optimized incrementally:
   conversion, CSC column reductions, CSC diagonal extraction, and CSC dense
   conversion use fixed-worker row/column partitions when
   ``MLX_SPARSE_CPU_THREADS`` resolves above one.
-* ``fromdense`` count/fill stages, compressed CSR/CSC ``sort_indices`` and
-  ``sum_duplicates``, and sparse-value VJP kernels use fixed-worker
-  row/column/entry partitions where each worker owns disjoint output entries.
+* ``fromdense`` uses an immediate CPU host assembly path that scans rows once
+  into canonical CSR buffers when the selected stream is CPU.  GPU streams keep
+  the staged count/prefix/fill implementation.
+* Compressed CSR/CSC ``sort_indices`` and ``sum_duplicates`` plus sparse-value
+  VJP kernels use fixed-worker row/column/entry partitions where each worker
+  owns disjoint output entries.  ``sum_duplicates`` stays on the staged
+  count/prefix/fill path because measured immediate host assembly did not beat
+  it on the CPU benchmark sweep.
 * CSR-to-CSC, CSC-to-CSR, COO-to-CSR, COO-to-CSC, and CSR transpose CPU
   structural paths use histogram/prefix/fill style assembly with private
   per-worker histograms or private write offsets for the parallel fill.  They
