@@ -210,6 +210,48 @@ def test_fromdense_large_cases_are_reported_as_skipped(mx):
     assert "dense materialization" in records[0]["skip_reason"]
 
 
+def test_coo_csc_dense_product_benchmarks_include_batched_records(mx):
+    bench = _sparse_ops_benchmark()
+    rng = np.random.default_rng(5)
+    matrix = bench.uniform_short_rows(6, 8, 2, rng)
+    case = bench.MatrixCase(
+        family="uniform_short_rows",
+        label="uniform_short_rows_n6_r2",
+        primary=matrix,
+        spgemm_rhs=matrix,
+        size=6,
+        short_row_nnz=2,
+    )
+    records = []
+
+    bench._bench_coo_csc_dense_products(
+        records,
+        case,
+        rhs_cols=2,
+        batch_size=3,
+        index_dtype=mx.int32,
+        warmup=0,
+        iters=1,
+        verify=True,
+        verify_max_elements=256,
+        rng=rng,
+    )
+
+    assert {
+        "coo_matvec",
+        "coo_matmul",
+        "coo_batched_matvec",
+        "coo_batched_matmul",
+        "csc_matvec",
+        "csc_matmul",
+        "csc_batched_matvec",
+        "csc_batched_matmul",
+    } == {record["operation"] for record in records}
+    assert all(
+        record["verification"]["status"] == "checked_dense" for record in records
+    )
+
+
 def test_baseline_comparison_uses_loose_thresholds(tmp_path):
     bench = _sparse_ops_benchmark()
     baseline = {
@@ -251,6 +293,7 @@ def test_validation_rejects_dimensions_above_32k():
         size=None,
         sizes=[bench.MAX_BENCHMARK_DIMENSION + 1],
         rhs_cols=1,
+        batch_size=4,
         density=None,
         densities=[0.01],
         target_nnz_per_row=None,

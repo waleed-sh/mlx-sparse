@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -60,6 +61,129 @@ private:
 };
 
 template <typename T, typename I>
+void coo_batched_matmul_generic_loop(const T *data_ptr, const I *row_ptr,
+                                     const I *col_ptr, const T *rhs_ptr,
+                                     T *out_ptr, size_t nnz, int batch_begin,
+                                     int batch_end, int rhs_cols,
+                                     size_t per_batch_out,
+                                     size_t per_batch_rhs) {
+  using AccT = typename Accumulator<T>::Type;
+
+  if constexpr (std::is_same_v<AccT, T>) {
+    const auto fill_begin = static_cast<size_t>(batch_begin) * per_batch_out;
+    const auto fill_end = static_cast<size_t>(batch_end) * per_batch_out;
+    std::fill(out_ptr + fill_begin, out_ptr + fill_end, T{});
+    for (int batch = batch_begin; batch < batch_end; ++batch) {
+      const auto out_batch = static_cast<size_t>(batch) * per_batch_out;
+      const auto rhs_batch = static_cast<size_t>(batch) * per_batch_rhs;
+      for (size_t p = 0; p < nnz; ++p) {
+        const auto out_offset =
+            out_batch + static_cast<size_t>(row_ptr[p]) * rhs_cols;
+        const auto rhs_offset =
+            rhs_batch + static_cast<size_t>(col_ptr[p]) * rhs_cols;
+        const T value = data_ptr[p];
+        for (int k = 0; k < rhs_cols; ++k) {
+          out_ptr[out_offset + k] += value * rhs_ptr[rhs_offset + k];
+        }
+      }
+    }
+  } else {
+    const auto fill_begin = static_cast<size_t>(batch_begin) * per_batch_out;
+    const auto fill_end = static_cast<size_t>(batch_end) * per_batch_out;
+    std::vector<AccT> accum(fill_end - fill_begin, Accumulator<T>::zero());
+    for (int batch = batch_begin; batch < batch_end; ++batch) {
+      const auto out_batch = static_cast<size_t>(batch) * per_batch_out;
+      const auto rhs_batch = static_cast<size_t>(batch) * per_batch_rhs;
+      for (size_t p = 0; p < nnz; ++p) {
+        const auto out_offset =
+            out_batch + static_cast<size_t>(row_ptr[p]) * rhs_cols;
+        const auto rhs_offset =
+            rhs_batch + static_cast<size_t>(col_ptr[p]) * rhs_cols;
+        const T value = data_ptr[p];
+        for (int k = 0; k < rhs_cols; ++k) {
+          accum[out_offset - fill_begin + k] +=
+              multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
+        }
+      }
+    }
+    for (size_t i = fill_begin; i < fill_end; ++i) {
+      out_ptr[i] = Accumulator<T>::cast(accum[i - fill_begin]);
+    }
+  }
+}
+
+template <typename T, typename I, int RHSCols>
+void coo_batched_matmul_small_rhs_loop(const T *data_ptr, const I *row_ptr,
+                                       const I *col_ptr, const T *rhs_ptr,
+                                       T *out_ptr, size_t nnz, int batch_begin,
+                                       int batch_end, size_t per_batch_out,
+                                       size_t per_batch_rhs) {
+  using AccT = typename Accumulator<T>::Type;
+
+  if constexpr (std::is_same_v<AccT, T>) {
+    const auto fill_begin = static_cast<size_t>(batch_begin) * per_batch_out;
+    const auto fill_end = static_cast<size_t>(batch_end) * per_batch_out;
+    std::fill(out_ptr + fill_begin, out_ptr + fill_end, T{});
+    for (int batch = batch_begin; batch < batch_end; ++batch) {
+      const auto out_batch = static_cast<size_t>(batch) * per_batch_out;
+      const auto rhs_batch = static_cast<size_t>(batch) * per_batch_rhs;
+      for (size_t p = 0; p < nnz; ++p) {
+        const auto out_offset =
+            out_batch + static_cast<size_t>(row_ptr[p]) * RHSCols;
+        const auto rhs_offset =
+            rhs_batch + static_cast<size_t>(col_ptr[p]) * RHSCols;
+        const T value = data_ptr[p];
+        for (int k = 0; k < RHSCols; ++k) {
+          out_ptr[out_offset + k] += value * rhs_ptr[rhs_offset + k];
+        }
+      }
+    }
+  } else {
+    const auto fill_begin = static_cast<size_t>(batch_begin) * per_batch_out;
+    const auto fill_end = static_cast<size_t>(batch_end) * per_batch_out;
+    std::vector<AccT> accum(fill_end - fill_begin, Accumulator<T>::zero());
+    for (int batch = batch_begin; batch < batch_end; ++batch) {
+      const auto out_batch = static_cast<size_t>(batch) * per_batch_out;
+      const auto rhs_batch = static_cast<size_t>(batch) * per_batch_rhs;
+      for (size_t p = 0; p < nnz; ++p) {
+        const auto out_offset =
+            out_batch + static_cast<size_t>(row_ptr[p]) * RHSCols;
+        const auto rhs_offset =
+            rhs_batch + static_cast<size_t>(col_ptr[p]) * RHSCols;
+        const T value = data_ptr[p];
+        for (int k = 0; k < RHSCols; ++k) {
+          accum[out_offset - fill_begin + k] +=
+              multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
+        }
+      }
+    }
+    for (size_t i = fill_begin; i < fill_end; ++i) {
+      out_ptr[i] = Accumulator<T>::cast(accum[i - fill_begin]);
+    }
+  }
+}
+
+template <typename T, typename I>
+void coo_batched_matmul_run_range(const T *data_ptr, const I *row_ptr,
+                                  const I *col_ptr, const T *rhs_ptr,
+                                  T *out_ptr, size_t nnz, int rhs_cols,
+                                  size_t per_batch_out, size_t per_batch_rhs,
+                                  CpuRange batch_range) {
+  switch (rhs_cols) {
+  case 1:
+    coo_batched_matmul_small_rhs_loop<T, I, 1>(
+        data_ptr, row_ptr, col_ptr, rhs_ptr, out_ptr, nnz, batch_range.begin,
+        batch_range.end, per_batch_out, per_batch_rhs);
+    break;
+  default:
+    coo_batched_matmul_generic_loop<T, I>(
+        data_ptr, row_ptr, col_ptr, rhs_ptr, out_ptr, nnz, batch_range.begin,
+        batch_range.end, rhs_cols, per_batch_out, per_batch_rhs);
+    break;
+  }
+}
+
+template <typename T, typename I>
 void coo_batched_matmul_cpu_impl(const mx::array &data, const mx::array &row,
                                  const mx::array &col, const mx::array &rhs,
                                  mx::array &out, int n_rows, int n_cols,
@@ -80,52 +204,29 @@ void coo_batched_matmul_cpu_impl(const mx::array &data, const mx::array &row,
                     rhs = mx::array::unsafe_weak_copy(rhs),
                     out = mx::array::unsafe_weak_copy(out), n_rows, n_cols,
                     batch_size, rhs_cols]() mutable {
-    using AccT = typename Accumulator<T>::Type;
     const auto *data_ptr = data.data<T>();
     const auto *row_ptr = row.data<I>();
     const auto *col_ptr = col.data<I>();
     const auto *rhs_ptr = rhs.data<T>();
     auto *out_ptr = out.data<T>();
+    const size_t nnz = data.size();
     const size_t per_batch_out = static_cast<size_t>(n_rows) * rhs_cols;
     const size_t per_batch_rhs = static_cast<size_t>(n_cols) * rhs_cols;
 
-    if constexpr (std::is_same_v<AccT, T>) {
-      std::fill(out_ptr, out_ptr + out.size(), T{});
-      for (int batch = 0; batch < batch_size; ++batch) {
-        const auto out_batch = static_cast<size_t>(batch) * per_batch_out;
-        const auto rhs_batch = static_cast<size_t>(batch) * per_batch_rhs;
-        for (size_t p = 0; p < data.size(); ++p) {
-          const auto out_offset =
-              out_batch + static_cast<size_t>(row_ptr[p]) * rhs_cols;
-          const auto rhs_offset =
-              rhs_batch + static_cast<size_t>(col_ptr[p]) * rhs_cols;
-          const T value = data_ptr[p];
-          for (int k = 0; k < rhs_cols; ++k) {
-            out_ptr[out_offset + k] += value * rhs_ptr[rhs_offset + k];
-          }
-        }
-      }
-    } else {
-      std::vector<AccT> accum(out.size(), Accumulator<T>::zero());
-      for (int batch = 0; batch < batch_size; ++batch) {
-        const auto out_batch = static_cast<size_t>(batch) * per_batch_out;
-        const auto rhs_batch = static_cast<size_t>(batch) * per_batch_rhs;
-        for (size_t p = 0; p < data.size(); ++p) {
-          const auto out_offset =
-              out_batch + static_cast<size_t>(row_ptr[p]) * rhs_cols;
-          const auto rhs_offset =
-              rhs_batch + static_cast<size_t>(col_ptr[p]) * rhs_cols;
-          const T value = data_ptr[p];
-          for (int k = 0; k < rhs_cols; ++k) {
-            accum[out_offset + k] +=
-                multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
-          }
-        }
-      }
-      for (size_t i = 0; i < out.size(); ++i) {
-        out_ptr[i] = Accumulator<T>::cast(accum[i]);
-      }
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || batch_size <= 1) {
+      coo_batched_matmul_run_range<T, I>(data_ptr, row_ptr, col_ptr, rhs_ptr,
+                                         out_ptr, nnz, rhs_cols, per_batch_out,
+                                         per_batch_rhs, {0, batch_size});
+      return;
     }
+
+    const auto ranges = equal_cpu_ranges(batch_size, workers);
+    parallel_for_cpu_ranges(ranges, [&](CpuRange range) {
+      coo_batched_matmul_run_range<T, I>(data_ptr, row_ptr, col_ptr, rhs_ptr,
+                                         out_ptr, nnz, rhs_cols, per_batch_out,
+                                         per_batch_rhs, range);
+    });
   });
 }
 
