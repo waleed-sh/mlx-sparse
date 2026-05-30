@@ -219,6 +219,24 @@ def test_native_index_dtype_bits_rejects_unsupported_dtype(mx):
             {"lower": True, "unit_diagonal": False},
             "csr_triangular_solve",
         ),
+        (
+            "csr_triangular_diagonal_positions",
+            "triangular_analysis",
+            {},
+            "csr_triangular_diagonal_positions",
+        ),
+        (
+            "csr_triangular_level_schedule",
+            "triangular_analysis",
+            {"lower": True},
+            "csr_triangular_level_schedule",
+        ),
+        (
+            "csr_triangular_solve",
+            "triangular_analyzed",
+            {},
+            "csr_triangular_solve",
+        ),
         ("csr_vdot", "inner", {}, "csr_vdot"),
         ("csr_dot", "inner", {}, "csr_dot"),
         ("csr_permute_vector", "permute", {}, "csr_permute_vector"),
@@ -246,6 +264,15 @@ def test_native_extension_required_error_paths(
         call_args = (data, indices, indptr, (1, 1))
     elif args == "triangular":
         call_args = (data, indices, indptr, vector, (1, 1))
+    elif args == "triangular_analysis":
+        call_args = (indices, indptr, (1, 1))
+    elif args == "triangular_analyzed":
+        call_args = (data, indices, indptr, vector, (1, 1))
+        kwargs = {
+            "lower": True,
+            "unit_diagonal": False,
+            "diagonal_positions": indices,
+        }
     elif args == "inner":
         call_args = (data, indices, indptr, data, indices, indptr, (1, 1))
     else:

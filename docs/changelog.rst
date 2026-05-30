@@ -147,6 +147,16 @@ Improvements
   and solver CPU parallelism is separated behind ``MLX_SPARSE_SOLVER_PARALLEL``
   / ``MLX_SPARSE_SOLVER_THREADS``.
 
+* Added native CSR triangular-solve structural analysis primitives for
+  diagonal-position lookup and dependency-level schedules, plus an analyzed
+  solve path used by the benchmark suite.  The analysis path is guarded by
+  graph structure and falls back to row-order solves when no useful level
+  parallelism exists.  Production explicit-factor solves keep the measured
+  row-order path because cached diagonal positions and fixed-worker level
+  scheduling did not improve the single-thread regression target.  Cholesky
+  solves cache the transposed upper factor without changing the public factor
+  dataclass constructor.
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)

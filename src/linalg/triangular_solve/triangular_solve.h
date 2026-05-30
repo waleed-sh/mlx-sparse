@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <tuple>
+
 #include "common/common.h"
 
 namespace mlx_sparse {
@@ -22,5 +24,19 @@ mx::array csr_triangular_solve(const mx::array &data, const mx::array &indices,
                                const mx::array &indptr, const mx::array &b,
                                int n_rows, int n_cols, bool lower,
                                bool unit_diagonal, mx::StreamOrDevice s = {});
+
+mx::array csr_triangular_diagonal_positions(const mx::array &indices,
+                                            const mx::array &indptr, int n_rows,
+                                            int n_cols);
+
+std::tuple<mx::array, mx::array>
+csr_triangular_level_schedule(const mx::array &indices, const mx::array &indptr,
+                              int n_rows, int n_cols, bool lower);
+
+mx::array csr_triangular_solve_analyzed(
+    const mx::array &data, const mx::array &indices, const mx::array &indptr,
+    const mx::array &b, const mx::array &diagonal_positions,
+    const mx::array &level_offsets, const mx::array &level_rows, int n_rows,
+    int n_cols, bool lower, bool unit_diagonal, mx::StreamOrDevice s = {});
 
 } // namespace mlx_sparse

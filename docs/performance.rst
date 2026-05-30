@@ -328,6 +328,14 @@ while other CPU kernels are still being optimized incrementally:
   than once per Python-sliced RHS column.  Solver parallelism is controlled
   separately with ``MLX_SPARSE_SOLVER_PARALLEL`` and
   ``MLX_SPARSE_SOLVER_THREADS``; it is not enabled by ``SPGEMM_THREADS``.
+* CSR triangular-solve structural analysis is available internally for
+  benchmark and development work: diagonal positions can be precomputed, and a
+  dependency-level schedule is emitted only when the factor graph has level
+  width greater than one.  v0.0.4b1 keeps production explicit-factor solves on
+  the row-order path because the analyzed path did not beat the serial
+  regression target in the measured CPU sweep.  Cholesky solves still reuse the
+  transposed upper factor after the first solve without changing the public
+  factor object constructor.
 * The worker count is the configured runtime value. It is not changed
   heuristically from matrix shape, density, or nnz.
 * No architecture-specific SIMD intrinsics are required in the default build.
