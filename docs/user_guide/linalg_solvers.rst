@@ -124,7 +124,8 @@ Solver support matrix
      - Full CPU + GPU for solve phase
      - No
      - This row covers the solve phase only, the factors were produced by the
-       CPU factorization APIs above.
+       CPU factorization APIs above.  CPU matrix-RHS solves use one native
+       triangular-solve sequence instead of a Python loop over RHS columns.
    * - ``linalg.eigsh``
      - A few eigenpairs of a square symmetric/Hermitian sparse matrix.
      - Partial
@@ -197,7 +198,9 @@ Choosing a solver
 * Use ``minres`` for large symmetric indefinite systems.
 * Use ``spsolve`` for a one-shot square direct solve.
 * Use ``factorized`` when solving the same sparse system against multiple
-  right-hand sides, especially in Accelerate-enabled builds.
+  right-hand sides.  Native explicit-factor solves accept rank-2 RHS arrays on
+  CPU, and Accelerate-enabled builds can use opaque framework solves for
+  supported methods.
 * Use ``sparse_cholesky`` or ``sparse_lu`` only when you need explicit
   mlx-sparse factor objects.
 * Use ``eigsh``, ``eigs``, or ``svds`` when you need only a few spectral

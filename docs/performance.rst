@@ -322,6 +322,12 @@ while other CPU kernels are still being optimized incrementally:
   scatter-style kernels.  CSR transpose products and axis-mismatched COO/CSC
   reductions use private per-worker accumulators with a deterministic final
   reduction, while CSC transpose products use output-column ownership.
+* Native explicit-factor solves accept matrix right-hand sides on CPU.  The
+  serial path uses a row-major sparse triangular solve with multiple dense RHS
+  columns so each sparse factor row is scanned once per triangular solve rather
+  than once per Python-sliced RHS column.  Solver parallelism is controlled
+  separately with ``MLX_SPARSE_SOLVER_PARALLEL`` and
+  ``MLX_SPARSE_SOLVER_THREADS``; it is not enabled by ``SPGEMM_THREADS``.
 * The worker count is the configured runtime value. It is not changed
   heuristically from matrix shape, density, or nnz.
 * No architecture-specific SIMD intrinsics are required in the default build.

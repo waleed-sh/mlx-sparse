@@ -107,21 +107,24 @@ def _float32_sparse(
 
 def _triangular_solve(factor: CSRArray, b, *, lower: bool, unit_diagonal: bool):
     rhs = ensure_mx_array(b, dtype=mx.float32)
-    if rhs.ndim == 1:
-        return _native.csr_triangular_solve(
-            factor.data,
-            factor.indices,
-            factor.indptr,
-            rhs,
-            factor.shape,
-            lower=lower,
-            unit_diagonal=unit_diagonal,
+    if rhs.ndim not in (1, 2):
+        raise ValueError(f"right-hand side must be rank-1 or rank-2, got {rhs.shape}.")
+    if rhs.shape[0] != factor.shape[0]:
+        expected = (factor.shape[0],) if rhs.ndim == 1 else (factor.shape[0], "nrhs")
+        raise ValueError(
+            f"right-hand side has incompatible shape {rhs.shape}; expected {expected}."
         )
-    if rhs.ndim == 2:
-        raise NotImplementedError(
-            "sparse triangular solve currently accepts rank-1 RHS."
-        )
-    raise ValueError(f"right-hand side must be rank-1 or rank-2, got {rhs.shape}.")
+    if rhs.ndim == 2 and rhs.shape[1] <= 0:
+        raise ValueError("right-hand side must include at least one column.")
+    return _native.csr_triangular_solve(
+        factor.data,
+        factor.indices,
+        factor.indptr,
+        rhs,
+        factor.shape,
+        lower=lower,
+        unit_diagonal=unit_diagonal,
+    )
 
 
 def _normalize_factorized_method(method: str) -> str:
@@ -176,8 +179,7 @@ def _solve_columns(solver, b, *, rhs_size: int) -> mx.array:
             )
         if rhs.shape[1] <= 0:
             raise ValueError("right-hand side must include at least one column.")
-        columns = [solver.solve(rhs[:, col])[:, None] for col in range(rhs.shape[1])]
-        return mx.concatenate(columns, axis=1)
+        return solver.solve(rhs)
     raise ValueError(f"right-hand side must be rank-1 or rank-2, got {rhs.shape}.")
 
 
@@ -292,10 +294,11 @@ class SparseCholesky:
             on the host.
 
         Args:
-            b: Right-hand side vector of shape ``(n,)``.
+            b: Right-hand side array of shape ``(n,)`` or ``(n, nrhs)``.
 
         Returns:
-            Solution vector ``x`` of shape ``(n,)`` as an ``mlx.core.array``.
+            Solution array of shape ``(n,)`` or ``(n, nrhs)`` as an
+            ``mlx.core.array``.
 
         Raises:
             ValueError: If ``b`` has the wrong shape.
@@ -344,17 +347,27 @@ class SparseLU:
             call and shape checks run on the host.
 
         Args:
-            b: Right-hand side vector of shape ``(n,)``.
+            b: Right-hand side array of shape ``(n,)`` or ``(n, nrhs)``.
 
         Returns:
-            Solution vector ``x`` of shape ``(n,)`` as an ``mlx.core.array``.
+            Solution array of shape ``(n,)`` or ``(n, nrhs)`` as an
+            ``mlx.core.array``.
 
         Raises:
-            NotImplementedError: If ``b`` is not rank-1.
+            ValueError: If ``b`` has the wrong shape.
         """
         rhs = ensure_mx_array(b, dtype=mx.float32)
-        if rhs.ndim != 1:
-            raise NotImplementedError("SparseLU.solve currently accepts rank-1 RHS.")
+        if rhs.ndim not in (1, 2):
+            raise ValueError(
+                f"right-hand side must be rank-1 or rank-2, got {rhs.shape}."
+            )
+        if rhs.shape[0] != self.shape[0]:
+            raise ValueError(
+                f"right-hand side has incompatible shape {rhs.shape}; "
+                f"expected first dimension {self.shape[0]}."
+            )
+        if rhs.ndim == 2 and rhs.shape[1] <= 0:
+            raise ValueError("right-hand side must include at least one column.")
         permuted = _native.csr_permute_vector(rhs, self.perm)
         y = _triangular_solve(self.L, permuted, lower=True, unit_diagonal=True)
         return _triangular_solve(self.U, y, lower=False, unit_diagonal=False)

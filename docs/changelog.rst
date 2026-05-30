@@ -141,6 +141,12 @@ Improvements
   assembly was also measured for compressed ``sum_duplicates`` and deliberately
   not adopted because it did not beat the existing staged CPU path.
 
+* Added native rank-2 RHS support for explicit-factor CPU solves.  Native
+  Cholesky and LU reuse now apply CSR triangular solves to dense RHS matrices
+  in one native call sequence, LU row permutation accepts matrix RHS inputs,
+  and solver CPU parallelism is separated behind ``MLX_SPARSE_SOLVER_PARALLEL``
+  / ``MLX_SPARSE_SOLVER_THREADS``.
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)

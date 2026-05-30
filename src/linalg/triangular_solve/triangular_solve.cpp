@@ -15,6 +15,7 @@
 #include "linalg/triangular_solve/triangular_solve.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <limits>
@@ -34,6 +35,7 @@
 #include "mlx/backend/metal/device.h"
 #endif
 
+#include "common/cpu_parallel.h"
 #include "linalg/common/common.h"
 
 namespace mlx_sparse {
@@ -45,9 +47,9 @@ using namespace linalg_detail;
 class CSRTriangularSolve : public mx::Primitive {
 public:
   CSRTriangularSolve(mx::Stream stream, int n_rows, int n_cols, bool lower,
-                     bool unit_diagonal)
+                     bool unit_diagonal, int rhs_cols)
       : Primitive(stream), n_rows_(n_rows), n_cols_(n_cols), lower_(lower),
-        unit_diagonal_(unit_diagonal) {}
+        unit_diagonal_(unit_diagonal), rhs_cols_(rhs_cols) {}
 
   void eval_cpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
@@ -59,7 +61,8 @@ public:
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSRTriangularSolve &>(other);
     return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ &&
-           lower_ == rhs.lower_ && unit_diagonal_ == rhs.unit_diagonal_;
+           lower_ == rhs.lower_ && unit_diagonal_ == rhs.unit_diagonal_ &&
+           rhs_cols_ == rhs.rhs_cols_;
   }
 
 private:
@@ -67,14 +70,14 @@ private:
   int n_cols_;
   bool lower_;
   bool unit_diagonal_;
+  int rhs_cols_;
 };
 
 template <typename I>
-void csr_triangular_solve_cpu_impl(const mx::array &data,
-                                   const mx::array &indices,
-                                   const mx::array &indptr, const mx::array &b,
-                                   mx::array &x, int n_rows, bool lower,
-                                   bool unit_diagonal, mx::Stream stream) {
+void csr_triangular_solve_vector_cpu_impl(
+    const mx::array &data, const mx::array &indices, const mx::array &indptr,
+    const mx::array &b, mx::array &x, int n_rows, bool lower,
+    bool unit_diagonal, mx::Stream stream) {
   x.set_data(mx::allocator::malloc(x.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -138,6 +141,245 @@ void csr_triangular_solve_cpu_impl(const mx::array &data,
   });
 }
 
+template <typename I, int kRhsCols>
+void csr_triangular_solve_matrix_fixed_cols(const float *data_ptr,
+                                            const I *indices_ptr,
+                                            const I *indptr_ptr,
+                                            const float *b_ptr, float *x_ptr,
+                                            int n_rows, bool lower,
+                                            bool unit_diagonal) {
+  std::array<float, static_cast<size_t>(kRhsCols)> sum{};
+  if (lower) {
+    for (int row = 0; row < n_rows; ++row) {
+      for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+        sum[static_cast<size_t>(rhs)] =
+            b_ptr[static_cast<size_t>(row) * kRhsCols + rhs];
+      }
+      float diag = 1.0f;
+      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+        const int col = static_cast<int>(indices_ptr[p]);
+        if (col < row) {
+          const float value = data_ptr[p];
+          const float *x_col = x_ptr + static_cast<size_t>(col) * kRhsCols;
+          for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+            sum[static_cast<size_t>(rhs)] -= value * x_col[rhs];
+          }
+        } else if (col == row) {
+          diag = data_ptr[p];
+        }
+      }
+      if (!unit_diagonal &&
+          std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
+        throw std::runtime_error(
+            "csr_triangular_solve encountered a zero diagonal.");
+      }
+      float *x_row = x_ptr + static_cast<size_t>(row) * kRhsCols;
+      if (unit_diagonal) {
+        for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+          x_row[rhs] = sum[static_cast<size_t>(rhs)];
+        }
+      } else {
+        const float inv_diag = 1.0f / diag;
+        for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+          x_row[rhs] = sum[static_cast<size_t>(rhs)] * inv_diag;
+        }
+      }
+    }
+  } else {
+    for (int row = n_rows - 1; row >= 0; --row) {
+      for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+        sum[static_cast<size_t>(rhs)] =
+            b_ptr[static_cast<size_t>(row) * kRhsCols + rhs];
+      }
+      float diag = 1.0f;
+      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+        const int col = static_cast<int>(indices_ptr[p]);
+        if (col > row) {
+          const float value = data_ptr[p];
+          const float *x_col = x_ptr + static_cast<size_t>(col) * kRhsCols;
+          for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+            sum[static_cast<size_t>(rhs)] -= value * x_col[rhs];
+          }
+        } else if (col == row) {
+          diag = data_ptr[p];
+        }
+      }
+      if (!unit_diagonal &&
+          std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
+        throw std::runtime_error(
+            "csr_triangular_solve encountered a zero diagonal.");
+      }
+      float *x_row = x_ptr + static_cast<size_t>(row) * kRhsCols;
+      if (unit_diagonal) {
+        for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+          x_row[rhs] = sum[static_cast<size_t>(rhs)];
+        }
+      } else {
+        const float inv_diag = 1.0f / diag;
+        for (int rhs = 0; rhs < kRhsCols; ++rhs) {
+          x_row[rhs] = sum[static_cast<size_t>(rhs)] * inv_diag;
+        }
+      }
+    }
+  }
+}
+
+template <typename I>
+void csr_triangular_solve_matrix_rhs_range(
+    const float *data_ptr, const I *indices_ptr, const I *indptr_ptr,
+    const float *b_ptr, float *x_ptr, int n_rows, int rhs_cols, CpuRange cols,
+    bool lower, bool unit_diagonal) {
+  const int width = cols.end - cols.begin;
+  std::vector<float> sum(static_cast<size_t>(width));
+  if (lower) {
+    for (int row = 0; row < n_rows; ++row) {
+      const size_t row_base = static_cast<size_t>(row) * rhs_cols;
+      for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+        sum[static_cast<size_t>(rhs - cols.begin)] = b_ptr[row_base + rhs];
+      }
+      float diag = 1.0f;
+      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+        const int col = static_cast<int>(indices_ptr[p]);
+        if (col < row) {
+          const float value = data_ptr[p];
+          const size_t col_base = static_cast<size_t>(col) * rhs_cols;
+          for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+            sum[static_cast<size_t>(rhs - cols.begin)] -=
+                value * x_ptr[col_base + rhs];
+          }
+        } else if (col == row) {
+          diag = data_ptr[p];
+        }
+      }
+      if (!unit_diagonal &&
+          std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
+        throw std::runtime_error(
+            "csr_triangular_solve encountered a zero diagonal.");
+      }
+      if (unit_diagonal) {
+        for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+          x_ptr[row_base + rhs] = sum[static_cast<size_t>(rhs - cols.begin)];
+        }
+      } else {
+        const float inv_diag = 1.0f / diag;
+        for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+          x_ptr[row_base + rhs] =
+              sum[static_cast<size_t>(rhs - cols.begin)] * inv_diag;
+        }
+      }
+    }
+  } else {
+    for (int row = n_rows - 1; row >= 0; --row) {
+      const size_t row_base = static_cast<size_t>(row) * rhs_cols;
+      for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+        sum[static_cast<size_t>(rhs - cols.begin)] = b_ptr[row_base + rhs];
+      }
+      float diag = 1.0f;
+      for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+        const int col = static_cast<int>(indices_ptr[p]);
+        if (col > row) {
+          const float value = data_ptr[p];
+          const size_t col_base = static_cast<size_t>(col) * rhs_cols;
+          for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+            sum[static_cast<size_t>(rhs - cols.begin)] -=
+                value * x_ptr[col_base + rhs];
+          }
+        } else if (col == row) {
+          diag = data_ptr[p];
+        }
+      }
+      if (!unit_diagonal &&
+          std::abs(diag) <= std::numeric_limits<float>::epsilon()) {
+        throw std::runtime_error(
+            "csr_triangular_solve encountered a zero diagonal.");
+      }
+      if (unit_diagonal) {
+        for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+          x_ptr[row_base + rhs] = sum[static_cast<size_t>(rhs - cols.begin)];
+        }
+      } else {
+        const float inv_diag = 1.0f / diag;
+        for (int rhs = cols.begin; rhs < cols.end; ++rhs) {
+          x_ptr[row_base + rhs] =
+              sum[static_cast<size_t>(rhs - cols.begin)] * inv_diag;
+        }
+      }
+    }
+  }
+}
+
+template <typename I>
+void csr_triangular_solve_matrix_rhs_cpu_impl(
+    const mx::array &data, const mx::array &indices, const mx::array &indptr,
+    const mx::array &b, mx::array &x, int n_rows, int rhs_cols, bool lower,
+    bool unit_diagonal, mx::Stream stream) {
+  x.set_data(mx::allocator::malloc(x.nbytes()));
+
+  auto &encoder = mx::cpu::get_command_encoder(stream);
+  encoder.set_input_array(data);
+  encoder.set_input_array(indices);
+  encoder.set_input_array(indptr);
+  encoder.set_input_array(b);
+  encoder.set_output_array(x);
+
+  encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
+                    indices = mx::array::unsafe_weak_copy(indices),
+                    indptr = mx::array::unsafe_weak_copy(indptr),
+                    b = mx::array::unsafe_weak_copy(b),
+                    x = mx::array::unsafe_weak_copy(x), n_rows, rhs_cols, lower,
+                    unit_diagonal]() mutable {
+    const auto *data_ptr = data.data<float>();
+    const auto *indices_ptr = indices.data<I>();
+    const auto *indptr_ptr = indptr.data<I>();
+    const auto *b_ptr = b.data<float>();
+    auto *x_ptr = x.data<float>();
+
+    const int workers = configured_solver_worker_count();
+    const auto ranges = equal_cpu_ranges(rhs_cols, workers);
+    if (ranges.size() > 1) {
+      parallel_for_cpu_ranges(ranges, [&](CpuRange cols) {
+        csr_triangular_solve_matrix_rhs_range<I>(
+            data_ptr, indices_ptr, indptr_ptr, b_ptr, x_ptr, n_rows, rhs_cols,
+            cols, lower, unit_diagonal);
+      });
+      return;
+    }
+
+    switch (rhs_cols) {
+    case 2:
+      csr_triangular_solve_matrix_fixed_cols<I, 2>(
+          data_ptr, indices_ptr, indptr_ptr, b_ptr, x_ptr, n_rows, lower,
+          unit_diagonal);
+      return;
+    case 4:
+      csr_triangular_solve_matrix_fixed_cols<I, 4>(
+          data_ptr, indices_ptr, indptr_ptr, b_ptr, x_ptr, n_rows, lower,
+          unit_diagonal);
+      return;
+    case 8:
+      csr_triangular_solve_matrix_fixed_cols<I, 8>(
+          data_ptr, indices_ptr, indptr_ptr, b_ptr, x_ptr, n_rows, lower,
+          unit_diagonal);
+      return;
+    case 16:
+      csr_triangular_solve_matrix_fixed_cols<I, 16>(
+          data_ptr, indices_ptr, indptr_ptr, b_ptr, x_ptr, n_rows, lower,
+          unit_diagonal);
+      return;
+    case 32:
+      csr_triangular_solve_matrix_fixed_cols<I, 32>(
+          data_ptr, indices_ptr, indptr_ptr, b_ptr, x_ptr, n_rows, lower,
+          unit_diagonal);
+      return;
+    default:
+      csr_triangular_solve_matrix_rhs_range<I>(
+          data_ptr, indices_ptr, indptr_ptr, b_ptr, x_ptr, n_rows, rhs_cols,
+          {0, rhs_cols}, lower, unit_diagonal);
+      return;
+    }
+  });
+}
+
 } // namespace
 
 void CSRTriangularSolve::eval_cpu(const std::vector<mx::array> &inputs,
@@ -146,17 +388,30 @@ void CSRTriangularSolve::eval_cpu(const std::vector<mx::array> &inputs,
   auto &indices = inputs[1];
   auto &indptr = inputs[2];
   auto &b = inputs[3];
+  const bool matrix_rhs = b.ndim() == 2;
 
   if (indices.dtype() == mx::int32) {
-    csr_triangular_solve_cpu_impl<int32_t>(data, indices, indptr, b, outputs[0],
-                                           n_rows_, lower_, unit_diagonal_,
-                                           stream());
+    if (matrix_rhs) {
+      csr_triangular_solve_matrix_rhs_cpu_impl<int32_t>(
+          data, indices, indptr, b, outputs[0], n_rows_, rhs_cols_, lower_,
+          unit_diagonal_, stream());
+    } else {
+      csr_triangular_solve_vector_cpu_impl<int32_t>(data, indices, indptr, b,
+                                                    outputs[0], n_rows_, lower_,
+                                                    unit_diagonal_, stream());
+    }
     return;
   }
   if (indices.dtype() == mx::int64) {
-    csr_triangular_solve_cpu_impl<int64_t>(data, indices, indptr, b, outputs[0],
-                                           n_rows_, lower_, unit_diagonal_,
-                                           stream());
+    if (matrix_rhs) {
+      csr_triangular_solve_matrix_rhs_cpu_impl<int64_t>(
+          data, indices, indptr, b, outputs[0], n_rows_, rhs_cols_, lower_,
+          unit_diagonal_, stream());
+    } else {
+      csr_triangular_solve_vector_cpu_impl<int64_t>(data, indices, indptr, b,
+                                                    outputs[0], n_rows_, lower_,
+                                                    unit_diagonal_, stream());
+    }
     return;
   }
   throw std::runtime_error(
@@ -194,7 +449,10 @@ void CSRTriangularSolve::eval_gpu(const std::vector<mx::array> &inputs,
   int unit_diagonal = unit_diagonal_ ? 1 : 0;
   encoder.set_bytes(lower, 7);
   encoder.set_bytes(unit_diagonal, 8);
-  encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+  encoder.set_bytes(rhs_cols_, 9);
+  auto threads = std::max<size_t>(static_cast<size_t>(rhs_cols_), 1);
+  auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
 }
 #else
 void CSRTriangularSolve::eval_gpu(const std::vector<mx::array> &,
@@ -215,13 +473,29 @@ mx::array csr_triangular_solve(const mx::array &data, const mx::array &indices,
   require_rank(data, 1, "csr_triangular_solve data");
   require_rank(indices, 1, "csr_triangular_solve indices");
   require_rank(indptr, 1, "csr_triangular_solve indptr");
-  require_rank(b, 1, "csr_triangular_solve b");
+  if (b.ndim() != 1 && b.ndim() != 2) {
+    throw std::invalid_argument(
+        "csr_triangular_solve b must be rank-1 or rank-2.");
+  }
   require_linalg_float32(data, "csr_triangular_solve data");
   require_linalg_float32(b, "csr_triangular_solve b");
   require_same_index_dtype(indices, indptr, "csr_triangular_solve indices",
                            "csr_triangular_solve indptr");
   require_size(indptr, n_rows + 1, "csr_triangular_solve indptr");
-  require_size(b, n_rows, "csr_triangular_solve b");
+  const bool matrix_rhs = b.ndim() == 2;
+  const int rhs_cols = matrix_rhs ? b.shape(1) : 1;
+  if (matrix_rhs) {
+    if (b.shape(0) != n_rows) {
+      throw std::invalid_argument(
+          "csr_triangular_solve rank-2 b has incompatible row dimension.");
+    }
+    if (rhs_cols <= 0) {
+      throw std::invalid_argument(
+          "csr_triangular_solve rank-2 b must include at least one column.");
+    }
+  } else {
+    require_size(b, n_rows, "csr_triangular_solve b");
+  }
   if (indices.size() != data.size()) {
     throw std::invalid_argument(
         "csr_triangular_solve data and indices must have equal length.");
@@ -233,9 +507,11 @@ mx::array csr_triangular_solve(const mx::array &data, const mx::array &indices,
   auto indptr_contig = mx::contiguous(indptr, false, stream);
   auto b_contig = mx::contiguous(b, false, stream);
 
-  return mx::array(mx::Shape{n_rows}, mx::float32,
-                   std::make_shared<CSRTriangularSolve>(stream, n_rows, n_cols,
-                                                        lower, unit_diagonal),
+  const auto out_shape =
+      matrix_rhs ? mx::Shape{n_rows, rhs_cols} : mx::Shape{n_rows};
+  return mx::array(out_shape, mx::float32,
+                   std::make_shared<CSRTriangularSolve>(
+                       stream, n_rows, n_cols, lower, unit_diagonal, rhs_cols),
                    {data_contig, indices_contig, indptr_contig, b_contig});
 }
 

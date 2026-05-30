@@ -639,15 +639,16 @@ class TestFactorizationsFloat32Csr:
 
 
 class TestTriangularSolveErrors:
-    def test_rank2_raises_not_implemented(self):
+    def test_rank2_rhs_is_supported(self):
         from mlx_sparse.linalg._factorizations import _triangular_solve
 
         if not extension_available():
             pytest.skip("native extension unavailable")
         csr = _spd_2x2(mx)
         b2d = mx.array([[1.0, 2.0], [3.0, 4.0]], dtype=mx.float32)
-        with pytest.raises(NotImplementedError, match="rank-1"):
-            _triangular_solve(csr, b2d, lower=True, unit_diagonal=False)
+        result = _triangular_solve(csr, b2d, lower=True, unit_diagonal=False)
+        mx.eval(result)
+        assert result.shape == (2, 2)
 
     def test_rank0_raises_value_error(self):
         from mlx_sparse.linalg._factorizations import _triangular_solve
@@ -735,14 +736,15 @@ class TestSparseLUExtended:
         mx.eval(x1, x2)
         np.testing.assert_allclose(np.array(x1), np.array(x2))
 
-    def test_solve_rank2_raises(self):
+    def test_solve_rank2_rhs_is_supported(self):
         if not extension_available():
             pytest.skip("native extension unavailable")
         csr = _spd_2x2(mx)
         lu = linalg.sparse_lu(csr)
         b2d = mx.array([[1.0, 2.0], [3.0, 4.0]], dtype=mx.float32)
-        with pytest.raises(NotImplementedError, match="rank-1"):
-            lu.solve(b2d)
+        result = lu.solve(b2d)
+        mx.eval(result)
+        assert result.shape == (2, 2)
 
     def test_splu_alias(self):
         if not extension_available():
