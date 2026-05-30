@@ -305,17 +305,18 @@ while other CPU kernels are still being optimized incrementally:
 * ``fromdense`` count/fill stages, compressed CSR/CSC ``sort_indices`` and
   ``sum_duplicates``, and sparse-value VJP kernels use fixed-worker
   row/column/entry partitions where each worker owns disjoint output entries.
-* CSR-to-CSC and CSC-to-CSR CPU conversions use private per-worker histograms
-  and private write offsets for the parallel fill.  They do not share mutable
-  destination counters between workers.
+* CSR-to-CSC, CSC-to-CSR, COO-to-CSR, COO-to-CSC, and CSR transpose CPU
+  structural paths use histogram/prefix/fill style assembly with private
+  per-worker histograms or private write offsets for the parallel fill.  They
+  do not share mutable destination counters between workers.
 * Non-batched COO/CSC forward dense products remain serial on CPU because they
   scatter into shared dense output rows.  Parallelizing those paths requires a
   measured race-free design such as output ownership or private accumulators;
   unsynchronized scatter writes are not used.
 * Axis-mismatched compressed reductions and transpose products are treated as
-  scatter-style kernels.  They remain serial or use existing safe lowerings
-  until a measured race-free output-axis or private-accumulator design is
-  selected.
+  scatter-style kernels.  CSR transpose products and axis-mismatched COO/CSC
+  reductions use private per-worker accumulators with a deterministic final
+  reduction, while CSC transpose products use output-column ownership.
 * The worker count is the configured runtime value. It is not changed
   heuristically from matrix shape, density, or nnz.
 * No architecture-specific SIMD intrinsics are required in the default build.

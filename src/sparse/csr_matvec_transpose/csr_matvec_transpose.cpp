@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -85,25 +86,69 @@ void csr_matvec_transpose_cpu_impl(const mx::array &data,
     const auto *x_ptr = x.data<T>();
     auto *out_ptr = out.data<T>();
 
-    if constexpr (std::is_same_v<AccT, T>) {
-      std::fill(out_ptr, out_ptr + n_cols, T{});
-      for (int row = 0; row < n_rows; ++row) {
-        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-          out_ptr[indices_ptr[p]] += data_ptr[p] * x_ptr[row];
+    auto run_serial = [&]() {
+      if constexpr (std::is_same_v<AccT, T>) {
+        std::fill(out_ptr, out_ptr + n_cols, T{});
+        for (int row = 0; row < n_rows; ++row) {
+          for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            out_ptr[indices_ptr[p]] += data_ptr[p] * x_ptr[row];
+          }
+        }
+      } else {
+        std::vector<AccT> accum(static_cast<size_t>(n_cols),
+                                Accumulator<T>::zero());
+        for (int row = 0; row < n_rows; ++row) {
+          for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            accum[static_cast<size_t>(indices_ptr[p])] +=
+                multiply_accumulate<T>(data_ptr[p], x_ptr[row]);
+          }
+        }
+        for (int col = 0; col < n_cols; ++col) {
+          out_ptr[col] = Accumulator<T>::cast(accum[static_cast<size_t>(col)]);
         }
       }
-    } else {
-      std::vector<AccT> accum(static_cast<size_t>(n_cols),
-                              Accumulator<T>::zero());
-      for (int row = 0; row < n_rows; ++row) {
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_rows <= 0 || n_cols <= 0) {
+      run_serial();
+      return;
+    }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_rows, workers);
+    if (ranges.size() <= 1) {
+      run_serial();
+      return;
+    }
+
+    const auto n_partitions = ranges.size();
+    const size_t stride = static_cast<size_t>(n_cols);
+    std::vector<AccT> partial(n_partitions * stride, Accumulator<T>::zero());
+    parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
+      auto *accum = partial.data() + worker * stride;
+      for (int row = range.begin; row < range.end; ++row) {
+        const T x_value = x_ptr[row];
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
           accum[static_cast<size_t>(indices_ptr[p])] +=
-              multiply_accumulate<T>(data_ptr[p], x_ptr[row]);
+              multiply_accumulate<T>(data_ptr[p], x_value);
         }
       }
-      for (int col = 0; col < n_cols; ++col) {
-        out_ptr[col] = Accumulator<T>::cast(accum[static_cast<size_t>(col)]);
+    });
+
+    auto reduce_cols = [&](CpuRange range) {
+      for (int col = range.begin; col < range.end; ++col) {
+        AccT total = Accumulator<T>::zero();
+        for (size_t worker = 0; worker < n_partitions; ++worker) {
+          total += partial[worker * stride + col];
+        }
+        out_ptr[col] = Accumulator<T>::cast(total);
       }
+    };
+    const auto col_ranges = equal_cpu_ranges(n_cols, workers);
+    if (col_ranges.size() <= 1) {
+      reduce_cols({0, n_cols});
+    } else {
+      parallel_for_cpu_ranges(col_ranges, reduce_cols);
     }
   });
 }

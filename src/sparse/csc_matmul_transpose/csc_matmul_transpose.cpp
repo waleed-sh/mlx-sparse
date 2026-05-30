@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -74,25 +75,40 @@ void csc_matmul_transpose_cpu_impl(const mx::array &data,
     const auto *indptr_ptr = indptr.data<I>();
     const auto *rhs_ptr = rhs.data<T>();
     auto *out_ptr = out.data<T>();
-    std::vector<typename Accumulator<T>::Type> acc(
-        static_cast<size_t>(rhs_cols));
-
-    for (int col = 0; col < n_cols; ++col) {
-      std::fill(acc.begin(), acc.end(), Accumulator<T>::zero());
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        const auto rhs_offset = static_cast<size_t>(indices_ptr[p]) * rhs_cols;
-        const T value = data_ptr[p];
+    auto compute_cols = [&](CpuRange range) {
+      std::vector<typename Accumulator<T>::Type> acc(
+          static_cast<size_t>(rhs_cols));
+      for (int col = range.begin; col < range.end; ++col) {
+        std::fill(acc.begin(), acc.end(), Accumulator<T>::zero());
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          const auto rhs_offset =
+              static_cast<size_t>(indices_ptr[p]) * rhs_cols;
+          const T value = data_ptr[p];
+          for (int k = 0; k < rhs_cols; ++k) {
+            acc[static_cast<size_t>(k)] +=
+                multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
+          }
+        }
+        const auto out_offset = static_cast<size_t>(col) * rhs_cols;
         for (int k = 0; k < rhs_cols; ++k) {
-          acc[static_cast<size_t>(k)] +=
-              multiply_accumulate<T>(value, rhs_ptr[rhs_offset + k]);
+          out_ptr[out_offset + k] =
+              Accumulator<T>::cast(acc[static_cast<size_t>(k)]);
         }
       }
-      const auto out_offset = static_cast<size_t>(col) * rhs_cols;
-      for (int k = 0; k < rhs_cols; ++k) {
-        out_ptr[out_offset + k] =
-            Accumulator<T>::cast(acc[static_cast<size_t>(k)]);
-      }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    if (workers <= 1 || n_cols <= 0) {
+      compute_cols({0, n_cols});
+      return;
     }
+    const auto ranges =
+        cpu_ranges_for_compressed_segments(indptr_ptr, n_cols, workers);
+    if (ranges.size() <= 1) {
+      compute_cols({0, n_cols});
+      return;
+    }
+    parallel_for_cpu_ranges(ranges, compute_cols);
   });
 }
 
