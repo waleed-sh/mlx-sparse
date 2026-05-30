@@ -1114,6 +1114,45 @@ NB_MODULE(_ext, m) {
       "lower"_a, "unit_diagonal"_a, "Solve a sparse triangular CSR system.");
 
   m.def(
+      "csr_triangular_diagonal_positions",
+      [](const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_triangular_diagonal_positions(indices, indptr,
+                                                             n_rows, n_cols);
+      },
+      "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Precompute diagonal positions for a sparse triangular CSR system.");
+
+  m.def(
+      "csr_triangular_level_schedule",
+      [](const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols,
+         bool lower) {
+        return mlx_sparse::csr_triangular_level_schedule(indices, indptr,
+                                                         n_rows, n_cols, lower);
+      },
+      "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "lower"_a,
+      "Build a dependency-level schedule for a sparse triangular CSR system.");
+
+  m.def(
+      "csr_triangular_solve_analyzed",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &diagonal_positions,
+         const mlx_sparse::mx::array &level_offsets,
+         const mlx_sparse::mx::array &level_rows, int n_rows, int n_cols,
+         bool lower, bool unit_diagonal) {
+        return mlx_sparse::csr_triangular_solve_analyzed(
+            data, indices, indptr, b, diagonal_positions, level_offsets,
+            level_rows, n_rows, n_cols, lower, unit_diagonal);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "diagonal_positions"_a,
+      "level_offsets"_a, "level_rows"_a, "n_rows"_a, "n_cols"_a, "lower"_a,
+      "unit_diagonal"_a,
+      "Solve a sparse triangular CSR system with cached structural analysis.");
+
+  m.def(
       "csr_vdot",
       [](const mlx_sparse::mx::array &lhs_data,
          const mlx_sparse::mx::array &lhs_indices,

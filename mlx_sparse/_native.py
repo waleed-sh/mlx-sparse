@@ -1021,11 +1021,36 @@ def csr_triangular_solve(
     *,
     lower: bool,
     unit_diagonal: bool,
+    diagonal_positions: mx.array | None = None,
+    level_schedule: tuple[mx.array, mx.array] | None = None,
 ):
     ext = extension()
     if ext is None:
         raise RuntimeError(
             "csr_triangular_solve requires the native mlx_sparse extension."
+        )
+    if diagonal_positions is not None or level_schedule is not None:
+        if diagonal_positions is None:
+            diagonal_positions = csr_triangular_diagonal_positions(
+                indices, indptr, shape
+            )
+        if level_schedule is None:
+            level_offsets = mx.array([], dtype=mx.int32)
+            level_rows = mx.array([], dtype=mx.int32)
+        else:
+            level_offsets, level_rows = level_schedule
+        return ext.csr_triangular_solve_analyzed(
+            data,
+            indices,
+            indptr,
+            b,
+            diagonal_positions,
+            level_offsets,
+            level_rows,
+            shape[0],
+            shape[1],
+            bool(lower),
+            bool(unit_diagonal),
         )
     return ext.csr_triangular_solve(
         data,
@@ -1036,6 +1061,45 @@ def csr_triangular_solve(
         shape[1],
         bool(lower),
         bool(unit_diagonal),
+    )
+
+
+def csr_triangular_diagonal_positions(
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_triangular_diagonal_positions requires the native mlx_sparse extension."
+        )
+    return ext.csr_triangular_diagonal_positions(
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+    )
+
+
+def csr_triangular_level_schedule(
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    lower: bool,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_triangular_level_schedule requires the native mlx_sparse extension."
+        )
+    return ext.csr_triangular_level_schedule(
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        bool(lower),
     )
 
 

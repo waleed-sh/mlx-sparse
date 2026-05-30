@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import mlx.core as mx
 import numpy as np
@@ -105,7 +105,15 @@ def _float32_sparse(
     )
 
 
-def _triangular_solve(factor: CSRArray, b, *, lower: bool, unit_diagonal: bool):
+def _triangular_solve(
+    factor: CSRArray,
+    b,
+    *,
+    lower: bool,
+    unit_diagonal: bool,
+    diagonal_positions: mx.array | None = None,
+    level_schedule: tuple[mx.array, mx.array] | None = None,
+):
     rhs = ensure_mx_array(b, dtype=mx.float32)
     if rhs.ndim not in (1, 2):
         raise ValueError(f"right-hand side must be rank-1 or rank-2, got {rhs.shape}.")
@@ -124,6 +132,8 @@ def _triangular_solve(factor: CSRArray, b, *, lower: bool, unit_diagonal: bool):
         factor.shape,
         lower=lower,
         unit_diagonal=unit_diagonal,
+        diagonal_positions=diagonal_positions,
+        level_schedule=level_schedule,
     )
 
 
@@ -276,10 +286,20 @@ class SparseCholesky:
     """
 
     L: CSRArray
+    _upper_factor: CSRArray | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
 
     @property
     def shape(self) -> tuple[int, int]:
         return self.L.shape
+
+    def _upper(self) -> CSRArray:
+        upper = self._upper_factor
+        if upper is None:
+            upper = self.L.T
+            object.__setattr__(self, "_upper_factor", upper)
+        return upper
 
     def solve(self, b) -> mx.array:
         """Solve ``A @ x = b`` using the stored Cholesky factor.
@@ -304,7 +324,7 @@ class SparseCholesky:
             ValueError: If ``b`` has the wrong shape.
         """
         y = _triangular_solve(self.L, b, lower=True, unit_diagonal=False)
-        return _triangular_solve(self.L.T, y, lower=False, unit_diagonal=False)
+        return _triangular_solve(self._upper(), y, lower=False, unit_diagonal=False)
 
     def __call__(self, b) -> mx.array:
         """Alias for :meth:`solve`.  Allows the factorization to be called
