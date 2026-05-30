@@ -32,6 +32,8 @@ constexpr const char *kCpuThreadsEnv = "MLX_SPARSE_CPU_THREADS";
 constexpr const char *kCpuThreadsAliasEnv = "MLX_SPARSE_N_THREADS";
 constexpr const char *kSpgemmParallelEnv = "MLX_SPARSE_SPGEMM_PARALLEL";
 constexpr const char *kSpgemmThreadsEnv = "MLX_SPARSE_SPGEMM_THREADS";
+constexpr const char *kSolverParallelEnv = "MLX_SPARSE_SOLVER_PARALLEL";
+constexpr const char *kSolverThreadsEnv = "MLX_SPARSE_SOLVER_THREADS";
 
 std::string lower_ascii(const char *value) {
   std::string out(value == nullptr ? "" : value);
@@ -126,6 +128,10 @@ bool spgemm_parallel_enabled() {
   return parse_bool_env(kSpgemmParallelEnv, true);
 }
 
+bool solver_parallel_enabled() {
+  return parse_bool_env(kSolverParallelEnv, false);
+}
+
 int configured_cpu_worker_count() { return resolved_cpu_worker_count(); }
 
 int configured_spgemm_worker_count() {
@@ -134,6 +140,29 @@ int configured_spgemm_worker_count() {
   }
 
   const char *raw = std::getenv(kSpgemmThreadsEnv);
+  if (raw == nullptr || *raw == '\0') {
+    return configured_cpu_worker_count();
+  }
+
+  const auto value = lower_ascii(raw);
+  if (value == "inherit") {
+    return resolved_cpu_worker_count();
+  }
+  if (value == "auto") {
+    return auto_worker_count();
+  }
+  if (const int count = parse_positive_int(raw); count > 0) {
+    return count;
+  }
+  return resolved_cpu_worker_count();
+}
+
+int configured_solver_worker_count() {
+  if (!solver_parallel_enabled()) {
+    return 1;
+  }
+
+  const char *raw = std::getenv(kSolverThreadsEnv);
   if (raw == nullptr || *raw == '\0') {
     return configured_cpu_worker_count();
   }

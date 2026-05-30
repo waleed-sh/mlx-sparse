@@ -38,6 +38,22 @@ def _direct_solver_benchmark():
     return module
 
 
+def _repeated_solve_benchmark():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "benchmarks"
+        / "bench_native_cpu_repeated_solves.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "bench_native_cpu_repeated_solves_under_test", path
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_direct_density_for_size_keeps_target_row_occupancy():
     bench = _direct_solver_benchmark()
 
@@ -62,3 +78,14 @@ def test_direct_banded_family_uses_density_derived_bandwidth():
 
     assert wide.nnz > narrow.nnz
     assert np.diff(wide.indptr).max() > np.diff(narrow.indptr).max()
+
+
+def test_repeated_solve_benchmark_reuses_direct_density_policy():
+    direct = _direct_solver_benchmark()
+    repeated = _repeated_solve_benchmark()
+
+    assert repeated.DEFAULT_NRHS == [1, 2, 4, 8, 16, 32]
+    assert repeated.MAX_BENCHMARK_DIMENSION == direct.MAX_BENCHMARK_DIMENSION
+    assert repeated.density_for_size(1024, target_nnz_per_row=16) == pytest.approx(
+        direct.density_for_size(1024, target_nnz_per_row=16)
+    )

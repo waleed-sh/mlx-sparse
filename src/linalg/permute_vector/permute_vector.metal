@@ -18,10 +18,14 @@
 csr_permute_vector_float32_kernel(device const float *x [[buffer(0)]],
                                   device const int *perm [[buffer(1)]],
                                   device float *out [[buffer(2)]],
-                                  constant int &size [[buffer(3)]],
+                                  constant int &n_rows [[buffer(3)]],
+                                  constant int &rhs_cols [[buffer(4)]],
                                   uint tid [[thread_position_in_grid]]) {
+  const int size = n_rows * rhs_cols;
   if (static_cast<int>(tid) >= size) {
     return;
   }
-  out[tid] = x[perm[tid]];
+  const int row = static_cast<int>(tid) / rhs_cols;
+  const int rhs = static_cast<int>(tid) - row * rhs_cols;
+  out[tid] = x[perm[row] * rhs_cols + rhs];
 }
