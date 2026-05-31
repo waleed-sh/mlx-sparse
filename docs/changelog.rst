@@ -1,12 +1,12 @@
 Changelog
 =========
 
-mlx-sparse v0.0.4b1 (Unreleased)
----------------------------------
+mlx-sparse v0.0.4b1 (31.05.2026)
+----------------------------------
 
 .. note::
 
-    Unlike the previous release which targetted Accelerate integration, this release targets
+    Unlike the previous release which targetted Accelerate integration, this release targeted
     native CPU performance when Metal and Accelerate are unavailable, disabled, or intentionally avoided.
     See the roadmap `here <https://github.com/waleed-sh/mlx-sparse/issues/13>`_.
 
