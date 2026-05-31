@@ -18,7 +18,6 @@
 #include <cmath>
 #include <complex>
 #include <limits>
-#include <map>
 #include <numeric>
 #include <stdexcept>
 #include <type_traits>
@@ -42,6 +41,106 @@ namespace {
 
 using namespace linalg_detail;
 
+using SparseRow = std::vector<std::pair<int, float>>;
+
+void sort_and_sum_row(SparseRow &row) {
+  std::sort(row.begin(), row.end(), [](const auto &lhs, const auto &rhs) {
+    return lhs.first < rhs.first;
+  });
+  size_t write = 0;
+  for (const auto &[col, value] : row) {
+    if (write > 0 && row[write - 1].first == col) {
+      row[write - 1].second += value;
+    } else {
+      row[write++] = {col, value};
+    }
+  }
+  row.resize(write);
+}
+
+SparseRow::iterator find_row_col(SparseRow &row, int col) {
+  if (row.size() <= 16) {
+    return std::find_if(row.begin(), row.end(), [col](const auto &entry) {
+      return entry.first >= col;
+    });
+  }
+  return std::lower_bound(
+      row.begin(), row.end(), col,
+      [](const auto &entry, int target) { return entry.first < target; });
+}
+
+SparseRow::const_iterator find_row_col(const SparseRow &row, int col) {
+  if (row.size() <= 16) {
+    return std::find_if(row.begin(), row.end(), [col](const auto &entry) {
+      return entry.first >= col;
+    });
+  }
+  return std::lower_bound(
+      row.begin(), row.end(), col,
+      [](const auto &entry, int target) { return entry.first < target; });
+}
+
+float row_value(const SparseRow &row, int col) {
+  auto pos = find_row_col(row, col);
+  return (pos != row.end() && pos->first == col) ? pos->second : 0.0f;
+}
+
+void set_row_value(SparseRow &row, int col, float value) {
+  auto pos = find_row_col(row, col);
+  if (value == 0.0f) {
+    if (pos != row.end() && pos->first == col) {
+      row.erase(pos);
+    }
+    return;
+  }
+  if (pos != row.end() && pos->first == col) {
+    pos->second = value;
+  } else {
+    row.insert(pos, {col, value});
+  }
+}
+
+void add_row_value(SparseRow &row, int col, float delta, float eps) {
+  auto pos = find_row_col(row, col);
+  if (pos != row.end() && pos->first == col) {
+    pos->second += delta;
+    if (std::abs(pos->second) <= eps) {
+      row.erase(pos);
+    }
+  } else if (std::abs(delta) > eps) {
+    row.insert(pos, {col, delta});
+  }
+}
+
+template <typename I>
+std::vector<SparseRow>
+read_csr_sparse_rows_float32(mx::array data, mx::array indices,
+                             mx::array indptr, int n_rows, int n_cols) {
+  data.eval();
+  indices.eval();
+  indptr.eval();
+  const auto *data_ptr = data.data<float>();
+  const auto *indices_ptr = indices.data<I>();
+  const auto *indptr_ptr = indptr.data<I>();
+  std::vector<SparseRow> rows(static_cast<size_t>(n_rows));
+  for (int row = 0; row < n_rows; ++row) {
+    auto &entries = rows[static_cast<size_t>(row)];
+    const I begin = indptr_ptr[row];
+    const I end = indptr_ptr[row + 1];
+    entries.reserve(static_cast<size_t>(end - begin));
+    for (I p = begin; p < end; ++p) {
+      const int col = static_cast<int>(indices_ptr[p]);
+      if (col < 0 || col >= n_cols) {
+        throw std::invalid_argument(
+            "csr_lu input contains an out-of-bounds column.");
+      }
+      entries.push_back({col, data_ptr[p]});
+    }
+    sort_and_sum_row(entries);
+  }
+  return rows;
+}
+
 template <typename I>
 std::tuple<mx::array, mx::array, mx::array, mx::array, mx::array, mx::array,
            mx::array>
@@ -50,10 +149,10 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
   if (n_rows != n_cols) {
     throw std::invalid_argument("csr_lu requires a square matrix.");
   }
-  auto rows = read_csr_rows_float32<I>(std::move(data), std::move(indices),
-                                       std::move(indptr), n_rows);
-  std::vector<std::map<int, float>> L(static_cast<size_t>(n_rows));
-  std::vector<std::map<int, float>> U(static_cast<size_t>(n_rows));
+  auto rows = read_csr_sparse_rows_float32<I>(
+      std::move(data), std::move(indices), std::move(indptr), n_rows, n_cols);
+  std::vector<SparseRow> L(static_cast<size_t>(n_rows));
+  std::vector<SparseRow> U(static_cast<size_t>(n_rows));
   std::vector<int32_t> perm(static_cast<size_t>(n_rows));
   std::iota(perm.begin(), perm.end(), 0);
   const float eps = std::numeric_limits<float>::epsilon();
@@ -62,9 +161,7 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
     int pivot_row = k;
     float pivot_abs = 0.0f;
     for (int row = k; row < n_rows; ++row) {
-      auto found = rows[static_cast<size_t>(row)].find(k);
-      const float value =
-          found == rows[static_cast<size_t>(row)].end() ? 0.0f : found->second;
+      const float value = row_value(rows[static_cast<size_t>(row)], k);
       if (std::abs(value) > pivot_abs) {
         pivot_abs = std::abs(value);
         pivot_row = row;
@@ -80,34 +177,37 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
       std::swap(perm[static_cast<size_t>(pivot_row)],
                 perm[static_cast<size_t>(k)]);
       for (int col = 0; col < k; ++col) {
-        std::swap(L[static_cast<size_t>(pivot_row)][col],
-                  L[static_cast<size_t>(k)][col]);
+        const float pivot_value =
+            row_value(L[static_cast<size_t>(pivot_row)], col);
+        const float current_value = row_value(L[static_cast<size_t>(k)], col);
+        set_row_value(L[static_cast<size_t>(pivot_row)], col, current_value);
+        set_row_value(L[static_cast<size_t>(k)], col, pivot_value);
       }
     }
 
-    L[static_cast<size_t>(k)][k] = 1.0f;
+    set_row_value(L[static_cast<size_t>(k)], k, 1.0f);
+    auto &upper_row = U[static_cast<size_t>(k)];
+    upper_row.clear();
+    upper_row.reserve(rows[static_cast<size_t>(k)].size());
     for (const auto &[col, value] : rows[static_cast<size_t>(k)]) {
       if (col >= k && std::abs(value) > eps) {
-        U[static_cast<size_t>(k)][col] = value;
+        upper_row.push_back({col, value});
       }
     }
-    const float pivot = U[static_cast<size_t>(k)][k];
+    const float pivot = row_value(upper_row, k);
     for (int row = k + 1; row < n_rows; ++row) {
-      auto entry = rows[static_cast<size_t>(row)].find(k);
-      if (entry == rows[static_cast<size_t>(row)].end() ||
+      auto &work_row = rows[static_cast<size_t>(row)];
+      auto entry = find_row_col(work_row, k);
+      if (entry == work_row.end() || entry->first != k ||
           std::abs(entry->second) <= eps) {
         continue;
       }
       const float factor = entry->second / pivot;
-      L[static_cast<size_t>(row)][k] = factor;
-      rows[static_cast<size_t>(row)].erase(entry);
-      for (const auto &[col, upper_value] : U[static_cast<size_t>(k)]) {
+      set_row_value(L[static_cast<size_t>(row)], k, factor);
+      work_row.erase(entry);
+      for (const auto &[col, upper_value] : upper_row) {
         if (col > k) {
-          auto &slot = rows[static_cast<size_t>(row)][col];
-          slot -= factor * upper_value;
-          if (std::abs(slot) <= eps) {
-            rows[static_cast<size_t>(row)].erase(col);
-          }
+          add_row_value(work_row, col, -factor * upper_value, eps);
         }
       }
     }
@@ -119,6 +219,16 @@ csr_lu_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
   std::vector<float> u_data;
   std::vector<I> u_indices;
   std::vector<I> u_indptr(static_cast<size_t>(n_rows) + 1, I{0});
+  size_t l_nnz = 0;
+  size_t u_nnz = 0;
+  for (int row = 0; row < n_rows; ++row) {
+    l_nnz += L[static_cast<size_t>(row)].size();
+    u_nnz += U[static_cast<size_t>(row)].size();
+  }
+  l_data.reserve(l_nnz);
+  l_indices.reserve(l_nnz);
+  u_data.reserve(u_nnz);
+  u_indices.reserve(u_nnz);
   for (int row = 0; row < n_rows; ++row) {
     for (const auto &[col, value] : L[static_cast<size_t>(row)]) {
       if (col <= row && std::abs(value) > eps) {

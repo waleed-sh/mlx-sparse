@@ -112,13 +112,17 @@ Solver support matrix
      - CPU only for factorization
      - No
      - Returns explicit mlx-sparse CSR factors. The returned
-       ``SparseCholesky.solve`` can use native GPU triangular solves.
+       ``SparseCholesky.solve`` can use native GPU triangular solves. The
+       native CPU factorization keeps natural-order semantics and uses an
+       allocation-light sparse accumulator implementation.
    * - ``linalg.sparse_lu`` / ``linalg.splu``
      - Explicit sparse LU factorization for square general systems.
      - CPU only for factorization
      - No
      - Returns explicit mlx-sparse CSR factors and pivots. The returned
        ``SparseLU.solve`` can use native GPU permutation and triangular solves.
+       The native CPU factorization preserves the existing partial pivoting
+       semantics and does not apply fill-reducing ordering.
    * - ``SparseCholesky.solve`` / ``SparseLU.solve``
      - Reuse explicit native factors for one or more right-hand sides.
      - Full CPU + GPU for solve phase

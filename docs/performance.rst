@@ -336,6 +336,18 @@ while other CPU kernels are still being optimized incrementally:
   regression target in the measured CPU sweep.  Cholesky solves still reuse the
   transposed upper factor after the first solve without changing the public
   factor object constructor.
+* Native explicit Cholesky and LU factorization remain immediate CPU host
+  routines with natural row order and the existing error behavior.  The
+  Cholesky path uses sorted sparse rows plus reusable dense marker/work arrays
+  instead of per-row maps, and LU uses sorted sparse rows while preserving the
+  existing partial-pivoting semantics.  No fill-reducing ordering, supernodal
+  factorization, native QR, native LDLT, or rectangular native direct solver is
+  introduced in this release line.
+* ``benchmarks/bench_native_cpu_direct_solvers.py`` reports input
+  ``import_canonicalize`` separately from native ``factor_only``.  The native
+  factorization record is still one fused kernel because the production host
+  routines combine symbolic structure discovery, numeric row updates, and CSR
+  materialization.
 * The worker count is the configured runtime value. It is not changed
   heuristically from matrix shape, density, or nnz.
 * No architecture-specific SIMD intrinsics are required in the default build.
