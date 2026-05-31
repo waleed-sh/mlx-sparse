@@ -12,13 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Backward-compatible import shim for linalg array utilities.
+"""Internal linalg helper utilities.
 
-New linalg code should import from :mod:`mlx_sparse.linalg.utils.arrays`.
+The public linalg modules should describe algorithms and public objects. Shared
+normalization, dtype promotion, residual checking, and solver bookkeeping live
+in this subpackage so the algorithm modules do not accumulate unrelated private
+helper functions.
 """
 
 from __future__ import annotations
 
-from mlx_sparse.linalg.utils.arrays import ensure_array
-
-__all__ = ["ensure_array"]
+__all__ = [
+    "arrays",
+    "factorization",
+    "iterative",
+    "operators",
+    "preconditioners",
+    "sparse",
+    "spectral",
+]

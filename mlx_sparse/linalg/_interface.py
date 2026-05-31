@@ -22,7 +22,8 @@ from mlx_sparse._coo import COOArray
 from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import normalize_shape
-from mlx_sparse.linalg._utils import ensure_array
+from mlx_sparse.linalg.utils.arrays import ensure_array
+from mlx_sparse.linalg.utils.operators import sparse_operator
 
 Matvec = Callable[[mx.array], mx.array]
 Matmat = Callable[[mx.array], mx.array]
@@ -70,6 +71,8 @@ class LinearOperator:
 
     @property
     def ndim(self) -> int:
+        """Number of dimensions exposed by every linear operator."""
+
         return 2
 
     def matvec(self, x) -> mx.array:
@@ -146,6 +149,8 @@ class LinearOperator:
         return self.rmatvec_fn(x)
 
     def __matmul__(self, rhs):
+        """Apply the operator to a vector or dense matrix with ``@``."""
+
         rhs = ensure_array(rhs)
         if rhs.ndim == 1:
             return self.matvec(rhs)
@@ -206,23 +211,6 @@ class LinearOperator:
         )
 
 
-def _sparse_operator(array: CSRArray | COOArray | CSCArray) -> LinearOperator:
-    csr = (
-        array.canonicalize()
-        if isinstance(array, CSRArray)
-        else array.tocsr(canonical=True)
-    )
-    adjoint = csr.H
-    return LinearOperator(
-        shape=csr.shape,
-        matvec_fn=lambda x: csr @ x,
-        matmat_fn=lambda X: csr @ X,
-        rmatvec_fn=lambda x: adjoint @ x,
-        dtype=csr.dtype,
-        _sparse_array=csr,
-    )
-
-
 def aslinearoperator(A) -> LinearOperator:
     """Wrap a sparse matrix or callable as a :class:`LinearOperator`.
 
@@ -253,7 +241,7 @@ def aslinearoperator(A) -> LinearOperator:
     if isinstance(A, LinearOperator):
         return A
     if isinstance(A, CSRArray | COOArray | CSCArray):
-        return _sparse_operator(A)
+        return sparse_operator(A, LinearOperator)
     if isinstance(A, tuple) and len(A) >= 2:
         shape, matvec = A[:2]
         matmat = A[2] if len(A) > 2 else None
@@ -265,7 +253,7 @@ def aslinearoperator(A) -> LinearOperator:
     if sp is not None and sp.issparse(A):
         from mlx_sparse._construct import from_scipy
 
-        return _sparse_operator(from_scipy(A))
+        return sparse_operator(from_scipy(A), LinearOperator)
     raise TypeError(
         "aslinearoperator accepts LinearOperator, CSRArray, COOArray, CSCArray, "
         "SciPy sparse matrices, or (shape, matvec[, matmat]) tuples."

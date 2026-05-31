@@ -15,90 +15,14 @@
 from __future__ import annotations
 
 import mlx.core as mx
-import numpy as np
 
 import mlx_sparse._native as _native
-from mlx_sparse._coo import COOArray
-from mlx_sparse._csc import CSCArray
-from mlx_sparse._csr import CSRArray
-from mlx_sparse._host import to_numpy
-from mlx_sparse._validation import ensure_mx_array
-
-
-def _as_csr(A) -> CSRArray:
-    if isinstance(A, CSRArray):
-        return A.canonicalize()
-    if isinstance(A, COOArray):
-        return A.tocsr(canonical=True)
-    if isinstance(A, CSCArray):
-        return A.tocsr(canonical=True)
-    # Accept LinearOperator when it wraps a sparse array (created via
-    # aslinearoperator). The _sparse_array attribute is normalized to CSR for
-    # fast native solver dispatch.
-    from mlx_sparse.linalg._interface import LinearOperator
-
-    if isinstance(A, LinearOperator):
-        if A._sparse_array is not None:
-            return _as_csr(A._sparse_array)
-        raise TypeError(
-            "Iterative solvers accept LinearOperator only when it wraps a "
-            "CSRArray, COOArray, or CSCArray (use aslinearoperator(sparse_array)). "
-            "For fully matrix-free operators, implement a Python-level "
-            "iterative solver loop."
-        )
-    raise TypeError(
-        "sparse iterative solvers expect CSRArray, COOArray, CSCArray, or a "
-        "sparse-backed LinearOperator. Use mlx.linalg for dense arrays."
-    )
-
-
-def _float32_array(x) -> mx.array:
-    array = ensure_mx_array(x)
-    if array.dtype == mx.float32:
-        return array
-    if array.dtype in {mx.float16, mx.bfloat16}:
-        return array.astype(mx.float32)
-    raise TypeError("sparse iterative solvers currently require real float data.")
-
-
-def _float32_csr(A: CSRArray) -> CSRArray:
-    if A.data.dtype == mx.float32:
-        return A
-    if A.data.dtype in {mx.float16, mx.bfloat16}:
-        return CSRArray(
-            data=A.data.astype(mx.float32),
-            indices=A.indices,
-            indptr=A.indptr,
-            shape=A.shape,
-            sorted_indices=A.sorted_indices,
-            has_canonical_format=A.has_canonical_format,
-        )
-    raise TypeError("sparse iterative solvers currently require real float data.")
-
-
-def _info(info) -> int:
-    mx.eval(info)
-    return int(np.asarray(to_numpy(info)).item())
-
-
-def _guess(csr: CSRArray, b: mx.array, x0) -> mx.array:
-    if b.ndim != 1:
-        raise ValueError(f"right-hand side must be rank-1, got {b.shape}.")
-    if b.shape[0] != csr.shape[0]:
-        raise ValueError(f"b has length {b.shape[0]}, expected {csr.shape[0]}.")
-    if x0 is None:
-        return mx.zeros((csr.shape[1],), dtype=mx.float32)
-    x = _float32_array(x0)
-    if x.ndim != 1 or x.shape[0] != csr.shape[1]:
-        raise ValueError(f"x0 must have shape ({csr.shape[1]},), got {x.shape}.")
-    return x
-
-
-def _maxiter(csr: CSRArray, maxiter: int | None) -> int:
-    value = 10 * csr.shape[1] if maxiter is None else int(maxiter)
-    if value < 0:
-        raise ValueError("maxiter must be non-negative.")
-    return value
+from mlx_sparse.linalg.utils.iterative import as_csr as _as_csr
+from mlx_sparse.linalg.utils.iterative import float32_array as _float32_array
+from mlx_sparse.linalg.utils.iterative import float32_csr as _float32_csr
+from mlx_sparse.linalg.utils.iterative import initial_guess as _guess
+from mlx_sparse.linalg.utils.iterative import max_iterations as _maxiter
+from mlx_sparse.linalg.utils.iterative import solver_info_to_int as _info
 
 
 def cg(
@@ -154,7 +78,9 @@ def cg(
         of shape ``(n,)`` and ``info`` is an integer convergence flag.
         ``info == 0`` means the solver converged to the requested tolerance.
         ``info > 0`` is the iteration count at which the solver stopped without
-        converging.
+        converging. ``info < 0`` indicates numerical breakdown, such as a
+        non-positive preconditioned residual product, non-finite scalar, or
+        scale-aware near-zero denominator.
 
     Raises:
         NotImplementedError: If ``callback`` is not ``None``.

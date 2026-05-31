@@ -17,41 +17,9 @@ from __future__ import annotations
 import mlx.core as mx
 
 import mlx_sparse._native as _native
-from mlx_sparse._coo import COOArray
-from mlx_sparse._csc import CSCArray
-from mlx_sparse._csr import CSRArray
-
-
-def _as_csr(A) -> CSRArray:
-    if isinstance(A, CSRArray):
-        return A.canonicalize()
-    if isinstance(A, COOArray):
-        return A.tocsr(canonical=True)
-    if isinstance(A, CSCArray):
-        return A.tocsr(canonical=True)
-    raise TypeError(
-        "sparse eigen routines expect CSRArray, COOArray, or CSCArray. Dense "
-        "arrays belong in mlx.linalg."
-    )
-
-
-def _float32_csr(A: CSRArray) -> CSRArray:
-    if A.data.dtype == mx.float32:
-        return A
-    if A.data.dtype in {mx.float16, mx.bfloat16}:
-        return CSRArray(
-            data=A.data.astype(mx.float32),
-            indices=A.indices,
-            indptr=A.indptr,
-            shape=A.shape,
-            sorted_indices=A.sorted_indices,
-            has_canonical_format=A.has_canonical_format,
-        )
-    raise TypeError("sparse spectral routines currently require real float data.")
-
-
-def _ncv(n: int, k: int, ncv: int | None) -> int:
-    return min(n, max(k + 1, 2 * k + 1 if ncv is None else int(ncv)))
+from mlx_sparse.linalg.utils.spectral import as_csr as _as_csr
+from mlx_sparse.linalg.utils.spectral import float32_csr as _float32_csr
+from mlx_sparse.linalg.utils.spectral import normalize_ncv as _ncv
 
 
 def lanczos(
