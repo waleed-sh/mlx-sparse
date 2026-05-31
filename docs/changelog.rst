@@ -139,7 +139,7 @@ Improvements
   streams now scan dense rows directly into canonical CSR buffers, while GPU
   streams keep the staged count/prefix/fill implementation. Immediate host
   assembly was also measured for compressed ``sum_duplicates`` and deliberately
-  not adopted because it did not beat the existing staged CPU path
+  not adopted because it did not improve over the existing staged CPU path
   (`PR #20 <https://github.com/waleed-sh/mlx-sparse/pull/20>`_).
 
 * Added native rank-2 RHS support for explicit-factor CPU solves.  Native
@@ -178,6 +178,22 @@ Improvements
   accumulator semantics intact and does not introduce architecture-specific
   SIMD intrinsics or dense temporaries for these paths
   (`PR #24 <https://github.com/waleed-sh/mlx-sparse/pull/24>`_).
+
+Documentation
+~~~~~~~~~~~~~
+
+* Added a dedicated ``Parallelism and performance`` documentation section with
+  a detailed native CPU execution model, runtime and environment control
+  examples, fair sparse benchmarking guidance, and local v0.0.4b1 performance
+  figures comparing the optimized native CPU paths against the v0.0.4b0-style
+  baseline and SciPy (`PR #25 <https://github.com/waleed-sh/mlx-sparse/pull/25>`_).
+
+* Clarified the remaining serial or dependency-bound native CPU paths in the
+  release notes and performance docs.  Natural-order Cholesky/LU
+  factorization, production row-order triangular solves, non-batched COO/CSC
+  scatter dense products, small scalar reductions, and rejected
+  iterative/spectral helper parallelism are not described as broadly parallel
+  native backend coverage (`PR #25 <https://github.com/waleed-sh/mlx-sparse/pull/25>`_).
 
 
 
