@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -84,13 +85,27 @@ void coo_trace_cpu_impl(const mx::array &data, const mx::array &row,
     const auto *data_ptr = data.data<T>();
     const auto *row_ptr = row.data<I>();
     const auto *col_ptr = col.data<I>();
-    auto acc = Accumulator<T>::zero();
+    using AccT = typename Accumulator<T>::Type;
+    const int nnz = static_cast<int>(data.size());
 
-    for (size_t p = 0; p < data.size(); ++p) {
-      const auto r = row_ptr[p];
-      if (r == col_ptr[p] && r >= 0 && r < static_cast<I>(diag_size)) {
-        acc += static_cast<typename Accumulator<T>::Type>(data_ptr[p]);
+    auto compute_nnz = [&](CpuRange range) -> AccT {
+      auto local = Accumulator<T>::zero();
+      for (int p = range.begin; p < range.end; ++p) {
+        const auto r = row_ptr[p];
+        if (r == col_ptr[p] && r >= 0 && r < static_cast<I>(diag_size)) {
+          local += static_cast<AccT>(data_ptr[p]);
+        }
       }
+      return local;
+    };
+
+    AccT acc = Accumulator<T>::zero();
+    const int workers = configured_cpu_worker_count();
+    if (!should_parallelize_cpu_tree_reduction(workers, nnz)) {
+      acc = compute_nnz({0, nnz});
+    } else {
+      const auto ranges = equal_cpu_ranges(nnz, workers);
+      acc = parallel_reduce_cpu_ranges<AccT>(ranges, compute_nnz);
     }
     *out.data<T>() = Accumulator<T>::cast(acc);
   });

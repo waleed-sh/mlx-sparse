@@ -170,6 +170,15 @@ Improvements
   numeric updates, and CSR materialization
   (`PR #23 <https://github.com/waleed-sh/mlx-sparse/pull/23>`_).
 
+* Added thresholded deterministic tree reductions for native CPU scalar
+  reductions.  CSR/COO/CSC trace and CSR sparse ``dot``/``vdot`` keep the
+  serial path for small inputs, then split larger inputs into configured
+  ``CPU_THREADS`` row/nonzero ranges with worker-local partials and a stable
+  final tree reduction.  The implementation keeps low-precision and complex
+  accumulator semantics intact and does not introduce architecture-specific
+  SIMD intrinsics or dense temporaries for these paths
+  (`PR #24 <https://github.com/waleed-sh/mlx-sparse/pull/24>`_).
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)

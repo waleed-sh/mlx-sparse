@@ -24,6 +24,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -114,34 +115,57 @@ void csr_vdot_cpu_impl(const mx::array &lhs_data, const mx::array &lhs_indices,
     const auto *rhs_indptr_ptr = rhs_indptr.data<I>();
     using AccT = std::conditional_t<std::is_same_v<T, mx::complex64_t>,
                                     std::complex<double>, double>;
-    AccT acc{};
-    for (int row = 0; row < n_rows; ++row) {
-      I lp = lhs_indptr_ptr[row];
-      I rp = rhs_indptr_ptr[row];
-      const I lend = lhs_indptr_ptr[row + 1];
-      const I rend = rhs_indptr_ptr[row + 1];
-      while (lp < lend && rp < rend) {
-        const I lc = lhs_indices_ptr[lp];
-        const I rc = rhs_indices_ptr[rp];
-        if (lc == rc) {
-          if constexpr (std::is_same_v<T, mx::complex64_t>) {
-            const std::complex<float> lhs_value(lhs_data_ptr[lp]);
-            const std::complex<float> rhs_value(rhs_data_ptr[rp]);
-            acc += static_cast<std::complex<double>>(
-                conjugate_lhs ? std::conj(lhs_value) * rhs_value
-                              : lhs_value * rhs_value);
+
+    auto compute_rows = [&](CpuRange range) -> AccT {
+      AccT local{};
+      for (int row = range.begin; row < range.end; ++row) {
+        I lp = lhs_indptr_ptr[row];
+        I rp = rhs_indptr_ptr[row];
+        const I lend = lhs_indptr_ptr[row + 1];
+        const I rend = rhs_indptr_ptr[row + 1];
+        while (lp < lend && rp < rend) {
+          const I lc = lhs_indices_ptr[lp];
+          const I rc = rhs_indices_ptr[rp];
+          if (lc == rc) {
+            if constexpr (std::is_same_v<T, mx::complex64_t>) {
+              const std::complex<float> lhs_value(lhs_data_ptr[lp]);
+              const std::complex<float> rhs_value(rhs_data_ptr[rp]);
+              local += static_cast<std::complex<double>>(
+                  conjugate_lhs ? std::conj(lhs_value) * rhs_value
+                                : lhs_value * rhs_value);
+            } else {
+              local += static_cast<double>(sparse_inner_product_value<T>(
+                  lhs_data_ptr[lp], rhs_data_ptr[rp], conjugate_lhs));
+            }
+            ++lp;
+            ++rp;
+          } else if (lc < rc) {
+            ++lp;
           } else {
-            acc += static_cast<double>(sparse_inner_product_value<T>(
-                lhs_data_ptr[lp], rhs_data_ptr[rp], conjugate_lhs));
+            ++rp;
           }
-          ++lp;
-          ++rp;
-        } else if (lc < rc) {
-          ++lp;
-        } else {
-          ++rp;
         }
       }
+      return local;
+    };
+
+    AccT acc{};
+    const int workers = configured_cpu_worker_count();
+    const auto estimated_work =
+        static_cast<int64_t>(lhs_data.size() + rhs_data.size());
+    if (!should_parallelize_cpu_tree_reduction(workers, estimated_work) ||
+        n_rows <= 0) {
+      acc = compute_rows({0, n_rows});
+    } else {
+      std::vector<int64_t> row_work(static_cast<size_t>(n_rows));
+      for (int row = 0; row < n_rows; ++row) {
+        row_work[static_cast<size_t>(row)] =
+            static_cast<int64_t>(lhs_indptr_ptr[row + 1] -
+                                 lhs_indptr_ptr[row]) +
+            static_cast<int64_t>(rhs_indptr_ptr[row + 1] - rhs_indptr_ptr[row]);
+      }
+      const auto ranges = cpu_ranges_for_output_work(row_work, workers);
+      acc = parallel_reduce_cpu_ranges<AccT>(ranges, compute_rows);
     }
     if constexpr (std::is_same_v<T, mx::complex64_t>) {
       *out.data<T>() = mx::complex64_t(static_cast<float>(acc.real()),
