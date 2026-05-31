@@ -46,6 +46,7 @@ docs = [
     "pydata-sphinx-theme>=0.16",
     "myst-nb>=1.4",
     "numpy>=1.26",
+    "sphinx-copybutton",
 ]
 
 [tool.setuptools_scm]
