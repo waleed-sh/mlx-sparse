@@ -721,6 +721,46 @@ def csr_cg(
     )
 
 
+def csr_pcg_jacobi(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    inv_diag: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_pcg_jacobi requires the native mlx_sparse extension.")
+    return ext.csr_pcg_jacobi(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        inv_diag,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def diagonal_preconditioner_apply(inv_diag: mx.array, rhs: mx.array):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "diagonal_preconditioner_apply requires the native mlx_sparse extension."
+        )
+    return ext.diagonal_preconditioner_apply(inv_diag, rhs)
+
+
 def csr_lanczos(
     data: mx.array,
     indices: mx.array,

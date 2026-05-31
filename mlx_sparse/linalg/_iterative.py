@@ -142,7 +142,11 @@ def cg(
             Defaults to ``0.0``.
         maxiter: Maximum number of iterations.  Defaults to ``10 * n`` when
             ``None``.
-        M: Not supported.  Pass ``None`` (the default).
+        M: Optional native-backed preconditioner.  ``None`` uses the existing
+            unpreconditioned native CG path.  ``preconditioners.identity`` also
+            uses that path.  ``preconditioners.diagonal`` and
+            ``preconditioners.jacobi`` dispatch to native Jacobi-preconditioned
+            CG.
         callback: Not supported.  Pass ``None`` (the default).
 
     Returns:
@@ -153,9 +157,10 @@ def cg(
         converging.
 
     Raises:
-        NotImplementedError: If ``M`` or ``callback`` is not ``None``.
+        NotImplementedError: If ``callback`` is not ``None``.
         TypeError: If ``A`` is a dense ``mlx.core.array`` or an unsupported
-            type.
+            type, or if ``M`` is not a native-backed identity, diagonal, or
+            Jacobi preconditioner.
         ValueError: If ``b`` is not rank-1 or its length does not match
             ``A.shape[0]``.
 
@@ -180,11 +185,36 @@ def cg(
             print(info)  # 0 means converged
     """
 
-    if M is not None or callback is not None:
+    if callback is not None:
         raise NotImplementedError("native sparse cg does not use Python callbacks.")
     csr = _float32_csr(_as_csr(A))
     rhs = _float32_array(b)
     guess = _guess(csr, rhs, x0)
+    if M is not None:
+        from mlx_sparse.linalg import preconditioners
+
+        pc = preconditioners.aspreconditioner(M, csr)
+        if isinstance(pc, preconditioners.IdentityPreconditioner):
+            pass
+        elif isinstance(pc, preconditioners.DiagonalPreconditioner):
+            x, info, _, _ = _native.csr_pcg_jacobi(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.inverse_diagonal,
+                csr.shape,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=_maxiter(csr, maxiter),
+            )
+            return x, _info(info)
+        else:
+            raise NotImplementedError(
+                "cg currently supports only identity, diagonal, and Jacobi "
+                "native-backed preconditioners."
+            )
     x, info, _, _ = _native.csr_cg(
         csr.data,
         csr.indices,

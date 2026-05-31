@@ -56,8 +56,8 @@ Solver support matrix
      - Iterative solve for square symmetric positive-definite systems.
      - Full CPU + GPU
      - No
-     - The full CG iteration runs in native kernels. On GPU, the iteration is
-       fused into a Metal kernel.
+     - The unpreconditioned and Jacobi-preconditioned CG iterations run in
+       native kernels. On GPU, each path uses a Metal solver kernel.
    * - ``linalg.gmres``
      - Iterative solve for square general systems.
      - Partial
@@ -209,3 +209,12 @@ Choosing a solver
   mlx-sparse factor objects.
 * Use ``eigsh``, ``eigs``, or ``svds`` when you need only a few spectral
   values/vectors rather than a dense decomposition.
+
+Preconditioners
+---------------
+
+``linalg.cg`` accepts native-backed ``identity``, ``diagonal``, and ``jacobi``
+preconditioners from ``mlx_sparse.linalg.preconditioners``. ``identity`` uses
+the existing unpreconditioned CG path. ``diagonal`` and ``jacobi`` dispatch to
+native Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX
+device. ``gmres`` and ``minres`` still reject non-``None`` preconditioners.

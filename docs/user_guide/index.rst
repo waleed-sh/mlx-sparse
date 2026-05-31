@@ -11,3 +11,4 @@ User guide
    device_execution
    linalg
    linalg_solvers
+   preconditioners

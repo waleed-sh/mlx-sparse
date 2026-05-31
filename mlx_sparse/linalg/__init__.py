@@ -18,6 +18,7 @@ The linalg layer operates on sparse containers and native extension kernels.
 Dense MLX arrays should use ``mlx.linalg`` directly.
 """
 
+from mlx_sparse.linalg import preconditioners
 from mlx_sparse.linalg._eigen import eigs, eigsh, lanczos, svds
 from mlx_sparse.linalg._factorizations import (
     FactorizedSolve,
@@ -49,6 +50,7 @@ __all__ = [
     "gmres",
     "lanczos",
     "minres",
+    "preconditioners",
     "sparse_cholesky",
     "sparse_lu",
     "splu",
