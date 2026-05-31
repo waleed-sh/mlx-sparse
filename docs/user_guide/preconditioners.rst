@@ -9,9 +9,11 @@ approximation to ``A^{-1}``, it is not interpreted as a sparse matrix to invert
 implicitly.
 
 Python preconditioner objects are API containers and dispatch helpers. Diagonal
-application, Jacobi-preconditioned CG, and diagonal/Jacobi-preconditioned GMRES
-run through native C++/Metal primitives under ``src/preconditioners``, they do
-not execute a Python callback inside native Krylov iterations.
+application, Jacobi-preconditioned CG, diagonal/Jacobi-preconditioned GMRES, and
+exact LU/Cholesky preconditioner application run through native primitives under
+``src/preconditioners``, they do not execute a Python callback inside native
+Krylov iterations. Exact-factor preconditioners wrap existing direct solve
+objects and reuse typed native or guarded Accelerate apply paths.
 
 Current support
 ---------------
@@ -41,20 +43,39 @@ Current support
      - Custom inverse-apply callable or object with ``solve(x)``.
      - ``gmres`` supports these through a host fallback loop with
        left-preconditioning semantics. ``cg`` remains native-only.
+   * - ``from_factorized(solver)``
+     - Exact inverse-apply wrapper around ``FactorizedSolve``, ``SparseLU``,
+       or ``SparseCholesky``.
+     - Native explicit factors apply through permutation/triangular-solve
+       kernels on CPU or Metal, and GMRES uses typed native exact-factor
+       entrypoints. Accelerate-backed ``FactorizedSolve`` objects apply through
+       Apple's CPU sparse solver when guarded support is available.
+   * - ``exact(A, method="auto")``
+     - Convenience wrapper around ``linalg.factorized`` for diagnostics,
+       testing, and small exact-preconditioner baselines.
+     - Setup follows ``linalg.factorized``: guarded Accelerate when available
+       and appropriate, otherwise native square LU/Cholesky fallback.
 
 ``cg`` currently supports native-backed ``identity``, ``diagonal``, and
 ``jacobi`` preconditioners. ``gmres`` supports ``identity``,
-``diagonal``/``jacobi``, and explicit inverse-apply callables or objects.  For
-``diagonal`` and ``jacobi``, GMRES builds the Krylov basis for ``M^{-1} A`` and
-checks convergence against the true residual ``b - A @ x``. ``minres``
-preconditioner support is still future work.
+``diagonal``/``jacobi``, exact-factor preconditioners, and explicit
+inverse-apply callables or objects. For ``diagonal``/``jacobi`` and exact
+native or Accelerate factors, GMRES builds the Krylov basis for ``M^{-1} A`` and
+checks convergence against the true residual ``b - A @ x`` inside native solver
+entrypoints. Custom callable preconditioners use the documented host GMRES
+fallback for inverse applications. ``minres`` preconditioner support is still
+future work.
 
 Jacobi and diagonal preconditioner application do not use Accelerate because
 the current mlx-sparse Accelerate integration is for direct sparse
 factorization/solve objects. The native diagonal/Jacobi Krylov paths use the
-selected MLX CPU or Metal device. Future exact-factor preconditioners will
-preserve the existing Accelerate guards and use Accelerate only on Apple builds
-where it is available and helpful.
+selected MLX CPU or Metal device. Exact-factor preconditioners preserve the
+existing Accelerate guards from ``linalg.factorized`` and use Accelerate only
+on Apple builds where it is available and helpful, otherwise they reuse the
+native sparse LU/Cholesky solve path. Python preconditioner objects are metadata
+and dispatch containers, the exact LU/Cholesky apply sequence itself is exposed
+as native bindings so future solver integrations can reuse the same primitive
+without adding Python callbacks to their iterations.
 
 Jacobi
 ------
@@ -165,6 +186,47 @@ Example: GMRES with Jacobi
 
    assert info == 0
 
+Example: GMRES with an Exact Factor
+-----------------------------------
+
+.. code-block:: python
+
+   import mlx.core as mx
+   import numpy as np
+   import scipy.sparse
+   import mlx_sparse as ms
+
+   A_sp = scipy.sparse.csr_array(
+       np.array(
+           [
+               [5.0, -1.0, 0.0],
+               [0.5, 4.0, -1.5],
+               [0.0, 1.0, 3.0],
+           ],
+           dtype=np.float32,
+       )
+   )
+   A = ms.csr_array(
+       (
+           mx.array(A_sp.data, dtype=mx.float32),
+           mx.array(A_sp.indices, dtype=mx.int32),
+           mx.array(A_sp.indptr, dtype=mx.int32),
+       ),
+       shape=A_sp.shape,
+       canonical=True,
+   )
+   b = mx.array([2.0, -1.0, 0.5], dtype=mx.float32)
+
+   M = ms.linalg.preconditioners.exact(A, method="lu")
+   x, info = ms.linalg.gmres(A, b, M=M, rtol=1e-6, restart=2, maxiter=4)
+
+   assert info == 0
+
+Exact-factor preconditioners are primarily for diagnostics, small systems, and
+validating solver/preconditioner plumbing. They include direct factorization
+setup cost, so they should not be presented as a performance replacement for
+incomplete preconditioners such as ILU(0) or IC(0).
+
 Preconditioner metadata
 -----------------------
 
@@ -185,8 +247,10 @@ For the current v0.0.5b0 support:
   ``gmres``.
 * Use ``diagonal(..., inverse=True)`` when a safe inverse diagonal is already
   available.
+* Use ``exact`` or ``from_factorized`` as a diagnostic baseline or when a
+  reusable direct factorization already exists.
 * Use custom callables with ``gmres`` only when the convenience of a host
   fallback outweighs the Python callback cost.
 
-ILU(0), IC(0), and exact-factor wrappers are planned separately so each native
-solver path can be tested and benchmarked directly.
+ILU(0) and IC(0) are planned separately so each native solver path can be
+tested and benchmarked directly.

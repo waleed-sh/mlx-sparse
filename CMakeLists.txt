@@ -68,6 +68,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/diagonal/diagonal.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/exact/exact.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/gmres/gmres.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/pcg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp

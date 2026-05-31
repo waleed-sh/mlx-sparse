@@ -258,6 +258,69 @@ def gmres(
                 maxiter=maxiter_value,
             )
             return x, _info(info)
+        if isinstance(pc, preconditioners.ExactFactorPreconditioner):
+            factor = pc.native_factorization
+            if pc.native_apply_kind == "lu" and factor is not None:
+                x, info, _, _ = _native.csr_gmres_exact_lu(
+                    csr.data,
+                    csr.indices,
+                    csr.indptr,
+                    rhs,
+                    guess,
+                    factor.perm,
+                    factor.L.data,
+                    factor.L.indices,
+                    factor.L.indptr,
+                    factor.U.data,
+                    factor.U.indices,
+                    factor.U.indptr,
+                    csr.shape,
+                    rtol=float(rtol),
+                    atol=float(atol),
+                    restart=restart_value,
+                    maxiter=maxiter_value,
+                )
+                return x, _info(info)
+            if pc.native_apply_kind == "cholesky" and factor is not None:
+                upper = factor._upper()
+                x, info, _, _ = _native.csr_gmres_exact_cholesky(
+                    csr.data,
+                    csr.indices,
+                    csr.indptr,
+                    rhs,
+                    guess,
+                    factor.L.data,
+                    factor.L.indices,
+                    factor.L.indptr,
+                    upper.data,
+                    upper.indices,
+                    upper.indptr,
+                    csr.shape,
+                    rtol=float(rtol),
+                    atol=float(atol),
+                    restart=restart_value,
+                    maxiter=maxiter_value,
+                )
+                return x, _info(info)
+            if pc.native_apply_kind == "accelerate" and factor is not None:
+                x, info, _, _ = _native.csr_gmres_exact_accelerate(
+                    csr.data,
+                    csr.indices,
+                    csr.indptr,
+                    rhs,
+                    guess,
+                    factor,
+                    csr.shape,
+                    rtol=float(rtol),
+                    atol=float(atol),
+                    restart=restart_value,
+                    maxiter=maxiter_value,
+                )
+                return x, _info(info)
+            raise TypeError(
+                "gmres exact-factor preconditioners require a native LU, "
+                "native Cholesky, or guarded Accelerate factorization."
+            )
         if not isinstance(pc, preconditioners.IdentityPreconditioner):
             x, info, _, _ = _left_pgmres_host(
                 csr,

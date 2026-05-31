@@ -32,6 +32,15 @@ New Features
   preconditioned Arnoldi kernels under ``src/preconditioners/gmres``, custom
   callables use a documented host fallback.
 
+* Added exact-factor preconditioners through ``from_factorized(solver)`` and
+  ``exact(A, method="auto")``. The wrappers compose with ``FactorizedSolve``,
+  ``SparseLU``, and ``SparseCholesky`` without refactorizing on application,
+  preserve native or Accelerate backend metadata, and support rank-1/rank-2
+  inverse application where the underlying solver supports it. Explicit native
+  LU/Cholesky factors now use native exact-apply bindings, and
+  ``gmres(..., M=exact(...))`` routes through typed native exact-factor GMRES
+  entrypoints instead of the Python host fallback.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -47,6 +56,15 @@ Improvements
 * Added true-residual convergence checks and finite inverse-diagonal handling
   to native Jacobi-preconditioned GMRES. The preconditioned basis is built for
   ``M^{-1} A``, while success is still determined from ``b - A @ x``.
+
+* Extended preconditioner normalization so reusable sparse direct-solve objects
+  are recognized as exact inverse-apply preconditioners instead of generic
+  Python callables.
+
+* Added guarded Accelerate exact-factor GMRES routing for real Accelerate
+  factorized objects, preserving the optional Apple CPU sparse-solver boundary
+  when the package is built with Accelerate support and falling back to native
+  explicit factors otherwise.
 
 * Hardened diagonal and Jacobi preconditioner validation with explicit finite
   setup checks, finite RHS checks for standalone inverse application,
@@ -77,6 +95,13 @@ Tests
   true-residual reporting, non-finite inverse-diagonal breakdown handling,
   callable inverse-apply host fallback, and sparse-matrix ``M`` rejection.
 
+* Added exact-factor preconditioner tests covering native LU and Cholesky
+  metadata, native exact-apply bindings against dense NumPy solves, rank-1/rank-2
+  application, ``FactorizedSolve`` backend metadata preservation, ``exact(A)``
+  convenience construction, rectangular factorization rejection, non-finite
+  output rejection, and GMRES composition with assertions that exact LU/Cholesky
+  do not use the Python host fallback.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -94,9 +119,10 @@ Documentation
 ~~~~~~~~~~~~~
 
 * Added a Preconditioners user-guide page and updated linalg solver docs to
-  describe the current native CG and GMRES preconditioner support, callable
-  GMRES host fallback behavior, CPU/Metal boundaries, and the remaining MINRES
-  preconditioner gap.
+  describe the current native CG and GMRES preconditioner support,
+  exact-factor wrappers, callable GMRES host fallback behavior, native
+  exact-factor GMRES routing, CPU/Metal and Accelerate boundaries, and the
+  remaining MINRES preconditioner gap.
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------

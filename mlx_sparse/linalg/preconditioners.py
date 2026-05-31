@@ -383,6 +383,161 @@ class CallablePreconditioner:
         return self.solve(x)
 
 
+@dataclass(frozen=True, slots=True)
+class ExactFactorPreconditioner:
+    """Exact inverse-apply preconditioner backed by a sparse factorization.
+
+    This wrapper composes existing direct sparse solve objects with the
+    iterative ``M`` protocol. It does not refactorize on application: setup is
+    completed before construction. :meth:`solve` uses explicit native
+    LU/Cholesky apply bindings when factors are available, uses the guarded
+    Accelerate solver for real Accelerate factorized objects, and otherwise
+    delegates to the stored reusable solve object.
+
+    Stored fields include the reusable ``solver``, compatible square ``shape``,
+    factorization ``method``, implementation ``backend``, and conservative
+    symmetry/positive-definiteness metadata.  Accelerate-backed
+    ``FactorizedSolve`` instances keep their Accelerate CPU apply boundary;
+    native explicit factors keep their native CPU/Metal triangular-solve apply
+    boundary.
+    """
+
+    solver: object
+    shape: tuple[int, int]
+    method: str
+    backend: str
+    kind: str = "exact"
+    is_symmetric: bool = False
+    is_positive_definite: bool = False
+    factor_nnz: int = -1
+    native_apply_kind: str | None = None
+    native_factorization: object | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the wrapped exact factorization metadata."""
+
+        if not hasattr(self.solver, "solve") or not callable(self.solver.solve):
+            raise TypeError("exact factor preconditioners require solve(x).")
+        object.__setattr__(self, "shape", square_shape(self.shape))
+        if self.factor_nnz < -1:
+            raise ValueError("factor_nnz must be -1 or a non-negative integer.")
+        if self.native_apply_kind not in {None, "lu", "cholesky", "accelerate"}:
+            raise ValueError(
+                "native_apply_kind must be None, 'lu', 'cholesky', or 'accelerate'."
+            )
+
+    @property
+    def dtype(self):
+        """Value dtype used by current sparse direct solve backends."""
+
+        return mx.float32
+
+    @property
+    def nnz(self) -> int:
+        """Stored factor nonzero count, or ``-1`` for opaque factors."""
+
+        return int(self.factor_nnz)
+
+    @property
+    def setup_device(self) -> str:
+        """Device category used during factorization setup."""
+
+        if self.backend == "accelerate":
+            return "accelerate_cpu"
+        return "native_cpu"
+
+    @property
+    def apply_device(self) -> str:
+        """Device category used during inverse application."""
+
+        if self.backend == "accelerate":
+            return "accelerate_cpu"
+        return "native_cpu_or_metal"
+
+    @property
+    def setup_info(self) -> Mapping[str, object]:
+        """Structured metadata describing the exact factorization wrapper."""
+
+        return {
+            "kind": self.kind,
+            "shape": self.shape,
+            "method": self.method,
+            "backend": self.backend,
+            "setup_device": self.setup_device,
+            "apply_device": self.apply_device,
+            "nnz": self.nnz,
+            "is_symmetric": self.is_symmetric,
+            "is_positive_definite": self.is_positive_definite,
+            "solver_type": type(self.solver).__name__,
+            "native_apply_kind": self.native_apply_kind,
+            "has_native_solver_apply": self.native_apply_kind is not None,
+        }
+
+    def solve(self, x) -> mx.array:
+        """Apply the exact factorized solve to a vector or dense RHS matrix.
+
+        Args:
+            x: Right-hand side with shape ``(n,)`` or ``(n, nrhs)``.
+
+        Returns:
+            Finite ``float32`` solution with the same shape as ``x``.
+        """
+
+        rhs = ensure_rank1_or_rank2_rhs(
+            x, leading_dim=self.shape[0], require_finite=True
+        )
+        result = self._native_or_wrapped_solve(rhs)
+        out = ensure_rank1_or_rank2_rhs(
+            result, leading_dim=self.shape[1], require_finite=True
+        )
+        if out.shape != rhs.shape:
+            raise ValueError(
+                f"exact factor preconditioner output shape {out.shape} does "
+                f"not match input shape {rhs.shape}."
+            )
+        return out
+
+    def _native_or_wrapped_solve(self, rhs) -> mx.array:
+        """Apply explicit native factors when available, otherwise delegate."""
+
+        factor = self.native_factorization
+        if self.native_apply_kind == "lu" and factor is not None:
+            return _native.csr_exact_lu_preconditioner_apply(
+                factor.perm,
+                factor.L.data,
+                factor.L.indices,
+                factor.L.indptr,
+                factor.U.data,
+                factor.U.indices,
+                factor.U.indptr,
+                rhs,
+                self.shape,
+            )
+        if self.native_apply_kind == "cholesky" and factor is not None:
+            upper = factor._upper()
+            return _native.csr_exact_cholesky_preconditioner_apply(
+                factor.L.data,
+                factor.L.indices,
+                factor.L.indptr,
+                upper.data,
+                upper.indices,
+                upper.indptr,
+                rhs,
+                self.shape,
+            )
+        return self.solver.solve(rhs)
+
+    def matvec(self, x) -> mx.array:
+        """Alias for :meth:`solve` for inverse-operator composition."""
+
+        return self.solve(x)
+
+    def __call__(self, x) -> mx.array:
+        """Alias for :meth:`solve`."""
+
+        return self.solve(x)
+
+
 def identity(A_or_shape, *, dtype=None) -> IdentityPreconditioner:
     """Create a no-op preconditioner for a square shape or sparse matrix.
 
@@ -536,6 +691,122 @@ def jacobi(
     )
 
 
+def from_factorized(solver) -> ExactFactorPreconditioner:
+    """Wrap an existing sparse factorization as an exact preconditioner.
+
+    Args:
+        solver: A :class:`~mlx_sparse.linalg.FactorizedSolve`,
+            :class:`~mlx_sparse.linalg.SparseLU`, or
+            :class:`~mlx_sparse.linalg.SparseCholesky` instance.
+
+    Returns:
+        An :class:`ExactFactorPreconditioner` whose inverse application uses a
+        native exact-apply path when the factorization exposes one.
+
+    Raises:
+        TypeError: If ``solver`` is not one of the supported factorization
+            objects.
+        ValueError: If the factorization does not represent a square operator.
+    """
+
+    from mlx_sparse.linalg._factorizations import (
+        FactorizedSolve,
+        SparseCholesky,
+        SparseLU,
+    )
+    from mlx_sparse.linalg.utils.factorization import NativeFactorizedSolve
+
+    if isinstance(solver, SparseCholesky):
+        return ExactFactorPreconditioner(
+            solver=solver,
+            shape=square_shape(solver.shape),
+            method="cholesky",
+            backend="native",
+            is_symmetric=True,
+            is_positive_definite=True,
+            factor_nnz=int(solver.L.nnz),
+            native_apply_kind="cholesky",
+            native_factorization=solver,
+        )
+    if isinstance(solver, SparseLU):
+        return ExactFactorPreconditioner(
+            solver=solver,
+            shape=square_shape(solver.shape),
+            method="lu",
+            backend="native",
+            is_symmetric=False,
+            is_positive_definite=False,
+            factor_nnz=int(solver.L.nnz + solver.U.nnz),
+            native_apply_kind="lu",
+            native_factorization=solver,
+        )
+    if isinstance(solver, FactorizedSolve):
+        shape = square_shape(solver.shape)
+        if int(solver.rhs_size) != shape[0] or int(solver.solution_size) != shape[1]:
+            raise ValueError(
+                "exact factor preconditioners require matching RHS and "
+                "solution dimensions."
+            )
+        method = str(solver.method)
+        is_cholesky = method == "cholesky"
+        native_apply_kind = None
+        native_factorization = None
+        factor_nnz = -1
+        wrapped_solver = getattr(solver, "_solver", None)
+        if isinstance(wrapped_solver, NativeFactorizedSolve):
+            factor = wrapped_solver.factorization
+            if isinstance(factor, SparseLU):
+                native_apply_kind = "lu"
+                native_factorization = factor
+                factor_nnz = int(factor.L.nnz + factor.U.nnz)
+            elif isinstance(factor, SparseCholesky):
+                native_apply_kind = "cholesky"
+                native_factorization = factor
+                factor_nnz = int(factor.L.nnz)
+        elif str(solver.backend) == "accelerate" and _native.is_accelerate_float_solve(
+            wrapped_solver
+        ):
+            native_apply_kind = "accelerate"
+            native_factorization = wrapped_solver
+        return ExactFactorPreconditioner(
+            solver=solver,
+            shape=shape,
+            method=method,
+            backend=str(solver.backend),
+            is_symmetric=method in {"cholesky", "ldlt"},
+            is_positive_definite=is_cholesky,
+            factor_nnz=factor_nnz,
+            native_apply_kind=native_apply_kind,
+            native_factorization=native_factorization,
+        )
+    raise TypeError(
+        "from_factorized expects FactorizedSolve, SparseLU, or SparseCholesky."
+    )
+
+
+def exact(A, *, method: str = "auto") -> ExactFactorPreconditioner:
+    """Factorize ``A`` once and return an exact inverse-apply preconditioner.
+
+    ``exact`` is a convenience wrapper around
+    :func:`mlx_sparse.linalg.factorized`. It is intended as a correctness
+    baseline, diagnostic tool, and composition point for existing direct
+    solvers rather than a performance headline.
+
+    Args:
+        A: Sparse coefficient matrix accepted by
+            :func:`mlx_sparse.linalg.factorized`.
+        method: Direct factorization method. Defaults to ``"auto"``.
+
+    Returns:
+        An :class:`ExactFactorPreconditioner` wrapping the reusable factorized
+        solve object.
+    """
+
+    from mlx_sparse.linalg._factorizations import factorized
+
+    return from_factorized(factorized(A, method=method))
+
+
 def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditioner:
     """Normalize supported preconditioner-like objects.
 
@@ -561,7 +832,13 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
             raise ValueError("A is required when M is None.")
         return identity(A)
     if isinstance(
-        M, (IdentityPreconditioner, DiagonalPreconditioner, CallablePreconditioner)
+        M,
+        (
+            IdentityPreconditioner,
+            DiagonalPreconditioner,
+            CallablePreconditioner,
+            ExactFactorPreconditioner,
+        ),
     ):
         if A is not None and M.shape != square_shape(A):
             raise ValueError(f"preconditioner shape {M.shape} does not match A.shape.")
@@ -571,6 +848,17 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
             "sparse matrices are not inverse-apply preconditioners; use "
             "preconditioners.jacobi(A) or preconditioners.diagonal(...)."
         )
+    from mlx_sparse.linalg._factorizations import (
+        FactorizedSolve,
+        SparseCholesky,
+        SparseLU,
+    )
+
+    if isinstance(M, (FactorizedSolve, SparseLU, SparseCholesky)):
+        pc = from_factorized(M)
+        if A is not None and pc.shape != square_shape(A):
+            raise ValueError(f"preconditioner shape {pc.shape} does not match A.shape.")
+        return pc
     if hasattr(M, "solve") and callable(M.solve):
         if not assume_inverse:
             raise TypeError("custom preconditioner objects must apply the inverse.")
@@ -596,11 +884,14 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
 __all__ = [
     "DiagonalPreconditioner",
     "CallablePreconditioner",
+    "ExactFactorPreconditioner",
     "IdentityPreconditioner",
     "JacobiPreconditioner",
     "Preconditioner",
     "aspreconditioner",
     "diagonal",
+    "exact",
+    "from_factorized",
     "identity",
     "jacobi",
 ]
