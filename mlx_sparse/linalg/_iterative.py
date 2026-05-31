@@ -17,6 +17,9 @@ from __future__ import annotations
 import mlx.core as mx
 
 import mlx_sparse._native as _native
+from mlx_sparse.linalg.utils.gmres import (
+    left_preconditioned_gmres_host as _left_pgmres_host,
+)
 from mlx_sparse.linalg.utils.iterative import as_csr as _as_csr
 from mlx_sparse.linalg.utils.iterative import float32_array as _float32_array
 from mlx_sparse.linalg.utils.iterative import float32_csr as _float32_csr
@@ -137,7 +140,7 @@ def cg(
             )
             return x, _info(info)
         else:
-            raise NotImplementedError(
+            raise TypeError(
                 "cg currently supports only identity, diagonal, and Jacobi "
                 "native-backed preconditioners."
             )
@@ -201,7 +204,14 @@ def gmres(
             Defaults to ``min(20, n)``.
         maxiter: Maximum total number of matrix-vector products across all
             restart cycles.  Defaults to ``10 * n``.
-        M: Not supported.  Pass ``None`` (the default).
+        M: Optional inverse-apply preconditioner.  ``None`` uses the existing
+            native unpreconditioned GMRES path. ``preconditioners.identity``
+            is treated equivalently. ``preconditioners.diagonal`` and
+            ``preconditioners.jacobi`` dispatch to native left-preconditioned
+            GMRES. Custom callables and inverse-apply objects use a host
+            fallback loop. All preconditioned paths build Krylov vectors for
+            ``M^{-1} A`` while convergence is tested against the true residual
+            ``b - A @ x``.
         callback: Not supported.  Pass ``None`` (the default).
         callback_type: Accepted for API compatibility but ignored.
 
@@ -212,13 +222,13 @@ def gmres(
         iteration count at termination without convergence.
 
     Raises:
-        NotImplementedError: If ``M`` or ``callback`` is not ``None``.
+        NotImplementedError: If ``callback`` is not ``None``.
         TypeError: If ``A`` is a dense array or an unsupported type.
         ValueError: If ``b`` is not rank-1, its length does not match
             ``A.shape[0]``, or ``restart`` is not positive.
     """
 
-    if M is not None or callback is not None:
+    if callback is not None:
         raise NotImplementedError("native sparse gmres does not use Python callbacks.")
     if callback_type not in {"x", "pr_norm", "legacy"}:
         raise ValueError("callback_type must be 'x', 'pr_norm', or 'legacy'.")
@@ -228,6 +238,38 @@ def gmres(
     restart_value = min(20, csr.shape[0]) if restart is None else int(restart)
     if restart_value <= 0:
         raise ValueError("restart must be positive.")
+    maxiter_value = _maxiter(csr, maxiter)
+    if M is not None:
+        from mlx_sparse.linalg import preconditioners
+
+        pc = preconditioners.aspreconditioner(M, csr)
+        if isinstance(pc, preconditioners.DiagonalPreconditioner):
+            x, info, _, _ = _native.csr_gmres_jacobi(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.inverse_diagonal,
+                csr.shape,
+                rtol=float(rtol),
+                atol=float(atol),
+                restart=restart_value,
+                maxiter=maxiter_value,
+            )
+            return x, _info(info)
+        if not isinstance(pc, preconditioners.IdentityPreconditioner):
+            x, info, _, _ = _left_pgmres_host(
+                csr,
+                rhs,
+                guess,
+                pc,
+                rtol=float(rtol),
+                atol=float(atol),
+                restart=restart_value,
+                maxiter=maxiter_value,
+            )
+            return x, int(info)
     x, info, _, _ = _native.csr_gmres(
         csr.data,
         csr.indices,
@@ -238,7 +280,7 @@ def gmres(
         rtol=float(rtol),
         atol=float(atol),
         restart=restart_value,
-        maxiter=_maxiter(csr, maxiter),
+        maxiter=maxiter_value,
     )
     return x, _info(info)
 

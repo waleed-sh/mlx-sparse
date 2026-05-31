@@ -287,6 +287,102 @@ class JacobiPreconditioner(DiagonalPreconditioner):
         }
 
 
+@dataclass(frozen=True, slots=True)
+class CallablePreconditioner:
+    """Python host inverse-apply preconditioner wrapper.
+
+    ``CallablePreconditioner`` is the explicit normalization layer for custom
+    inverse-apply objects.  The wrapped callable receives a rank-1 or rank-2
+    ``float32`` MLX array and must return the same shape containing
+    ``M^{-1} @ x``.  Solver integrations may use this wrapper only on documented
+    host fallback paths because each application crosses through Python.
+
+    Stored fields include the callable ``apply`` object, compatible square
+    ``shape``, stable ``kind`` metadata, conservative symmetry/positive
+    definiteness flags, and structured setup information.
+    """
+
+    apply: object
+    shape: tuple[int, int]
+    dtype: object = mx.float32
+    kind: str = "callable"
+    is_symmetric: bool = False
+    is_positive_definite: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate the callable contract metadata."""
+
+        if not callable(self.apply):
+            raise TypeError("callable preconditioner apply object must be callable.")
+        object.__setattr__(self, "shape", square_shape(self.shape))
+        if self.dtype != mx.float32:
+            raise TypeError("callable preconditioners currently use float32 values.")
+
+    @property
+    def nnz(self) -> int:
+        """Unknown effective storage count for custom callables."""
+
+        return -1
+
+    @property
+    def setup_device(self) -> str:
+        """Device category used during setup."""
+
+        return "python_host"
+
+    @property
+    def apply_device(self) -> str:
+        """Device category used during inverse application."""
+
+        return "python_host"
+
+    @property
+    def setup_info(self) -> Mapping[str, object]:
+        """Structured metadata describing the callable contract."""
+
+        return {
+            "kind": self.kind,
+            "shape": self.shape,
+            "assume_inverse": True,
+            "is_symmetric": self.is_symmetric,
+            "is_positive_definite": self.is_positive_definite,
+        }
+
+    def solve(self, x) -> mx.array:
+        """Apply the wrapped inverse callable and validate its output.
+
+        Args:
+            x: Right-hand side with shape ``(n,)`` or ``(n, nrhs)``.
+
+        Returns:
+            Finite ``float32`` output with the exact same shape as ``x``.
+        """
+
+        rhs = ensure_rank1_or_rank2_rhs(
+            x, leading_dim=self.shape[0], require_finite=True
+        )
+        result = self.apply(rhs)
+        try:
+            out = ensure_rank1_or_rank2_rhs(
+                result, leading_dim=self.shape[0], require_finite=True
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "preconditioner output shape or finite-value validation failed."
+            ) from exc
+        if out.shape != rhs.shape:
+            raise ValueError(
+                f"preconditioner output shape {out.shape} does not match "
+                f"input shape {rhs.shape}."
+            )
+        return out
+
+    def __call__(self, x) -> mx.array:
+        """Alias for :meth:`solve`."""
+
+        return self.solve(x)
+
+
 def identity(A_or_shape, *, dtype=None) -> IdentityPreconditioner:
     """Create a no-op preconditioner for a square shape or sparse matrix.
 
@@ -444,12 +540,13 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
     """Normalize supported preconditioner-like objects.
 
     Args:
-        M: ``None`` or an existing native-backed preconditioner. Sparse matrices
-            are rejected because they do not explicitly define an inverse-apply
-            contract.
+        M: ``None``, an existing preconditioner, an object with ``solve(x)``,
+            or a callable. Sparse matrices are rejected because they do not
+            explicitly define an inverse-apply contract.
         A: Optional reference matrix or shape used to validate compatibility.
-        assume_inverse: Reserved for future callable/object support. Present to
-            keep the public normalization signature explicit.
+        assume_inverse: Must be ``True`` for callables and custom objects,
+            documenting that their output is already an inverse/preconditioner
+            application.
 
     Returns:
         A supported preconditioner object.
@@ -463,24 +560,42 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
         if A is None:
             raise ValueError("A is required when M is None.")
         return identity(A)
-    if isinstance(M, (IdentityPreconditioner, DiagonalPreconditioner)):
+    if isinstance(
+        M, (IdentityPreconditioner, DiagonalPreconditioner, CallablePreconditioner)
+    ):
         if A is not None and M.shape != square_shape(A):
             raise ValueError(f"preconditioner shape {M.shape} does not match A.shape.")
         return M
     if isinstance(M, (CSRArray, COOArray, CSCArray)):
         raise TypeError(
-            "sparse matrices are not inverse-apply preconditioners, use "
+            "sparse matrices are not inverse-apply preconditioners; use "
             "preconditioners.jacobi(A) or preconditioners.diagonal(...)."
         )
-    _ = assume_inverse
+    if hasattr(M, "solve") and callable(M.solve):
+        if not assume_inverse:
+            raise TypeError("custom preconditioner objects must apply the inverse.")
+        shape = square_shape(getattr(M, "shape", A)) if A is None else square_shape(A)
+        if hasattr(M, "shape") and square_shape(M.shape) != shape:
+            raise ValueError(
+                f"preconditioner shape {square_shape(M.shape)} does not match "
+                f"A.shape {shape}."
+            )
+        return CallablePreconditioner(M.solve, shape)
+    if callable(M):
+        if not assume_inverse:
+            raise TypeError("callable preconditioners must apply the inverse.")
+        if A is None:
+            raise ValueError("A is required when M is a callable.")
+        return CallablePreconditioner(M, square_shape(A))
     raise TypeError(
-        "only native-backed identity, diagonal, and Jacobi preconditioners are "
-        "supported by the current solver integration."
+        "M must be None, a supported preconditioner, an inverse-apply object "
+        "with solve(x), or an inverse-apply callable."
     )
 
 
 __all__ = [
     "DiagonalPreconditioner",
+    "CallablePreconditioner",
     "IdentityPreconditioner",
     "JacobiPreconditioner",
     "Preconditioner",

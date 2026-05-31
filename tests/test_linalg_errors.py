@@ -257,11 +257,11 @@ class TestSolverAPIErrors:
         with pytest.raises(NotImplementedError, match="callbacks"):
             linalg.cg(csr, b, callback=lambda x: None)
 
-    def test_gmres_with_M_raises(self):
+    def test_gmres_rejects_sparse_matrix_as_M(self, mx):
         csr = _spd_2x2(mx)
         b = mx.array([1.0, 2.0], dtype=mx.float32)
-        with pytest.raises(NotImplementedError, match="callbacks"):
-            linalg.gmres(csr, b, M=lambda x: x)
+        with pytest.raises(TypeError, match="sparse matrices"):
+            linalg.gmres(csr, b, M=csr)
 
     def test_gmres_with_callback_raises(self):
         csr = _spd_2x2(mx)

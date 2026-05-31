@@ -218,5 +218,11 @@ preconditioners from ``mlx_sparse.linalg.preconditioners``. ``identity`` uses
 the existing unpreconditioned CG path. ``diagonal`` and ``jacobi`` dispatch to
 native Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX
 device and still test convergence against the true residual
-``||b - A @ x||``. ``gmres`` and ``minres`` still reject non-``None``
-preconditioners.
+``||b - A @ x||``.
+
+``linalg.gmres`` accepts ``identity``, ``diagonal``/``jacobi``, and explicit
+inverse-apply callables or objects. The diagonal/Jacobi path builds Krylov
+vectors for ``M^{-1} A`` through native CPU/Metal Arnoldi kernels and tests
+convergence against the true residual ``b - A @ x``. Custom callables and
+objects use a slower host fallback because Python cannot be called from native
+solver kernels. ``minres`` still rejects non-``None`` preconditioners.

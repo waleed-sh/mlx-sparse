@@ -9,9 +9,9 @@ approximation to ``A^{-1}``, it is not interpreted as a sparse matrix to invert
 implicitly.
 
 Python preconditioner objects are API containers and dispatch helpers. Diagonal
-application and Jacobi-preconditioned CG run through native C++/Metal
-primitives under ``src/preconditioners``, they do not execute a Python callback
-inside the Krylov iteration.
+application, Jacobi-preconditioned CG, and diagonal/Jacobi-preconditioned GMRES
+run through native C++/Metal primitives under ``src/preconditioners``, they do
+not execute a Python callback inside native Krylov iterations.
 
 Current support
 ---------------
@@ -25,27 +25,36 @@ Current support
      - Execution boundary
    * - ``identity(A_or_shape)``
      - Baseline no-op preconditioner.
-     - ``cg(..., M=identity(...))`` uses the existing native unpreconditioned
-       CG path.
+     - ``cg(..., M=identity(...))`` and ``gmres(..., M=identity(...))`` use
+       the existing native unpreconditioned paths.
    * - ``diagonal(values)``
      - Explicit diagonal inverse-apply preconditioner.
      - Application uses a native mlx-sparse CPU/Metal primitive for rank-1 and
-       rank-2 right-hand sides.
+       rank-2 right-hand sides. ``cg`` and ``gmres`` dispatch to native
+       diagonal-preconditioned Krylov paths.
    * - ``jacobi(A, check=False)``
      - Jacobi preconditioner built from the summed sparse diagonal.
      - Diagonal extraction uses existing sparse native kernels. ``cg(...,
-       M=jacobi(A))`` dispatches to a native C++/Metal
-       Jacobi-preconditioned CG primitive.
+       M=jacobi(A))`` and ``gmres(..., M=jacobi(A))`` dispatch to native
+       C++/Metal Jacobi-preconditioned primitives.
+   * - ``aspreconditioner(callable, A)``
+     - Custom inverse-apply callable or object with ``solve(x)``.
+     - ``gmres`` supports these through a host fallback loop with
+       left-preconditioning semantics. ``cg`` remains native-only.
 
-``cg`` currently supports ``identity``, ``diagonal``, and ``jacobi``
-preconditioners. ``gmres`` and ``minres`` preconditioner support are still
-future work.
+``cg`` currently supports native-backed ``identity``, ``diagonal``, and
+``jacobi`` preconditioners. ``gmres`` supports ``identity``,
+``diagonal``/``jacobi``, and explicit inverse-apply callables or objects.  For
+``diagonal`` and ``jacobi``, GMRES builds the Krylov basis for ``M^{-1} A`` and
+checks convergence against the true residual ``b - A @ x``. ``minres``
+preconditioner support is still future work.
 
 Jacobi and diagonal preconditioner application do not use Accelerate because
 the current mlx-sparse Accelerate integration is for direct sparse
-factorization/solve objects. Future exact-factor preconditioners will preserve
-the existing Accelerate guards and use Accelerate only on Apple builds where it
-is available and helpful.
+factorization/solve objects. The native diagonal/Jacobi Krylov paths use the
+selected MLX CPU or Metal device. Future exact-factor preconditioners will
+preserve the existing Accelerate guards and use Accelerate only on Apple builds
+where it is available and helpful.
 
 Jacobi
 ------
@@ -119,6 +128,43 @@ Example: PCG with Jacobi
 
    assert info == 0
 
+Example: GMRES with Jacobi
+--------------------------
+
+.. code-block:: python
+
+   import mlx.core as mx
+   import numpy as np
+   import scipy.sparse
+   import mlx_sparse as ms
+
+   A_sp = scipy.sparse.csr_array(
+       np.array(
+           [
+               [7.0, -2.0, 0.5, 0.0],
+               [1.0, 5.5, -1.0, 0.25],
+               [0.0, -0.5, 4.5, 1.0],
+               [0.25, 0.0, -0.75, 3.75],
+           ],
+           dtype=np.float32,
+       )
+   )
+   A = ms.csr_array(
+       (
+           mx.array(A_sp.data, dtype=mx.float32),
+           mx.array(A_sp.indices, dtype=mx.int32),
+           mx.array(A_sp.indptr, dtype=mx.int32),
+       ),
+       shape=A_sp.shape,
+       canonical=True,
+   )
+   b = mx.array([1.0, -2.0, 0.5, 3.0], dtype=mx.float32)
+
+   M = ms.linalg.preconditioners.jacobi(A)
+   x, info = ms.linalg.gmres(A, b, M=M, rtol=1e-6, restart=4, maxiter=32)
+
+   assert info == 0
+
 Preconditioner metadata
 -----------------------
 
@@ -135,9 +181,12 @@ Choosing a preconditioner
 For the current v0.0.5b0 support:
 
 * Use ``identity`` as a baseline.
-* Use ``jacobi`` for cheap SPD or diagonally dominant systems.
+* Use ``jacobi`` for cheap SPD or diagonally dominant systems with ``cg`` or
+  ``gmres``.
 * Use ``diagonal(..., inverse=True)`` when a safe inverse diagonal is already
   available.
+* Use custom callables with ``gmres`` only when the convenience of a host
+  fallback outweighs the Python callback cost.
 
-ILU(0), IC(0), exact-factor wrappers, and GMRES preconditioning are planned
-separately so each native solver path can be tested and benchmarked directly.
+ILU(0), IC(0), and exact-factor wrappers are planned separately so each native
+solver path can be tested and benchmarked directly.

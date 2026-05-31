@@ -26,6 +26,12 @@ New Features
   ``src/preconditioners/diagonal``, with Python bindings through
   :mod:`mlx_sparse._native`.
 
+* Added left-preconditioned GMRES support for ``identity``,
+  ``diagonal``/``jacobi``, and explicit inverse-apply callables or objects.
+  Diagonal/Jacobi GMRES dispatches to native C++ with CPU/Metal
+  preconditioned Arnoldi kernels under ``src/preconditioners/gmres``, custom
+  callables use a documented host fallback.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -37,6 +43,10 @@ Improvements
 * Tightened GMRES status handling so a solve that reaches the true residual
   tolerance on the final allowed restart reports success instead of returning
   the iteration budget as ``info``.
+
+* Added true-residual convergence checks and finite inverse-diagonal handling
+  to native Jacobi-preconditioned GMRES. The preconditioned basis is built for
+  ``M^{-1} A``, while success is still determined from ``b - A @ x``.
 
 * Hardened diagonal and Jacobi preconditioner validation with explicit finite
   setup checks, finite RHS checks for standalone inverse application,
@@ -62,6 +72,11 @@ Tests
   SciPy PCG comparison, dense NumPy residual checks, and pathological
   near-singular or singular PCG behavior.
 
+* Added GMRES preconditioner tests covering native identity dispatch,
+  native Jacobi/diagonal left-preconditioned GMRES against SciPy, direct native
+  true-residual reporting, non-finite inverse-diagonal breakdown handling,
+  callable inverse-apply host fallback, and sparse-matrix ``M`` rejection.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -70,12 +85,18 @@ Benchmarks
   and SciPy CG/Jacobi reference measurements to
   ``benchmarks/reports/v0.0.5b0/jacobi_pcg``.
 
+* Recorded before/after GMRES preconditioner measurements under
+  ``benchmarks/reports/v0.0.5b0/gmres_preconditioners_*``, including the
+  unchanged unpreconditioned GMRES utility benchmark and a focused native
+  Jacobi-GMRES timing.
+
 Documentation
 ~~~~~~~~~~~~~
 
 * Added a Preconditioners user-guide page and updated linalg solver docs to
-  describe the current native CG preconditioner support and the remaining
-  GMRES/MINRES preconditioner gap.
+  describe the current native CG and GMRES preconditioner support, callable
+  GMRES host fallback behavior, CPU/Metal boundaries, and the remaining MINRES
+  preconditioner gap.
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------

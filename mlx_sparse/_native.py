@@ -817,6 +817,39 @@ def csr_gmres(
     )
 
 
+def csr_gmres_jacobi(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    inv_diag: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    restart: int,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_gmres_jacobi requires the native mlx_sparse extension.")
+    return ext.csr_gmres_jacobi(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        inv_diag,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(restart),
+        int(maxiter),
+    )
+
+
 def csr_minres(
     data: mx.array,
     indices: mx.array,

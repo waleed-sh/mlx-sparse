@@ -54,6 +54,7 @@ def test_native_linalg_symbols_are_exported_when_extension_loads():
         "csr_pcg_jacobi",
         "diagonal_preconditioner_apply",
         "csr_gmres",
+        "csr_gmres_jacobi",
         "csr_minres",
         "csr_lanczos",
         "csr_arnoldi",
