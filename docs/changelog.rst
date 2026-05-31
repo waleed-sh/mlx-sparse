@@ -160,6 +160,16 @@ Improvements
   dataclass constructor
   (`PR #22 <https://github.com/waleed-sh/mlx-sparse/pull/22>`_).
 
+* Improved native CPU explicit-factor construction for the portable direct
+  solver fallback.  Cholesky now uses sorted sparse rows plus reusable dense
+  marker/work arrays instead of map-heavy working storage, while LU uses sorted
+  sparse row vectors to reduce per-pivot map churn without changing partial
+  pivoting semantics, factor structure, natural ordering, or error behavior.
+  The direct-solver benchmark now reports input import/canonicalization
+  separately and records that native factorization fuses symbolic construction,
+  numeric updates, and CSR materialization
+  (`PR #23 <https://github.com/waleed-sh/mlx-sparse/pull/23>`_).
+
 
 
 mlx-sparse v0.0.4b0 (28.05.2026)

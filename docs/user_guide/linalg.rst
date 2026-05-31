@@ -36,6 +36,9 @@ Sparse direct factorizations
 ``A = L @ L.T`` for positive-definite real matrices. ``sparse_lu(A)`` computes
 ``P @ A = L @ U`` with sparse CSR factors and row pivoting. These APIs return
 explicit sparse factors and therefore stay on the native mlx-sparse path.
+They preserve natural-order native semantics: no fill-reducing ordering,
+supernodal factorization, native QR, native LDLT, or rectangular native direct
+solver is introduced by the fallback path.
 
 ``factorized(A, method="auto")`` returns a reusable solve object without
 exposing explicit factors. On Accelerate-enabled Apple builds it uses opaque
