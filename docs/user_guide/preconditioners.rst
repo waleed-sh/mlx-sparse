@@ -132,15 +132,7 @@ Example: PCG with Jacobi
    D = scipy.sparse.diags(scale, format="csr", dtype=np.float32)
    A_sp = (D @ T @ D).astype(np.float32).tocsr()
 
-   A = ms.csr_array(
-       (
-           mx.array(A_sp.data, dtype=mx.float32),
-           mx.array(A_sp.indices, dtype=mx.int32),
-           mx.array(A_sp.indptr, dtype=mx.int32),
-       ),
-       shape=A_sp.shape,
-       canonical=True,
-   )
+   A = ms.from_scipy(A_sp)
    x_true = mx.sin(mx.linspace(0.0, np.pi, n))
    b = A @ x_true
 
@@ -170,15 +162,7 @@ Example: GMRES with Jacobi
            dtype=np.float32,
        )
    )
-   A = ms.csr_array(
-       (
-           mx.array(A_sp.data, dtype=mx.float32),
-           mx.array(A_sp.indices, dtype=mx.int32),
-           mx.array(A_sp.indptr, dtype=mx.int32),
-       ),
-       shape=A_sp.shape,
-       canonical=True,
-   )
+   A = ms.from_scipy(A_sp)
    b = mx.array([1.0, -2.0, 0.5, 3.0], dtype=mx.float32)
 
    M = ms.linalg.preconditioners.jacobi(A)
@@ -206,15 +190,7 @@ Example: GMRES with an Exact Factor
            dtype=np.float32,
        )
    )
-   A = ms.csr_array(
-       (
-           mx.array(A_sp.data, dtype=mx.float32),
-           mx.array(A_sp.indices, dtype=mx.int32),
-           mx.array(A_sp.indptr, dtype=mx.int32),
-       ),
-       shape=A_sp.shape,
-       canonical=True,
-   )
+   A = ms.from_scipy(A_sp)
    b = mx.array([2.0, -1.0, 0.5], dtype=mx.float32)
 
    M = ms.linalg.preconditioners.exact(A, method="lu")
