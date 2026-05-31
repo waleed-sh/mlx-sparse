@@ -29,6 +29,15 @@ New Features
 Improvements
 ~~~~~~~~~~~~
 
+* Replaced GMRES' projected normal-equation solve with a native
+  upper-Hessenberg QR solve using Givens rotations, avoiding the condition
+  number squaring of ``H.T @ H`` during restarted GMRES updates while keeping
+  the existing CPU/Metal Arnoldi dispatch.
+
+* Tightened GMRES status handling so a solve that reaches the true residual
+  tolerance on the final allowed restart reports success instead of returning
+  the iteration budget as ``info``.
+
 * Hardened diagonal and Jacobi preconditioner validation with explicit finite
   setup checks, finite RHS checks for standalone inverse application,
   conservative positive-definite metadata, and an opt-in ``check=True`` path
@@ -43,6 +52,11 @@ Improvements
 Tests
 ~~~~~
 
+* Added GMRES robustness tests for final-restart true-residual success,
+  nonsymmetric diagonal-dominant systems against SciPy and dense NumPy solves,
+  convection-diffusion-like systems against SciPy, and the remaining
+  Hilbert-like float32 limitation with a bounded-residual assertion.
+
 * Expanded preconditioner coverage for rank-1/rank-2 RHS application,
   low-precision RHS promotion, CSR/COO/CSC Jacobi setup, input immutability,
   SciPy PCG comparison, dense NumPy residual checks, and pathological
@@ -53,8 +67,8 @@ Benchmarks
 
 * Added a focused Jacobi PCG validation benchmark entrypoint that writes setup
   time, solve time, true residual, matrix metadata, preconditioner metadata,
-  and SciPy CG/Jacobi reference measurements.
-
+  and SciPy CG/Jacobi reference measurements to
+  ``benchmarks/reports/v0.0.5b0/jacobi_pcg``.
 
 Documentation
 ~~~~~~~~~~~~~
