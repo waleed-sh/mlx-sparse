@@ -378,6 +378,7 @@ def test_spectral_routines_match_scipy_sparse(mx, scipy_sparse, to_numpy):
     np.testing.assert_allclose(to_numpy(got_s)[0], expected_s, rtol=5e-2, atol=5e-2)
 
 
+@pytest.mark.cpu_only
 def test_spectral_solver_parallel_matches_serial(mx, scipy_sparse, to_numpy):
     if not extension_available():
         pytest.skip("native extension unavailable")

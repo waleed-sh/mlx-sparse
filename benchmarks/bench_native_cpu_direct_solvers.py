@@ -16,11 +16,19 @@
 
 This benchmark is the v0.0.4b1 baseline for the native, non-Accelerate sparse
 direct solver path.  It pins MLX to CPU, records runtime and matrix metadata,
-and measures native LU and Cholesky in three phases:
+separates input import/canonicalization from native factorization, and
+measures native LU and Cholesky in three solve phases:
 
+* ``import_canonicalize``: import a SciPy CSR matrix as materialized canonical
+  mlx-sparse CSR input
 * ``factor_only``: create explicit sparse factors and force their buffers
 * ``solve_only``: reuse one factorization and force the dense solution
 * ``factor_plus_solve``: factor and solve in one measured call
+
+The native factorization phase itself is intentionally reported as one fused
+kernel.  The current natural-order Cholesky and LU implementations combine
+symbolic structure discovery, numeric row updates, and CSR materialization
+inside the host factorization routine.
 
 Example:
     python benchmarks/bench_native_cpu_direct_solvers.py \\
@@ -261,13 +269,12 @@ def main() -> None:
                     else float(density_spec["effective_density"])
                 )
                 scipy_matrix = MATRIX_FACTORIES[family](n, density, rng)
-                matrix = ms.from_scipy(
-                    scipy_matrix,
-                    format="csr",
-                    dtype=mx.float32,
-                    index_dtype=index_dtype,
-                    canonical=True,
+                import_timing = time_result(
+                    lambda: _materialized_mlx_csr(scipy_matrix, index_dtype),
+                    warmup=args.warmup,
+                    iters=args.iters,
                 )
+                matrix = _materialized_mlx_csr(scipy_matrix, index_dtype)
                 force_eval(matrix)
                 matrix_meta = sparse_matrix_metadata(matrix)
                 matrix_meta["density_mode"] = (
@@ -282,6 +289,12 @@ def main() -> None:
                 )
                 matrix_meta["max_density"] = (
                     None if density_spec is None else density_spec["max_density"]
+                )
+                _append_input_record(
+                    records,
+                    family=family,
+                    matrix_meta=matrix_meta,
+                    timing=import_timing,
                 )
 
                 if family in CHOLESKY_FAMILIES:
@@ -319,6 +332,20 @@ def main() -> None:
         "benchmark": "native_cpu_direct_solvers",
         "version_target": "0.0.4b1",
         "mode": "cpu_only_native_non_accelerate",
+        "phase_model": {
+            "import_canonicalize": (
+                "Timed Python/SciPy-to-mlx-sparse import, canonicalization, "
+                "and CSR buffer materialization before native factorization."
+            ),
+            "factor_only": (
+                "Timed native host factorization with factor buffers forced. "
+                "The production kernels fuse symbolic structure construction, "
+                "numeric factorization, and CSR materialization rather than "
+                "exposing benchmark-only internal timers."
+            ),
+            "solve_only": "Timed reuse of one already materialized factorization.",
+            "factor_plus_solve": "Timed native factorization followed by one solve.",
+        },
         "runtime": runtime,
         "args": {
             "sizes": args.sizes,
@@ -466,6 +493,28 @@ def _append_record(
     records.append(record)
 
 
+def _append_input_record(
+    records: list[dict[str, Any]],
+    *,
+    family: str,
+    matrix_meta: dict[str, Any],
+    timing: BenchmarkTiming,
+) -> None:
+    records.append(
+        {
+            "solver": "csr_input",
+            "backend": "native",
+            "matrix_family": family,
+            "phase": "import_canonicalize",
+            "phase_detail": (
+                "SciPy CSR to canonical materialized mlx-sparse CSR input."
+            ),
+            "matrix": matrix_meta,
+            "timing": timing.as_dict(),
+        }
+    )
+
+
 def _scipy_phase_timings(
     *,
     solver: str,
@@ -477,7 +526,7 @@ def _scipy_phase_timings(
     if solver != "lu":
         reason = (
             "scipy.sparse.linalg does not provide a built-in sparse Cholesky "
-            "factorization, SuperLU timings are recorded on LU records for the "
+            "factorization; SuperLU timings are recorded on LU records for the "
             "same matrices."
         )
         return {
@@ -558,6 +607,21 @@ def _relative_residual_numpy(
     x_np = np.asarray(solution, dtype=np.float64)
     residual = matrix @ x_np - rhs_np
     return float(np.linalg.norm(residual) / max(np.linalg.norm(rhs_np), 1.0))
+
+
+def _materialized_mlx_csr(
+    scipy_matrix: sp.csr_matrix,
+    index_dtype: mx.Dtype,
+) -> ms.CSRArray:
+    matrix = ms.from_scipy(
+        scipy_matrix,
+        format="csr",
+        dtype=mx.float32,
+        index_dtype=index_dtype,
+        canonical=True,
+    )
+    force_eval(matrix)
+    return matrix
 
 
 def density_for_size(
