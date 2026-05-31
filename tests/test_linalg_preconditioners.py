@@ -44,6 +44,29 @@ def _scipy_cg(scipy_linalg, A, b, *, M=None, rtol=1e-6, atol=0.0, maxiter=64):
         return scipy_linalg.cg(A, b, M=M, tol=rtol, maxiter=maxiter)
 
 
+def _scipy_gmres(
+    scipy_linalg,
+    A,
+    b,
+    *,
+    M=None,
+    rtol=1e-6,
+    atol=0.0,
+    restart=None,
+    maxiter=64,
+):
+    try:
+        return scipy_linalg.gmres(
+            A, b, M=M, rtol=rtol, atol=atol, restart=restart, maxiter=maxiter
+        )
+    except TypeError:
+        return scipy_linalg.gmres(A, b, M=M, tol=rtol, restart=restart, maxiter=maxiter)
+
+
+def _relative_residual(A_dense, x, b):
+    return np.linalg.norm(A_dense @ x - b) / max(np.linalg.norm(b), 1.0)
+
+
 def _spd_2x2(mx):
     return ms.csr_array(
         (
@@ -111,6 +134,25 @@ def test_preconditioner_metadata_is_explicit_and_conservative(mx):
     assert jacobi_checked.setup_info["positive_diagonal"] is True
     assert jacobi_checked.setup_info["omega"] == pytest.approx(1.0)
     assert jacobi_checked.setup_info["shift"] == pytest.approx(0.0)
+
+
+def test_aspreconditioner_wraps_callable_inverse_apply(mx, to_numpy):
+    scale = mx.array([0.5, 0.25], dtype=mx.float32)
+    M = preconditioners.aspreconditioner(lambda x: scale * x, (2, 2))
+
+    assert isinstance(M, preconditioners.CallablePreconditioner)
+    assert M.shape == (2, 2)
+    got = M(mx.array([2.0, 8.0], dtype=mx.float32))
+    np.testing.assert_allclose(to_numpy(got), [1.0, 2.0], rtol=1e-6)
+
+
+def test_callable_preconditioner_rejects_wrong_output_shape(mx):
+    M = preconditioners.aspreconditioner(
+        lambda x: mx.ones((3,), dtype=mx.float32), (2, 2)
+    )
+
+    with pytest.raises(ValueError, match="output shape"):
+        M(mx.ones((2,), dtype=mx.float32))
 
 
 def test_diagonal_preconditioner_apply_rank1_and_rank2(mx, to_numpy):
@@ -292,6 +334,178 @@ def test_cg_identity_preconditioner_uses_native_cg(mx, to_numpy):
     assert info_base == 0
     assert info_identity == 0
     np.testing.assert_allclose(to_numpy(x_identity), to_numpy(x_base), rtol=1e-6)
+
+
+def test_gmres_identity_preconditioner_matches_native_unpreconditioned(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _spd_2x2(mx)
+    b = mx.array([1.0, 2.0], dtype=mx.float32)
+
+    x_base, info_base = linalg.gmres(A, b, rtol=1e-6, maxiter=32)
+    x_identity, info_identity = linalg.gmres(
+        A, b, M=preconditioners.identity(A), rtol=1e-6, maxiter=32
+    )
+
+    assert info_base == 0
+    assert info_identity == 0
+    np.testing.assert_allclose(to_numpy(x_identity), to_numpy(x_base), rtol=1e-6)
+
+
+def test_gmres_diagonal_left_preconditioner_matches_scipy(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    scipy_linalg = pytest.importorskip("scipy.sparse.linalg")
+    A_dense = np.array(
+        [
+            [7.0, -2.0, 0.5, 0.0],
+            [1.0, 5.5, -1.0, 0.25],
+            [0.0, -0.5, 4.5, 1.0],
+            [0.25, 0.0, -0.75, 3.75],
+        ],
+        dtype=np.float32,
+    )
+    scipy_A = scipy_sparse.csr_array(A_dense)
+    A = _csr_from_scipy(mx, scipy_A)
+    b_np = np.array([1.0, -2.0, 0.5, 3.0], dtype=np.float32)
+
+    M = preconditioners.jacobi(A)
+    x_mlx, info_mlx = linalg.gmres(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=M,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=4,
+        maxiter=32,
+    )
+
+    inv_diag = 1.0 / scipy_A.diagonal()
+    M_scipy = scipy_linalg.LinearOperator(
+        scipy_A.shape,
+        matvec=lambda x: inv_diag * x,
+        dtype=np.float32,
+    )
+    x_scipy, info_scipy = _scipy_gmres(
+        scipy_linalg,
+        scipy_A,
+        b_np,
+        M=M_scipy,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=4,
+        maxiter=32,
+    )
+
+    x_np = to_numpy(x_mlx)
+    assert info_mlx == 0
+    assert info_scipy == 0
+    np.testing.assert_allclose(x_np, x_scipy, rtol=2e-4, atol=2e-4)
+    assert _relative_residual(A_dense, x_np, b_np) <= 2e-6
+
+
+def test_native_gmres_jacobi_reports_true_residual_and_iterations(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    A_dense = np.array(
+        [
+            [5.0, -1.0, 0.25, 0.0],
+            [1.25, 4.0, -0.5, 0.25],
+            [0.0, 0.75, 3.5, -1.0],
+            [0.5, 0.0, 1.0, 4.5],
+        ],
+        dtype=np.float32,
+    )
+    A = _csr_from_scipy(mx, scipy_sparse.csr_array(A_dense))
+    b_np = np.array([2.0, -1.0, 0.25, 3.0], dtype=np.float32)
+    b = mx.array(b_np, dtype=mx.float32)
+    x0 = mx.zeros((A.shape[0],), dtype=mx.float32)
+    M = preconditioners.jacobi(A)
+
+    x, info, residual, iterations = _native.csr_gmres_jacobi(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        M.inverse_diagonal,
+        A.shape,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=4,
+        maxiter=32,
+    )
+
+    x_np = to_numpy(x)
+    residual_np = float(np.asarray(to_numpy(residual)).item())
+    true_residual = np.linalg.norm(A_dense @ x_np - b_np)
+    assert int(np.asarray(to_numpy(info)).item()) == 0
+    assert int(np.asarray(to_numpy(iterations)).item()) <= 8
+    assert residual_np == pytest.approx(true_residual, abs=1e-5)
+    assert true_residual <= 2e-6 * max(np.linalg.norm(b_np), 1.0)
+
+
+def test_native_gmres_jacobi_rejects_nonfinite_inverse_diagonal(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _spd_2x2(mx)
+    b = mx.array([1.0, 2.0], dtype=mx.float32)
+    x0 = mx.zeros((2,), dtype=mx.float32)
+    inv_diag = mx.array([np.inf, 1.0], dtype=mx.float32)
+
+    x, info, residual, iterations = _native.csr_gmres_jacobi(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        inv_diag,
+        A.shape,
+        rtol=1e-6,
+        atol=1e-8,
+        restart=2,
+        maxiter=8,
+    )
+
+    assert int(np.asarray(to_numpy(info)).item()) == -3
+    assert int(np.asarray(to_numpy(iterations)).item()) == 0
+    assert np.isinf(float(np.asarray(to_numpy(residual)).item()))
+    np.testing.assert_allclose(to_numpy(x), [0.0, 0.0], rtol=0.0, atol=0.0)
+
+
+def test_gmres_callable_left_preconditioner_converges(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    A_dense = np.array(
+        [
+            [6.0, -1.0, 0.0],
+            [0.5, 4.0, -1.5],
+            [0.0, 1.0, 3.0],
+        ],
+        dtype=np.float32,
+    )
+    A = _csr_from_scipy(mx, scipy_sparse.csr_array(A_dense))
+    b_np = np.array([2.0, -1.0, 0.5], dtype=np.float32)
+    inv_diag = mx.array(1.0 / np.diag(A_dense), dtype=mx.float32)
+
+    x, info = linalg.gmres(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=lambda rhs: inv_diag * rhs,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=3,
+        maxiter=24,
+    )
+
+    x_np = to_numpy(x)
+    expected = np.linalg.solve(A_dense.astype(np.float64), b_np.astype(np.float64))
+    assert info == 0
+    np.testing.assert_allclose(x_np, expected, rtol=2e-5, atol=2e-5)
+    assert _relative_residual(A_dense, x_np, b_np) <= 2e-6
 
 
 def test_cg_jacobi_preconditioner_converges(mx, to_numpy):

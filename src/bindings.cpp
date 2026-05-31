@@ -29,6 +29,7 @@
 #include "linalg/accelerate/solve/solve.h"
 #include "linalg/linalg.h"
 #include "preconditioners/diagonal/diagonal.h"
+#include "preconditioners/gmres/gmres.h"
 #include "preconditioners/pcg/pcg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
@@ -1035,6 +1036,23 @@ NB_MODULE(_ext, m) {
       "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a, "n_cols"_a,
       "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
       "Solve a float32 CSR system with restarted GMRES.");
+
+  m.def(
+      "csr_gmres_jacobi",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &inv_diag,
+         int n_rows, int n_cols, float rtol, float atol, int restart,
+         int maxiter) {
+        return mlx_sparse::csr_gmres_jacobi(data, indices, indptr, b, x0,
+                                            inv_diag, n_rows, n_cols, rtol,
+                                            atol, restart, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "inv_diag"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
+      "Solve a float32 CSR system with restarted Jacobi-preconditioned "
+      "GMRES.");
 
   m.def(
       "csr_minres",

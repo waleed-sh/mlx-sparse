@@ -181,11 +181,11 @@ def ensure_factor_rhs(b, *, leading_dim: int) -> mx.array:
     if rhs.shape[0] != leading_dim:
         if rhs.ndim == 1:
             raise ValueError(
-                f"right-hand side has incompatible shape {rhs.shape}, "
+                f"right-hand side has incompatible shape {rhs.shape}; "
                 f"expected ({leading_dim},)."
             )
         raise ValueError(
-            f"right-hand side has incompatible shape {rhs.shape}, "
+            f"right-hand side has incompatible shape {rhs.shape}; "
             f"expected first dimension {leading_dim}."
         )
     if rhs.ndim == 2 and rhs.shape[1] <= 0:
@@ -210,7 +210,7 @@ def check_accelerate_direct_residual(
     x_np = np.asarray(to_numpy(x), dtype=np.float64)
     if not np.all(np.isfinite(x_np)):
         raise RuntimeError(
-            "Accelerate sparse direct solve produced non-finite values, "
+            "Accelerate sparse direct solve produced non-finite values; "
             "the matrix may be singular or ill-conditioned."
         )
 
@@ -224,7 +224,7 @@ def check_accelerate_direct_residual(
         or relative_residual > ACCELERATE_SPSOLVE_RESIDUAL_RTOL
     ):
         raise RuntimeError(
-            "Accelerate sparse direct solve residual is too large, "
+            "Accelerate sparse direct solve residual is too large; "
             "the matrix may be singular or ill-conditioned."
         )
 

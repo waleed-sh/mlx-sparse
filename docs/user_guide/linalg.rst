@@ -29,11 +29,11 @@ gradients. ``gmres(A, b)`` uses restarted Arnoldi/GMRES for nonsymmetric
 systems. ``minres(A, b)`` uses Lanczos projection for symmetric indefinite
 systems. All three return ``(x, info)`` where ``info == 0`` means convergence.
 
-``cg`` also accepts native-backed identity, diagonal, and Jacobi
-preconditioners through ``M``. The Jacobi-preconditioned path dispatches to a
-separate native C++/Metal PCG primitive rather than a Python per-iteration
-callback. See :doc:`preconditioners` for the current preconditioner support
-matrix.
+``cg`` accepts native-backed identity, diagonal, and Jacobi preconditioners
+through ``M``. ``gmres`` accepts identity, diagonal/Jacobi, and explicit
+inverse-apply callables or objects, diagonal/Jacobi GMRES uses native
+left-preconditioned Arnoldi kernels and true-residual convergence checks. See
+:doc:`preconditioners` for the current support matrix and CPU/Metal boundaries.
 
 Sparse direct factorizations
 ----------------------------
