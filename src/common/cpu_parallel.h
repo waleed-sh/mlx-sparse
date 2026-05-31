@@ -21,6 +21,7 @@
 #include <exception>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace mlx_sparse {
@@ -38,6 +39,13 @@ int configured_solver_worker_count();
 std::vector<CpuRange> equal_cpu_ranges(int n_items, int partitions);
 std::vector<CpuRange> weighted_cpu_ranges(const std::vector<int64_t> &row_work,
                                           int partitions);
+
+constexpr int64_t kCpuTreeReductionMinWork = 1 << 17;
+
+inline bool should_parallelize_cpu_tree_reduction(int workers,
+                                                  int64_t estimated_work) {
+  return workers > 1 && estimated_work >= kCpuTreeReductionMinWork;
+}
 
 template <typename Fn>
 void parallel_for_cpu_ranges_indexed(const std::vector<CpuRange> &ranges,
@@ -86,6 +94,41 @@ template <typename Fn>
 void parallel_for_cpu_ranges(const std::vector<CpuRange> &ranges, Fn &&fn) {
   parallel_for_cpu_ranges_indexed(ranges,
                                   [&](size_t, CpuRange range) { fn(range); });
+}
+
+template <typename AccT>
+AccT deterministic_tree_reduce(std::vector<AccT> values) {
+  if (values.empty()) {
+    return AccT{};
+  }
+  size_t active = values.size();
+  while (active > 1) {
+    size_t write = 0;
+    for (size_t read = 0; read + 1 < active; read += 2) {
+      values[write++] = values[read] + values[read + 1];
+    }
+    if (active % 2 != 0) {
+      values[write++] = values[active - 1];
+    }
+    active = write;
+  }
+  return values[0];
+}
+
+template <typename AccT, typename Fn>
+AccT parallel_reduce_cpu_ranges(const std::vector<CpuRange> &ranges, Fn &&fn) {
+  if (ranges.empty()) {
+    return AccT{};
+  }
+  if (ranges.size() == 1) {
+    return fn(ranges[0]);
+  }
+
+  std::vector<AccT> partials(ranges.size(), AccT{});
+  parallel_for_cpu_ranges_indexed(ranges, [&](size_t index, CpuRange range) {
+    partials[index] = fn(range);
+  });
+  return deterministic_tree_reduce(std::move(partials));
 }
 
 template <typename CountT>

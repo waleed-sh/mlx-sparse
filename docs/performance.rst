@@ -322,6 +322,11 @@ while other CPU kernels are still being optimized incrementally:
   scatter-style kernels.  CSR transpose products and axis-mismatched COO/CSC
   reductions use private per-worker accumulators with a deterministic final
   reduction, while CSC transpose products use output-column ownership.
+* CSR, COO, and CSC CPU trace plus CSR sparse ``dot``/``vdot`` use scalar
+  serial accumulation for small inputs and deterministic fixed-order tree
+  reductions for larger inputs when ``MLX_SPARSE_CPU_THREADS`` resolves above
+  one.  Worker-local partials are reduced in a stable tree order and join
+  before the MLX CPU dispatch returns.
 * Native explicit-factor solves accept matrix right-hand sides on CPU.  The
   serial path uses a row-major sparse triangular solve with multiple dense RHS
   columns so each sparse factor row is scanned once per triangular solve rather
@@ -350,9 +355,14 @@ while other CPU kernels are still being optimized incrementally:
   materialization.
 * The worker count is the configured runtime value. It is not changed
   heuristically from matrix shape, density, or nnz.
-* No architecture-specific SIMD intrinsics are required in the default build.
-* ``float16`` and ``bfloat16`` use ``float32`` accumulators.
-* ``complex64`` uses standard ``complex64`` arithmetic.
+* No architecture-specific SIMD intrinsics are required in the default build;
+  the CPU changes in v0.0.4b1 prefer cache-friendly loop layout, row/column
+  ownership, and compiler auto-vectorization.
+* ``float16`` and ``bfloat16`` reductions use ``float32`` accumulators where
+  the existing semantics require them, and sparse ``dot``/``vdot`` continue to
+  promote low-precision operands to ``float32`` before the native merge kernel.
+* ``complex64`` paths keep complex accumulation semantics without adding full
+  dense temporaries for trace or CSR sparse ``dot``/``vdot``.
 
 For reference: hand-tuned Sparse BLAS libraries may still be faster at the
 same problem size, especially on small sparse-dense products where fixed

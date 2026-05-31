@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -84,14 +85,32 @@ void csc_trace_cpu_impl(const mx::array &data, const mx::array &indices,
     const auto *data_ptr = data.data<T>();
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
-    auto acc = Accumulator<T>::zero();
+    using AccT = typename Accumulator<T>::Type;
 
-    for (int col = 0; col < diag_size; ++col) {
-      for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-        if (indices_ptr[p] == static_cast<I>(col)) {
-          acc += static_cast<typename Accumulator<T>::Type>(data_ptr[p]);
+    auto compute_cols = [&](CpuRange range) -> AccT {
+      auto local = Accumulator<T>::zero();
+      for (int col = range.begin; col < range.end; ++col) {
+        const I diagonal = static_cast<I>(col);
+        for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (indices_ptr[p] == diagonal) {
+            local += static_cast<AccT>(data_ptr[p]);
+          }
         }
       }
+      return local;
+    };
+
+    AccT acc = Accumulator<T>::zero();
+    const int workers = configured_cpu_worker_count();
+    const auto estimated_work =
+        static_cast<int64_t>(indptr_ptr[diag_size] - indptr_ptr[0]);
+    if (!should_parallelize_cpu_tree_reduction(workers, estimated_work) ||
+        diag_size <= 0) {
+      acc = compute_cols({0, diag_size});
+    } else {
+      const auto ranges =
+          cpu_ranges_for_compressed_segments(indptr_ptr, diag_size, workers);
+      acc = parallel_reduce_cpu_ranges<AccT>(ranges, compute_cols);
     }
     *out.data<T>() = Accumulator<T>::cast(acc);
   });

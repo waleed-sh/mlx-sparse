@@ -106,6 +106,120 @@ def _assert_csc_exact(left, right):
     np.testing.assert_allclose(to_numpy(left.data), to_numpy(right.data), atol=0.0)
 
 
+def _tree_trace_csr(mx, dtype_name, index_dtype):
+    n = 257
+    entries_per_row = 5
+    rows = np.repeat(np.arange(n, dtype=index_dtype), entries_per_row)
+    indices = []
+    indptr = [0]
+    values = []
+    for row in range(n):
+        cols = np.array(
+            [
+                row,
+                (row * 7 + 3) % n,
+                row,
+                (row + 31) % n,
+                (row * 11 + 5) % n,
+            ],
+            dtype=index_dtype,
+        )
+        base = np.array(
+            [
+                np.sin(row * 0.013) + 0.25,
+                np.cos(row * 0.017) * 0.125,
+                np.sin(row * 0.019) - 0.5,
+                np.cos(row * 0.023) * 0.0625,
+                np.sin(row * 0.029) * 0.03125,
+            ],
+            dtype=np.float32,
+        )
+        indices.extend(cols)
+        values.extend(base)
+        indptr.append(len(indices))
+
+    values = np.asarray(values, dtype=np.float32)
+    if dtype_name == "complex64":
+        values = values.astype(np.complex64) + 1j * (
+            np.cos(np.arange(values.size, dtype=np.float32) * 0.037) / 9.0
+        )
+
+    data = mx.array(values).astype(getattr(mx, dtype_name))
+    return (
+        ms.csr_array(
+            (
+                data,
+                mx.array(np.asarray(indices, dtype=index_dtype)),
+                mx.array(np.asarray(indptr, dtype=index_dtype)),
+            ),
+            shape=(n, n),
+            sorted_indices=False,
+            canonical=False,
+        ),
+        rows,
+    )
+
+
+def _inner_product_pair(mx, dtype_name, index_dtype):
+    n_rows = 193
+    n_cols = 211
+    nnz_per_row = 6
+    lhs_indptr = [0]
+    rhs_indptr = [0]
+    lhs_indices = []
+    rhs_indices = []
+    lhs_values = []
+    rhs_values = []
+    for row in range(n_rows):
+        cols = np.unique((row * 13 + np.arange(nnz_per_row + 3) * 17) % n_cols)
+        cols = np.sort(cols[:nnz_per_row]).astype(index_dtype, copy=False)
+        rhs_cols = np.sort(
+            np.unique(np.concatenate([cols[:4], (cols[2:] + 5) % n_cols]))[:nnz_per_row]
+        ).astype(index_dtype, copy=False)
+        lhs_indices.extend(cols)
+        rhs_indices.extend(rhs_cols)
+        base = np.arange(cols.size, dtype=np.float32)
+        rhs_base = np.arange(rhs_cols.size, dtype=np.float32)
+        lhs_values.extend(np.sin(0.11 * (row + 1) * (base + 1)))
+        rhs_values.extend(np.cos(0.07 * (row + 1) * (rhs_base + 1)))
+        lhs_indptr.append(len(lhs_indices))
+        rhs_indptr.append(len(rhs_indices))
+
+    lhs_values = np.asarray(lhs_values, dtype=np.float32)
+    rhs_values = np.asarray(rhs_values, dtype=np.float32)
+    if dtype_name == "complex64":
+        lhs_values = lhs_values.astype(np.complex64) + 1j * (
+            np.sin(np.arange(lhs_values.size, dtype=np.float32) * 0.031) / 7.0
+        )
+        rhs_values = rhs_values.astype(np.complex64) + 1j * (
+            np.cos(np.arange(rhs_values.size, dtype=np.float32) * 0.043) / 5.0
+        )
+
+    lhs_indptr = np.asarray(lhs_indptr, dtype=index_dtype)
+    rhs_indptr = np.asarray(rhs_indptr, dtype=index_dtype)
+    lhs = ms.csr_array(
+        (
+            mx.array(lhs_values).astype(getattr(mx, dtype_name)),
+            mx.array(np.asarray(lhs_indices, dtype=index_dtype)),
+            mx.array(lhs_indptr),
+        ),
+        shape=(n_rows, n_cols),
+        sorted_indices=True,
+        canonical=True,
+    )
+    rhs = ms.csr_array(
+        (
+            mx.array(rhs_values).astype(getattr(mx, dtype_name)),
+            mx.array(np.asarray(rhs_indices, dtype=index_dtype)),
+            mx.array(rhs_indptr),
+        ),
+        shape=(n_rows, n_cols),
+        sorted_indices=True,
+        canonical=True,
+    )
+    return lhs, rhs
+
+
 @pytest.mark.cpu_only
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
 def test_storage_aligned_reductions_and_todense_parallel_match_serial(mx, index_dtype):
@@ -138,6 +252,70 @@ def test_storage_aligned_reductions_and_todense_parallel_match_serial(mx, index_
 
     for name, expected in serial.items():
         np.testing.assert_allclose(parallel[name], expected, rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
+@pytest.mark.parametrize("dtype_name", ["float32", "float16", "bfloat16", "complex64"])
+def test_trace_tree_reductions_parallel_match_serial(mx, index_dtype, dtype_name):
+    csr, rows = _tree_trace_csr(mx, dtype_name, index_dtype)
+    coo = ms.coo_array(
+        (csr.data, (mx.array(rows), csr.indices)),
+        shape=csr.shape,
+        canonical=False,
+    )
+    csc = csr.tocsc(canonical=False)
+    rtol = (
+        5e-2 if dtype_name == "bfloat16" else 8e-3 if dtype_name == "float16" else 2e-5
+    )
+    atol = rtol
+
+    with ms.runtime.context(n_threads=1):
+        serial = {
+            "csr": to_numpy(csr.trace()),
+            "coo": to_numpy(coo.trace()),
+            "csc": to_numpy(csc.trace()),
+        }
+
+    with ms.runtime.context(n_threads=4):
+        parallel = {
+            "csr": to_numpy(csr.trace()),
+            "coo": to_numpy(coo.trace()),
+            "csc": to_numpy(csc.trace()),
+        }
+
+    for name, expected in serial.items():
+        np.testing.assert_allclose(
+            parallel[name], expected, rtol=rtol, atol=atol, err_msg=name
+        )
+
+
+@pytest.mark.cpu_only
+@pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
+@pytest.mark.parametrize("dtype_name", ["float32", "complex64"])
+def test_csr_sparse_inner_product_tree_reduction_parallel_matches_serial(
+    mx, index_dtype, dtype_name
+):
+    lhs, rhs = _inner_product_pair(mx, dtype_name, index_dtype)
+    dense_lhs = to_numpy(lhs.todense())
+    dense_rhs = to_numpy(rhs.todense())
+
+    with ms.runtime.context(n_threads=1):
+        serial_dot = to_numpy(lhs.dot(rhs))
+        serial_vdot = to_numpy(lhs.vdot(rhs))
+
+    with ms.runtime.context(n_threads=4):
+        parallel_dot = to_numpy(lhs.dot(rhs))
+        parallel_vdot = to_numpy(lhs.vdot(rhs))
+
+    np.testing.assert_allclose(parallel_dot, serial_dot, rtol=2e-5, atol=2e-5)
+    np.testing.assert_allclose(parallel_vdot, serial_vdot, rtol=2e-5, atol=2e-5)
+    np.testing.assert_allclose(
+        serial_dot, np.sum(dense_lhs * dense_rhs), rtol=2e-5, atol=2e-5
+    )
+    np.testing.assert_allclose(
+        serial_vdot, np.vdot(dense_lhs, dense_rhs), rtol=2e-5, atol=2e-5
+    )
 
 
 @pytest.mark.cpu_only

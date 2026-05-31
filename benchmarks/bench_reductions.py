@@ -77,7 +77,10 @@ def _select_device():
     raise RuntimeError("No usable MLX device available for reductions benchmark.")
 
 
-def _make_matrix(*, n_rows=4096, n_cols=4096, nnz=32768, seed=20260525):
+def _make_matrix(*, n_rows=None, n_cols=None, nnz=None, seed=20260525):
+    n_rows = int(os.environ.get("MLX_SPARSE_REDUCTIONS_N_ROWS", n_rows or 4096))
+    n_cols = int(os.environ.get("MLX_SPARSE_REDUCTIONS_N_COLS", n_cols or 4096))
+    nnz = int(os.environ.get("MLX_SPARSE_REDUCTIONS_NNZ", nnz or 32768))
     rng = np.random.default_rng(seed)
     row = rng.integers(0, n_rows, size=nnz, dtype=np.int32)
     col = rng.integers(0, n_cols, size=nnz, dtype=np.int32)
@@ -93,9 +96,17 @@ def _make_matrix(*, n_rows=4096, n_cols=4096, nnz=32768, seed=20260525):
     csc = coo.tocsc(canonical=False)
     scipy_csr = scipy_coo.tocsr(copy=True)
 
-    unique_nnz = min(nnz, n_rows * 8)
-    canonical_row = np.repeat(np.arange(n_rows, dtype=np.int32), 8)[:unique_nnz]
-    canonical_col = np.tile(np.arange(8, dtype=np.int32), n_rows)[:unique_nnz]
+    canonical_per_row = int(
+        os.environ.get("MLX_SPARSE_REDUCTIONS_CANONICAL_PER_ROW", 8)
+    )
+    canonical_per_row = max(1, min(canonical_per_row, n_cols))
+    unique_nnz = min(nnz, n_rows * canonical_per_row)
+    canonical_row = np.repeat(np.arange(n_rows, dtype=np.int32), canonical_per_row)[
+        :unique_nnz
+    ]
+    canonical_col = np.tile(np.arange(canonical_per_row, dtype=np.int32), n_rows)[
+        :unique_nnz
+    ]
     canonical_data = rng.normal(size=unique_nnz).astype(np.float32)
     canonical_scipy_coo = sp.coo_matrix(
         (canonical_data, (canonical_row, canonical_col)),
@@ -212,6 +223,25 @@ def _scipy_col_norms(matrix):
     return np.sqrt(np.asarray(matrix.power(2).sum(axis=0)).ravel())
 
 
+def _mlx_dense_trace(matrix):
+    dense = matrix.todense()
+    eye = mx.eye(matrix.shape[0], matrix.shape[1], dtype=dense.dtype)
+    return mx.sum(dense * eye)
+
+
+def _mlx_dense_dot(lhs, rhs, *, conjugate_lhs=False):
+    lhs_dense = lhs.todense()
+    rhs_dense = rhs.todense()
+    if conjugate_lhs:
+        lhs_dense = mx.conjugate(lhs_dense)
+    return mx.sum(lhs_dense * rhs_dense)
+
+
+def _scipy_sparse_dot(lhs, rhs, *, conjugate_lhs=False):
+    left = lhs.conjugate() if conjugate_lhs else lhs
+    return left.multiply(rhs).sum()
+
+
 def run_benchmark():
     (
         coo,
@@ -251,6 +281,26 @@ def run_benchmark():
             lambda: coo.todense(),
             lambda: csr.todense(),
             lambda: scipy_csr.toarray(),
+        ),
+        (
+            "csr_trace",
+            lambda: _mlx_dense_trace(csr),
+            lambda: csr.trace(),
+            lambda: scipy_csr.diagonal().sum(),
+        ),
+        (
+            "csr_dot_canonical",
+            lambda: _mlx_dense_dot(canonical_csr, canonical_csr),
+            lambda: canonical_csr.dot(canonical_csr),
+            lambda: _scipy_sparse_dot(canonical_scipy_csr, canonical_scipy_csr),
+        ),
+        (
+            "csr_vdot_canonical",
+            lambda: _mlx_dense_dot(canonical_csr, canonical_csr, conjugate_lhs=True),
+            lambda: canonical_csr.vdot(canonical_csr),
+            lambda: _scipy_sparse_dot(
+                canonical_scipy_csr, canonical_scipy_csr, conjugate_lhs=True
+            ),
         ),
         (
             "coo_row_sums",
@@ -352,9 +402,12 @@ def run_benchmark():
 
 
 def _format_table(rows, device_name):
+    n_rows = int(os.environ.get("MLX_SPARSE_REDUCTIONS_N_ROWS", 4096))
+    n_cols = int(os.environ.get("MLX_SPARSE_REDUCTIONS_N_COLS", 4096))
+    nnz = int(os.environ.get("MLX_SPARSE_REDUCTIONS_NNZ", 32768))
     lines = [
         f"device: {device_name}",
-        "matrix: 4096 x 4096, nnz=32768, dtype=float32",
+        f"matrix: {n_rows} x {n_cols}, nnz={nnz}, dtype=float32",
         "",
         "| operation | legacy conversion ms | native ms | SciPy ms | native vs legacy | native vs SciPy |",
         "|---|---:|---:|---:|---:|---:|",
