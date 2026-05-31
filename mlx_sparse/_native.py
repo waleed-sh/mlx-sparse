@@ -761,6 +761,66 @@ def diagonal_preconditioner_apply(inv_diag: mx.array, rhs: mx.array):
     return ext.diagonal_preconditioner_apply(inv_diag, rhs)
 
 
+def csr_exact_lu_preconditioner_apply(
+    perm: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    u_data: mx.array,
+    u_indices: mx.array,
+    u_indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_exact_lu_preconditioner_apply requires the native mlx_sparse "
+            "extension."
+        )
+    return ext.csr_exact_lu_preconditioner_apply(
+        perm,
+        l_data,
+        l_indices,
+        l_indptr,
+        u_data,
+        u_indices,
+        u_indptr,
+        rhs,
+        shape[0],
+        shape[1],
+    )
+
+
+def csr_exact_cholesky_preconditioner_apply(
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    lt_data: mx.array,
+    lt_indices: mx.array,
+    lt_indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_exact_cholesky_preconditioner_apply requires the native "
+            "mlx_sparse extension."
+        )
+    return ext.csr_exact_cholesky_preconditioner_apply(
+        l_data,
+        l_indices,
+        l_indptr,
+        lt_data,
+        lt_indices,
+        lt_indptr,
+        rhs,
+        shape[0],
+        shape[1],
+    )
+
+
 def csr_lanczos(
     data: mx.array,
     indices: mx.array,
@@ -841,6 +901,134 @@ def csr_gmres_jacobi(
         b,
         x0,
         inv_diag,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(restart),
+        int(maxiter),
+    )
+
+
+def csr_gmres_exact_lu(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    perm: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    u_data: mx.array,
+    u_indices: mx.array,
+    u_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    restart: int,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_gmres_exact_lu requires the native mlx_sparse extension."
+        )
+    return ext.csr_gmres_exact_lu(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        perm,
+        l_data,
+        l_indices,
+        l_indptr,
+        u_data,
+        u_indices,
+        u_indptr,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(restart),
+        int(maxiter),
+    )
+
+
+def csr_gmres_exact_cholesky(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    lt_data: mx.array,
+    lt_indices: mx.array,
+    lt_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    restart: int,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_gmres_exact_cholesky requires the native mlx_sparse extension."
+        )
+    return ext.csr_gmres_exact_cholesky(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        l_data,
+        l_indices,
+        l_indptr,
+        lt_data,
+        lt_indices,
+        lt_indptr,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(restart),
+        int(maxiter),
+    )
+
+
+def csr_gmres_exact_accelerate(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    solver,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    restart: int,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None or not hasattr(ext, "csr_gmres_exact_accelerate"):
+        raise RuntimeError(
+            "csr_gmres_exact_accelerate requires an Accelerate-enabled native "
+            "mlx_sparse extension."
+        )
+    return ext.csr_gmres_exact_accelerate(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        solver,
         shape[0],
         shape[1],
         float(rtol),
@@ -1030,6 +1218,16 @@ def accelerate_solvers_available() -> bool:
         return False
     checker = getattr(ext, "_accelerate_solvers_available", None)
     return bool(checker()) if checker is not None else False
+
+
+def is_accelerate_float_solve(solver) -> bool:
+    """Return whether ``solver`` is the native Accelerate float solve type."""
+
+    ext = extension()
+    if ext is None:
+        return False
+    solver_type = getattr(ext, "_AccelerateFloatSolve", None)
+    return solver_type is not None and isinstance(solver, solver_type)
 
 
 def accelerate_lu_solvers_available() -> bool:

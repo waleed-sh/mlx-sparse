@@ -31,6 +31,12 @@
 #endif
 
 #include "linalg/common/common.h"
+#include "preconditioners/exact/exact.h"
+#include "sparse/csr_matvec/csr_matvec.h"
+
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+#include "linalg/accelerate/solve/solve.h"
+#endif
 
 namespace mlx_sparse {
 
@@ -62,6 +68,253 @@ private:
 };
 
 inline bool finite_float(float value) { return std::isfinite(value); }
+
+bool finite_vector(const std::vector<float> &values) {
+  for (float value : values) {
+    if (!finite_float(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+mx::array vector_to_mx_array(const std::vector<float> &values) {
+  return mx::array(values.begin(), mx::Shape{static_cast<int>(values.size())},
+                   mx::float32);
+}
+
+std::vector<float> host_vector(mx::array values, int expected_size,
+                               const char *context) {
+  mx::eval(values);
+  if (values.ndim() != 1 || values.shape(0) != expected_size) {
+    throw std::runtime_error(std::string(context) +
+                             " produced an incompatible vector shape.");
+  }
+  if (values.dtype() != mx::float32) {
+    throw std::runtime_error(std::string(context) +
+                             " produced a non-float32 vector.");
+  }
+  const auto *ptr = values.data<float>();
+  return std::vector<float>(ptr, ptr + expected_size);
+}
+
+template <typename ApplyPreconditioner>
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_gmres_native_left_preconditioned_impl(
+    mx::array data, mx::array indices, mx::array indptr, mx::array b,
+    mx::array x0, int n_rows, float rtol, float atol, int restart, int maxiter,
+    mx::Stream stream, ApplyPreconditioner &&apply_preconditioner) {
+  b.eval();
+  x0.eval();
+  const auto *b_ptr = b.data<float>();
+  const auto *x0_ptr = x0.data<float>();
+
+  std::vector<float> x(x0_ptr, x0_ptr + n_rows);
+  std::vector<float> rhs(b_ptr, b_ptr + n_rows);
+  const float b_norm = norm_float(rhs);
+  const float tolerance = std::max(atol, rtol * b_norm);
+  int iterations = 0;
+  int status = maxiter > 0 ? maxiter : 1;
+  float residual_norm = std::numeric_limits<float>::infinity();
+
+  if (!finite_vector(x) || !finite_vector(rhs) || !finite_float(b_norm)) {
+    return {vector_to_mx_array(x), mx::array(-3, mx::int32),
+            mx::array(residual_norm, mx::float32), mx::array(0, mx::int32)};
+  }
+
+  while (iterations < maxiter) {
+    std::vector<float> r(static_cast<size_t>(n_rows));
+    try {
+      auto x_mx = vector_to_mx_array(x);
+      auto ax_mx =
+          csr_matvec(data, indices, indptr, x_mx, n_rows, n_rows, stream);
+      auto ax = host_vector(ax_mx, n_rows, "exact GMRES SpMV");
+      for (int i = 0; i < n_rows; ++i) {
+        r[static_cast<size_t>(i)] =
+            rhs[static_cast<size_t>(i)] - ax[static_cast<size_t>(i)];
+      }
+    } catch (const std::exception &) {
+      status = -1;
+      break;
+    }
+
+    residual_norm = norm_float(r);
+    if (!finite_vector(r) || !finite_float(residual_norm)) {
+      status = -3;
+      break;
+    }
+    if (residual_norm <= tolerance) {
+      status = 0;
+      break;
+    }
+
+    std::vector<float> z0;
+    try {
+      z0 = host_vector(apply_preconditioner(vector_to_mx_array(r)), n_rows,
+                       "exact GMRES preconditioner");
+    } catch (const std::exception &) {
+      status = -1;
+      break;
+    }
+    const float beta = norm_float(z0);
+    if (!finite_vector(z0) || !finite_float(beta)) {
+      status = -3;
+      break;
+    }
+    if (beta <= std::numeric_limits<float>::epsilon()) {
+      status = -1;
+      break;
+    }
+
+    const int steps = std::min({restart, maxiter - iterations, n_rows});
+    const int basis_cols = steps + 1;
+    std::vector<float> basis(static_cast<size_t>(n_rows) * basis_cols, 0.0f);
+    std::vector<float> h(static_cast<size_t>(basis_cols) * steps, 0.0f);
+    for (int row = 0; row < n_rows; ++row) {
+      basis[static_cast<size_t>(row) * basis_cols] =
+          z0[static_cast<size_t>(row)] / beta;
+    }
+
+    int used = 0;
+    bool failed = false;
+    for (int j = 0; j < steps; ++j) {
+      std::vector<float> q(static_cast<size_t>(n_rows));
+      for (int row = 0; row < n_rows; ++row) {
+        q[static_cast<size_t>(row)] =
+            basis[static_cast<size_t>(row) * basis_cols + j];
+      }
+
+      std::vector<float> w;
+      try {
+        auto aq_mx = csr_matvec(data, indices, indptr, vector_to_mx_array(q),
+                                n_rows, n_rows, stream);
+        w = host_vector(apply_preconditioner(aq_mx), n_rows,
+                        "exact GMRES Arnoldi preconditioner");
+      } catch (const std::exception &) {
+        status = -1;
+        failed = true;
+        break;
+      }
+      if (!finite_vector(w)) {
+        status = -3;
+        failed = true;
+        break;
+      }
+
+      for (int pass = 0; pass < 2; ++pass) {
+        for (int col = 0; col <= j; ++col) {
+          double coeff = 0.0;
+          for (int row = 0; row < n_rows; ++row) {
+            coeff += basis[static_cast<size_t>(row) * basis_cols + col] *
+                     w[static_cast<size_t>(row)];
+          }
+          h[static_cast<size_t>(col) * steps + j] += static_cast<float>(coeff);
+          for (int row = 0; row < n_rows; ++row) {
+            w[static_cast<size_t>(row)] -=
+                static_cast<float>(coeff) *
+                basis[static_cast<size_t>(row) * basis_cols + col];
+          }
+        }
+      }
+
+      const float h_next = norm_float(w);
+      h[static_cast<size_t>(j + 1) * steps + j] = h_next;
+      used = j + 1;
+      if (!finite_float(h_next)) {
+        status = -3;
+        failed = true;
+        break;
+      }
+      if (h_next <= std::numeric_limits<float>::epsilon()) {
+        break;
+      }
+      for (int row = 0; row < n_rows; ++row) {
+        basis[static_cast<size_t>(row) * basis_cols + j + 1] =
+            w[static_cast<size_t>(row)] / h_next;
+      }
+    }
+    if (failed) {
+      break;
+    }
+    if (used == 0) {
+      status = -1;
+      break;
+    }
+
+    std::vector<double> h_used(static_cast<size_t>(used + 1) * used, 0.0);
+    bool finite_h = true;
+    for (int row = 0; row < used + 1; ++row) {
+      for (int col = 0; col < used; ++col) {
+        const float value = h[static_cast<size_t>(row) * steps + col];
+        h_used[static_cast<size_t>(row) * used + col] = value;
+        finite_h = finite_h && finite_float(value);
+      }
+    }
+    if (!finite_h) {
+      status = -3;
+      break;
+    }
+
+    std::vector<double> e1(static_cast<size_t>(used + 1), 0.0);
+    e1[0] = beta;
+    std::vector<double> y;
+    try {
+      y = least_squares_upper_hessenberg_givens_qr(h_used, e1, used + 1, used);
+    } catch (const std::exception &) {
+      status = -1;
+      break;
+    }
+
+    for (int row = 0; row < n_rows; ++row) {
+      double update = 0.0;
+      for (int col = 0; col < used; ++col) {
+        update += basis[static_cast<size_t>(row) * basis_cols + col] *
+                  y[static_cast<size_t>(col)];
+      }
+      if (!std::isfinite(update)) {
+        status = -3;
+        break;
+      }
+      x[static_cast<size_t>(row)] += static_cast<float>(update);
+      if (!finite_float(x[static_cast<size_t>(row)])) {
+        status = -3;
+        break;
+      }
+    }
+    if (status < 0) {
+      break;
+    }
+
+    iterations += used;
+    if (iterations >= maxiter) {
+      try {
+        auto ax =
+            host_vector(csr_matvec(data, indices, indptr, vector_to_mx_array(x),
+                                   n_rows, n_rows, stream),
+                        n_rows, "exact GMRES final SpMV");
+        std::vector<float> final_r(static_cast<size_t>(n_rows));
+        for (int i = 0; i < n_rows; ++i) {
+          final_r[static_cast<size_t>(i)] =
+              rhs[static_cast<size_t>(i)] - ax[static_cast<size_t>(i)];
+        }
+        residual_norm = norm_float(final_r);
+      } catch (const std::exception &) {
+        status = -1;
+        break;
+      }
+      if (!finite_float(residual_norm)) {
+        status = -3;
+      } else if (residual_norm <= tolerance) {
+        status = 0;
+      }
+      break;
+    }
+  }
+
+  return {vector_to_mx_array(x), mx::array(status, mx::int32),
+          mx::array(residual_norm, mx::float32),
+          mx::array(iterations, mx::int32)};
+}
 
 template <typename I>
 void csr_arnoldi_jacobi_cpu_impl(
@@ -509,5 +762,174 @@ csr_gmres_jacobi(const mx::array &data, const mx::array &indices,
   }
   throw std::runtime_error("csr_gmres_jacobi requires int32 or int64 indices.");
 }
+
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_gmres_exact_lu(const mx::array &data, const mx::array &indices,
+                   const mx::array &indptr, const mx::array &b,
+                   const mx::array &x0, const mx::array &perm,
+                   const mx::array &l_data, const mx::array &l_indices,
+                   const mx::array &l_indptr, const mx::array &u_data,
+                   const mx::array &u_indices, const mx::array &u_indptr,
+                   int n_rows, int n_cols, float rtol, float atol, int restart,
+                   int maxiter, mx::StreamOrDevice s) {
+  if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_lu requires a non-empty square matrix.");
+  }
+  if (restart <= 0 || maxiter < 0) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_lu requires restart > 0 and maxiter >= 0.");
+  }
+  require_rank(data, 1, "csr_gmres_exact_lu data");
+  require_rank(indices, 1, "csr_gmres_exact_lu indices");
+  require_rank(indptr, 1, "csr_gmres_exact_lu indptr");
+  require_rank(b, 1, "csr_gmres_exact_lu b");
+  require_rank(x0, 1, "csr_gmres_exact_lu x0");
+  require_linalg_float32(data, "csr_gmres_exact_lu data");
+  require_linalg_float32(b, "csr_gmres_exact_lu b");
+  require_linalg_float32(x0, "csr_gmres_exact_lu x0");
+  require_same_index_dtype(indices, indptr, "csr_gmres_exact_lu indices",
+                           "csr_gmres_exact_lu indptr");
+  require_size(indptr, n_rows + 1, "csr_gmres_exact_lu indptr");
+  require_size(b, n_rows, "csr_gmres_exact_lu b");
+  require_size(x0, n_cols, "csr_gmres_exact_lu x0");
+  if (indices.size() != data.size()) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_lu data and indices must have equal length.");
+  }
+
+  auto stream = mx::to_stream(s);
+  auto data_contig = mx::contiguous(data, false, stream);
+  auto indices_contig = mx::contiguous(indices, false, stream);
+  auto indptr_contig = mx::contiguous(indptr, false, stream);
+  auto b_contig = mx::contiguous(b, false, stream);
+  auto x0_contig = mx::contiguous(x0, false, stream);
+  auto perm_contig = mx::contiguous(perm, false, stream);
+  auto l_data_contig = mx::contiguous(l_data, false, stream);
+  auto l_indices_contig = mx::contiguous(l_indices, false, stream);
+  auto l_indptr_contig = mx::contiguous(l_indptr, false, stream);
+  auto u_data_contig = mx::contiguous(u_data, false, stream);
+  auto u_indices_contig = mx::contiguous(u_indices, false, stream);
+  auto u_indptr_contig = mx::contiguous(u_indptr, false, stream);
+
+  auto apply = [&](const mx::array &rhs) {
+    return csr_exact_lu_preconditioner_apply(
+        perm_contig, l_data_contig, l_indices_contig, l_indptr_contig,
+        u_data_contig, u_indices_contig, u_indptr_contig, rhs, n_rows, n_cols,
+        stream);
+  };
+  return csr_gmres_native_left_preconditioned_impl(
+      data_contig, indices_contig, indptr_contig, b_contig, x0_contig, n_rows,
+      rtol, atol, restart, maxiter, stream, apply);
+}
+
+std::tuple<mx::array, mx::array, mx::array, mx::array> csr_gmres_exact_cholesky(
+    const mx::array &data, const mx::array &indices, const mx::array &indptr,
+    const mx::array &b, const mx::array &x0, const mx::array &l_data,
+    const mx::array &l_indices, const mx::array &l_indptr,
+    const mx::array &lt_data, const mx::array &lt_indices,
+    const mx::array &lt_indptr, int n_rows, int n_cols, float rtol, float atol,
+    int restart, int maxiter, mx::StreamOrDevice s) {
+  if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_cholesky requires a non-empty square matrix.");
+  }
+  if (restart <= 0 || maxiter < 0) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_cholesky requires restart > 0 and maxiter >= 0.");
+  }
+  require_rank(data, 1, "csr_gmres_exact_cholesky data");
+  require_rank(indices, 1, "csr_gmres_exact_cholesky indices");
+  require_rank(indptr, 1, "csr_gmres_exact_cholesky indptr");
+  require_rank(b, 1, "csr_gmres_exact_cholesky b");
+  require_rank(x0, 1, "csr_gmres_exact_cholesky x0");
+  require_linalg_float32(data, "csr_gmres_exact_cholesky data");
+  require_linalg_float32(b, "csr_gmres_exact_cholesky b");
+  require_linalg_float32(x0, "csr_gmres_exact_cholesky x0");
+  require_same_index_dtype(indices, indptr, "csr_gmres_exact_cholesky indices",
+                           "csr_gmres_exact_cholesky indptr");
+  require_size(indptr, n_rows + 1, "csr_gmres_exact_cholesky indptr");
+  require_size(b, n_rows, "csr_gmres_exact_cholesky b");
+  require_size(x0, n_cols, "csr_gmres_exact_cholesky x0");
+  if (indices.size() != data.size()) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_cholesky data and indices must have equal length.");
+  }
+
+  auto stream = mx::to_stream(s);
+  auto data_contig = mx::contiguous(data, false, stream);
+  auto indices_contig = mx::contiguous(indices, false, stream);
+  auto indptr_contig = mx::contiguous(indptr, false, stream);
+  auto b_contig = mx::contiguous(b, false, stream);
+  auto x0_contig = mx::contiguous(x0, false, stream);
+  auto l_data_contig = mx::contiguous(l_data, false, stream);
+  auto l_indices_contig = mx::contiguous(l_indices, false, stream);
+  auto l_indptr_contig = mx::contiguous(l_indptr, false, stream);
+  auto lt_data_contig = mx::contiguous(lt_data, false, stream);
+  auto lt_indices_contig = mx::contiguous(lt_indices, false, stream);
+  auto lt_indptr_contig = mx::contiguous(lt_indptr, false, stream);
+
+  auto apply = [&](const mx::array &rhs) {
+    return csr_exact_cholesky_preconditioner_apply(
+        l_data_contig, l_indices_contig, l_indptr_contig, lt_data_contig,
+        lt_indices_contig, lt_indptr_contig, rhs, n_rows, n_cols, stream);
+  };
+  return csr_gmres_native_left_preconditioned_impl(
+      data_contig, indices_contig, indptr_contig, b_contig, x0_contig, n_rows,
+      rtol, atol, restart, maxiter, stream, apply);
+}
+
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_gmres_exact_accelerate(const mx::array &data, const mx::array &indices,
+                           const mx::array &indptr, const mx::array &b,
+                           const mx::array &x0,
+                           const AccelerateFloatSolve &solver, int n_rows,
+                           int n_cols, float rtol, float atol, int restart,
+                           int maxiter, mx::StreamOrDevice s) {
+  if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_accelerate requires a non-empty square matrix.");
+  }
+  if (restart <= 0 || maxiter < 0) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_accelerate requires restart > 0 and maxiter >= 0.");
+  }
+  if (solver.rhs_size() != n_rows || solver.solution_size() != n_cols) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_accelerate solver shape does not match A.");
+  }
+  require_rank(data, 1, "csr_gmres_exact_accelerate data");
+  require_rank(indices, 1, "csr_gmres_exact_accelerate indices");
+  require_rank(indptr, 1, "csr_gmres_exact_accelerate indptr");
+  require_rank(b, 1, "csr_gmres_exact_accelerate b");
+  require_rank(x0, 1, "csr_gmres_exact_accelerate x0");
+  require_linalg_float32(data, "csr_gmres_exact_accelerate data");
+  require_linalg_float32(b, "csr_gmres_exact_accelerate b");
+  require_linalg_float32(x0, "csr_gmres_exact_accelerate x0");
+  require_same_index_dtype(indices, indptr,
+                           "csr_gmres_exact_accelerate indices",
+                           "csr_gmres_exact_accelerate indptr");
+  require_size(indptr, n_rows + 1, "csr_gmres_exact_accelerate indptr");
+  require_size(b, n_rows, "csr_gmres_exact_accelerate b");
+  require_size(x0, n_cols, "csr_gmres_exact_accelerate x0");
+  if (indices.size() != data.size()) {
+    throw std::invalid_argument(
+        "csr_gmres_exact_accelerate data and indices must have equal length.");
+  }
+
+  auto stream = mx::to_stream(s);
+  auto data_contig = mx::contiguous(data, false, stream);
+  auto indices_contig = mx::contiguous(indices, false, stream);
+  auto indptr_contig = mx::contiguous(indptr, false, stream);
+  auto b_contig = mx::contiguous(b, false, stream);
+  auto x0_contig = mx::contiguous(x0, false, stream);
+
+  auto apply = [&](const mx::array &rhs) { return solver.solve(rhs); };
+  return csr_gmres_native_left_preconditioned_impl(
+      data_contig, indices_contig, indptr_contig, b_contig, x0_contig, n_rows,
+      rtol, atol, restart, maxiter, stream, apply);
+}
+#endif
 
 } // namespace mlx_sparse

@@ -29,6 +29,7 @@
 #include "linalg/accelerate/solve/solve.h"
 #include "linalg/linalg.h"
 #include "preconditioners/diagonal/diagonal.h"
+#include "preconditioners/exact/exact.h"
 #include "preconditioners/gmres/gmres.h"
 #include "preconditioners/pcg/pcg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
@@ -1012,6 +1013,41 @@ NB_MODULE(_ext, m) {
       "right-hand side.");
 
   m.def(
+      "csr_exact_lu_preconditioner_apply",
+      [](const mlx_sparse::mx::array &perm, const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &u_data,
+         const mlx_sparse::mx::array &u_indices,
+         const mlx_sparse::mx::array &u_indptr,
+         const mlx_sparse::mx::array &rhs, int n_rows, int n_cols) {
+        return mlx_sparse::csr_exact_lu_preconditioner_apply(
+            perm, l_data, l_indices, l_indptr, u_data, u_indices, u_indptr, rhs,
+            n_rows, n_cols);
+      },
+      "perm"_a, "l_data"_a, "l_indices"_a, "l_indptr"_a, "u_data"_a,
+      "u_indices"_a, "u_indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Apply an exact native LU preconditioner to a vector or matrix RHS.");
+
+  m.def(
+      "csr_exact_cholesky_preconditioner_apply",
+      [](const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &lt_data,
+         const mlx_sparse::mx::array &lt_indices,
+         const mlx_sparse::mx::array &lt_indptr,
+         const mlx_sparse::mx::array &rhs, int n_rows, int n_cols) {
+        return mlx_sparse::csr_exact_cholesky_preconditioner_apply(
+            l_data, l_indices, l_indptr, lt_data, lt_indices, lt_indptr, rhs,
+            n_rows, n_cols);
+      },
+      "l_data"_a, "l_indices"_a, "l_indptr"_a, "lt_data"_a, "lt_indices"_a,
+      "lt_indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Apply an exact native Cholesky preconditioner to a vector or matrix "
+      "RHS.");
+
+  m.def(
       "csr_lanczos",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -1053,6 +1089,72 @@ NB_MODULE(_ext, m) {
       "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
       "Solve a float32 CSR system with restarted Jacobi-preconditioned "
       "GMRES.");
+
+  m.def(
+      "csr_gmres_exact_lu",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &perm,
+         const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &u_data,
+         const mlx_sparse::mx::array &u_indices,
+         const mlx_sparse::mx::array &u_indptr, int n_rows, int n_cols,
+         float rtol, float atol, int restart, int maxiter) {
+        return mlx_sparse::csr_gmres_exact_lu(
+            data, indices, indptr, b, x0, perm, l_data, l_indices, l_indptr,
+            u_data, u_indices, u_indptr, n_rows, n_cols, rtol, atol, restart,
+            maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "perm"_a, "l_data"_a,
+      "l_indices"_a, "l_indptr"_a, "u_data"_a, "u_indices"_a, "u_indptr"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
+      "Solve a float32 CSR system with restarted native exact-LU "
+      "left-preconditioned GMRES.");
+
+  m.def(
+      "csr_gmres_exact_cholesky",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &lt_data,
+         const mlx_sparse::mx::array &lt_indices,
+         const mlx_sparse::mx::array &lt_indptr, int n_rows, int n_cols,
+         float rtol, float atol, int restart, int maxiter) {
+        return mlx_sparse::csr_gmres_exact_cholesky(
+            data, indices, indptr, b, x0, l_data, l_indices, l_indptr, lt_data,
+            lt_indices, lt_indptr, n_rows, n_cols, rtol, atol, restart,
+            maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "l_data"_a,
+      "l_indices"_a, "l_indptr"_a, "lt_data"_a, "lt_indices"_a, "lt_indptr"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
+      "Solve a float32 CSR system with restarted native exact-Cholesky "
+      "left-preconditioned GMRES.");
+
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+  m.def(
+      "csr_gmres_exact_accelerate",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0,
+         const mlx_sparse::AccelerateFloatSolve &solver, int n_rows, int n_cols,
+         float rtol, float atol, int restart, int maxiter) {
+        return mlx_sparse::csr_gmres_exact_accelerate(
+            data, indices, indptr, b, x0, solver, n_rows, n_cols, rtol, atol,
+            restart, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "solver"_a, "n_rows"_a,
+      "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
+      "Solve a float32 CSR system with guarded Accelerate exact-factor "
+      "left-preconditioned GMRES.");
+#endif
 
   m.def(
       "csr_minres",

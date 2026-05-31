@@ -62,8 +62,11 @@ Solver support matrix
      - Iterative solve for square general systems.
      - Partial
      - No
-     - Arnoldi projection runs on GPU when selected, restart bookkeeping,
-       convergence checks, and the small least-squares solve run on CPU.
+     - Unpreconditioned, diagonal/Jacobi-preconditioned, and exact-factor
+       preconditioned entries are native. Arnoldi work can run on GPU when
+       selected, restart bookkeeping, true-residual checks, and the small
+       least-squares solve run on CPU. Custom callable preconditioners use a
+       documented host fallback.
    * - ``linalg.minres``
      - Iterative solve for square symmetric indefinite systems.
      - Partial
@@ -220,9 +223,13 @@ native Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX
 device and still test convergence against the true residual
 ``||b - A @ x||``.
 
-``linalg.gmres`` accepts ``identity``, ``diagonal``/``jacobi``, and explicit
-inverse-apply callables or objects. The diagonal/Jacobi path builds Krylov
-vectors for ``M^{-1} A`` through native CPU/Metal Arnoldi kernels and tests
-convergence against the true residual ``b - A @ x``. Custom callables and
-objects use a slower host fallback because Python cannot be called from native
-solver kernels. ``minres`` still rejects non-``None`` preconditioners.
+``linalg.gmres`` accepts ``identity``, ``diagonal``/``jacobi``, exact-factor
+preconditioners, and explicit inverse-apply callables or objects. The
+diagonal/Jacobi and exact-factor paths build Krylov vectors for ``M^{-1} A``
+through native solver entrypoints and test convergence against the true residual
+``b - A @ x``. Explicit native LU/Cholesky factors apply through native
+permutation/triangular-solve bindings, guarded Accelerate factorized objects use
+Apple's CPU sparse solver when that support is built in. Custom callable/object
+preconditioners still use a slower host fallback because arbitrary Python cannot
+be called from native solver kernels. ``minres`` still rejects non-``None``
+preconditioners.

@@ -91,12 +91,26 @@ def _diagonal_system(mx):
     )
 
 
+def _general_3x3(mx):
+    return ms.csr_array(
+        (
+            mx.array([5.0, -1.0, 0.5, 4.0, -1.5, 1.0, 3.5], dtype=mx.float32),
+            mx.array([0, 1, 0, 1, 2, 1, 2], dtype=mx.int32),
+            mx.array([0, 2, 5, 7], dtype=mx.int32),
+        ),
+        shape=(3, 3),
+        canonical=True,
+    )
+
+
 def test_preconditioner_namespace_is_public():
     assert "preconditioners" in linalg.__all__
     assert linalg.preconditioners is preconditioners
     assert callable(preconditioners.jacobi)
     assert callable(preconditioners.diagonal)
     assert callable(preconditioners.identity)
+    assert callable(preconditioners.from_factorized)
+    assert callable(preconditioners.exact)
 
 
 def test_preconditioner_metadata_is_explicit_and_conservative(mx):
@@ -142,8 +156,32 @@ def test_aspreconditioner_wraps_callable_inverse_apply(mx, to_numpy):
 
     assert isinstance(M, preconditioners.CallablePreconditioner)
     assert M.shape == (2, 2)
+    assert M.dtype == mx.float32
+    assert M.nnz == -1
+    assert M.setup_device == "python_host"
+    assert M.apply_device == "python_host"
+    assert M.setup_info["assume_inverse"] is True
     got = M(mx.array([2.0, 8.0], dtype=mx.float32))
     np.testing.assert_allclose(to_numpy(got), [1.0, 2.0], rtol=1e-6)
+
+
+def test_identity_preconditioner_validates_rank_and_finiteness(mx, to_numpy):
+    M = preconditioners.identity((2, 2))
+    rhs = mx.array([[1.0, -2.0], [3.0, 4.0]], dtype=mx.float32)
+
+    got = M(rhs)
+
+    np.testing.assert_allclose(to_numpy(got), to_numpy(rhs), rtol=0.0, atol=0.0)
+    with pytest.raises(ValueError, match="finite"):
+        M(mx.array([1.0, np.nan], dtype=mx.float32))
+
+
+def test_callable_preconditioner_rejects_noncallable_and_dtype(mx):
+    with pytest.raises(TypeError, match="callable"):
+        preconditioners.CallablePreconditioner(object(), (2, 2))
+
+    with pytest.raises(TypeError, match="float32"):
+        preconditioners.CallablePreconditioner(lambda x: x, (2, 2), dtype=mx.float16)
 
 
 def test_callable_preconditioner_rejects_wrong_output_shape(mx):
@@ -153,6 +191,310 @@ def test_callable_preconditioner_rejects_wrong_output_shape(mx):
 
     with pytest.raises(ValueError, match="output shape"):
         M(mx.ones((2,), dtype=mx.float32))
+
+
+def test_callable_preconditioner_rejects_shape_preserving_contract_mismatch(mx):
+    M = preconditioners.aspreconditioner(
+        lambda x: mx.ones((2, 1), dtype=mx.float32), (2, 2)
+    )
+
+    with pytest.raises(ValueError, match="does not match input shape"):
+        M(mx.ones((2,), dtype=mx.float32))
+
+
+def test_from_factorized_wraps_native_lu_metadata_and_rank2_apply(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _general_3x3(mx)
+    factor = linalg.sparse_lu(A)
+    M = preconditioners.from_factorized(factor)
+    rhs_np = np.array([[1.0, 0.25], [-2.0, 1.5], [0.5, -0.75]], dtype=np.float32)
+
+    got = M(mx.array(rhs_np, dtype=mx.float32))
+    expected = np.linalg.solve(to_numpy(A.todense()), rhs_np)
+
+    assert isinstance(M, preconditioners.ExactFactorPreconditioner)
+    assert M.shape == A.shape
+    assert M.method == "lu"
+    assert M.backend == "native"
+    assert M.setup_device == "native_cpu"
+    assert M.apply_device == "native_cpu_or_metal"
+    assert M.dtype == mx.float32
+    assert M.nnz == factor.L.nnz + factor.U.nnz
+    assert M.native_apply_kind == "lu"
+    assert M.native_factorization is factor
+    assert M.setup_info["solver_type"] == "SparseLU"
+    assert M.setup_info["has_native_solver_apply"] is True
+    np.testing.assert_allclose(
+        to_numpy(M.matvec(mx.array(rhs_np[:, 0], dtype=mx.float32))),
+        expected[:, 0],
+        rtol=1e-4,
+        atol=1e-4,
+    )
+    np.testing.assert_allclose(to_numpy(got), expected, rtol=1e-4, atol=1e-4)
+
+
+def test_from_factorized_wraps_native_cholesky_metadata_and_rank1_apply(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _spd_2x2(mx)
+    factor = linalg.sparse_cholesky(A)
+    M = preconditioners.from_factorized(factor)
+    rhs_np = np.array([1.0, 2.0], dtype=np.float32)
+
+    got = M(mx.array(rhs_np, dtype=mx.float32))
+    expected = np.linalg.solve(to_numpy(A.todense()), rhs_np)
+
+    assert M.method == "cholesky"
+    assert M.backend == "native"
+    assert M.is_symmetric is True
+    assert M.is_positive_definite is True
+    assert M.nnz == factor.L.nnz
+    assert M.native_apply_kind == "cholesky"
+    assert M.native_factorization is factor
+    assert M.setup_info["has_native_solver_apply"] is True
+    np.testing.assert_allclose(to_numpy(got), expected, rtol=2e-4, atol=2e-4)
+
+
+def test_aspreconditioner_preserves_factorized_solve_backend_metadata(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _general_3x3(mx)
+    solver = linalg.factorized(A, method="lu")
+
+    M = preconditioners.aspreconditioner(solver, A)
+    got = M(mx.array([1.0, -2.0, 0.5], dtype=mx.float32))
+    expected = np.linalg.solve(
+        to_numpy(A.todense()), np.array([1.0, -2.0, 0.5], dtype=np.float32)
+    )
+
+    assert isinstance(M, preconditioners.ExactFactorPreconditioner)
+    assert M.method == solver.method
+    assert M.backend == solver.backend
+    assert M.setup_info["backend"] == solver.backend
+    assert M.setup_info["has_native_solver_apply"] is True
+    if solver.backend == "accelerate":
+        assert M.native_apply_kind == "accelerate"
+        assert M.apply_device == "accelerate_cpu"
+    else:
+        assert M.native_apply_kind == "lu"
+        assert M.apply_device == "native_cpu_or_metal"
+    np.testing.assert_allclose(to_numpy(got), expected, rtol=1e-3, atol=1e-3)
+
+
+def test_exact_convenience_preconditioner_matches_direct_solve(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _general_3x3(mx)
+    rhs_np = np.array([1.0, -2.0, 0.5], dtype=np.float32)
+
+    M = preconditioners.exact(A, method="lu")
+    got = M(mx.array(rhs_np, dtype=mx.float32))
+    expected = np.linalg.solve(to_numpy(A.todense()), rhs_np)
+
+    assert M.kind == "exact"
+    assert M.shape == A.shape
+    np.testing.assert_allclose(to_numpy(got), expected, rtol=1e-3, atol=1e-3)
+
+
+def test_native_exact_lu_apply_matches_numpy_rank1_and_rank2(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _general_3x3(mx)
+    factor = linalg.sparse_lu(A)
+    rhs_np = np.array([[1.0, 0.25], [-2.0, 1.5], [0.5, -0.75]], dtype=np.float32)
+
+    got_matrix = _native.csr_exact_lu_preconditioner_apply(
+        factor.perm,
+        factor.L.data,
+        factor.L.indices,
+        factor.L.indptr,
+        factor.U.data,
+        factor.U.indices,
+        factor.U.indptr,
+        mx.array(rhs_np, dtype=mx.float32),
+        A.shape,
+    )
+    got_vector = _native.csr_exact_lu_preconditioner_apply(
+        factor.perm,
+        factor.L.data,
+        factor.L.indices,
+        factor.L.indptr,
+        factor.U.data,
+        factor.U.indices,
+        factor.U.indptr,
+        mx.array(rhs_np[:, 0], dtype=mx.float32),
+        A.shape,
+    )
+    expected = np.linalg.solve(to_numpy(A.todense()), rhs_np)
+
+    np.testing.assert_allclose(to_numpy(got_matrix), expected, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(
+        to_numpy(got_vector), expected[:, 0], rtol=1e-4, atol=1e-4
+    )
+
+
+def test_native_exact_cholesky_apply_matches_numpy_rank1_and_rank2(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _spd_2x2(mx)
+    factor = linalg.sparse_cholesky(A)
+    upper = factor._upper()
+    rhs_np = np.array([[1.0, 0.25], [2.0, -0.75]], dtype=np.float32)
+
+    got_matrix = _native.csr_exact_cholesky_preconditioner_apply(
+        factor.L.data,
+        factor.L.indices,
+        factor.L.indptr,
+        upper.data,
+        upper.indices,
+        upper.indptr,
+        mx.array(rhs_np, dtype=mx.float32),
+        A.shape,
+    )
+    got_vector = _native.csr_exact_cholesky_preconditioner_apply(
+        factor.L.data,
+        factor.L.indices,
+        factor.L.indptr,
+        upper.data,
+        upper.indices,
+        upper.indptr,
+        mx.array(rhs_np[:, 0], dtype=mx.float32),
+        A.shape,
+    )
+    expected = np.linalg.solve(to_numpy(A.todense()), rhs_np)
+
+    np.testing.assert_allclose(to_numpy(got_matrix), expected, rtol=2e-4, atol=2e-4)
+    np.testing.assert_allclose(
+        to_numpy(got_vector), expected[:, 0], rtol=2e-4, atol=2e-4
+    )
+
+
+def test_from_factorized_preserves_accelerate_metadata_without_dependency(mx, to_numpy):
+    class _IdentitySolver:
+        def solve(self, rhs):
+            return rhs
+
+    solver = linalg.FactorizedSolve(
+        _solver=_IdentitySolver(),
+        shape=(2, 2),
+        method="lu",
+        backend="accelerate",
+        rhs_size=2,
+        solution_size=2,
+    )
+    M = preconditioners.from_factorized(solver)
+    rhs = mx.array([[1.0, -2.0], [0.5, 3.0]], dtype=mx.float32)
+
+    got = M(rhs)
+
+    assert M.backend == "accelerate"
+    assert M.setup_device == "accelerate_cpu"
+    assert M.apply_device == "accelerate_cpu"
+    assert M.native_apply_kind is None
+    assert M.native_factorization is None
+    assert M.setup_info["backend"] == "accelerate"
+    assert M.setup_info["apply_device"] == "accelerate_cpu"
+    assert M.setup_info["has_native_solver_apply"] is False
+    np.testing.assert_allclose(to_numpy(got), to_numpy(rhs), rtol=0.0, atol=0.0)
+
+
+def test_exact_factor_preconditioner_rejects_rectangular_factorized_solve(mx):
+    class _RectangularSolver:
+        def solve(self, rhs):
+            return rhs[:2]
+
+    solver = linalg.FactorizedSolve(
+        _solver=_RectangularSolver(),
+        shape=(3, 2),
+        method="qr",
+        backend="test",
+        rhs_size=3,
+        solution_size=2,
+    )
+
+    with pytest.raises(ValueError, match="square"):
+        preconditioners.from_factorized(solver)
+
+
+def test_exact_factor_preconditioner_rejects_inconsistent_factorized_sizes(mx):
+    class _IdentitySolver:
+        def solve(self, rhs):
+            return rhs
+
+    solver = linalg.FactorizedSolve(
+        _solver=_IdentitySolver(),
+        shape=(2, 2),
+        method="lu",
+        backend="test",
+        rhs_size=3,
+        solution_size=2,
+    )
+
+    with pytest.raises(ValueError, match="matching RHS"):
+        preconditioners.from_factorized(solver)
+
+
+def test_exact_factor_preconditioner_rejects_bad_wrapper_metadata(mx):
+    class _NoSolve:
+        pass
+
+    with pytest.raises(TypeError, match="solve"):
+        preconditioners.ExactFactorPreconditioner(
+            solver=_NoSolve(), shape=(2, 2), method="lu", backend="native"
+        )
+
+    with pytest.raises(ValueError, match="factor_nnz"):
+        preconditioners.ExactFactorPreconditioner(
+            solver=preconditioners.identity((2, 2)),
+            shape=(2, 2),
+            method="lu",
+            backend="native",
+            factor_nnz=-2,
+        )
+
+
+def test_exact_factor_preconditioner_rejects_nonfinite_output(mx):
+    class _BadSolver:
+        def solve(self, rhs):
+            return mx.array([np.nan, 0.0], dtype=mx.float32)
+
+    solver = linalg.FactorizedSolve(
+        _solver=_BadSolver(),
+        shape=(2, 2),
+        method="lu",
+        backend="test",
+        rhs_size=2,
+        solution_size=2,
+    )
+    M = preconditioners.from_factorized(solver)
+
+    with pytest.raises(ValueError, match="finite"):
+        M(mx.ones((2,), dtype=mx.float32))
+
+
+def test_exact_factor_preconditioner_rejects_output_shape_mismatch(mx):
+    class _BadShapeSolver:
+        def solve(self, rhs):
+            return mx.ones((2, 1), dtype=mx.float32)
+
+    solver = linalg.FactorizedSolve(
+        _solver=_BadShapeSolver(),
+        shape=(2, 2),
+        method="lu",
+        backend="test",
+        rhs_size=2,
+        solution_size=2,
+    )
+    M = preconditioners.from_factorized(solver)
+
+    with pytest.raises(ValueError, match="does not match input shape"):
+        M(mx.ones((2,), dtype=mx.float32))
+
+
+def test_from_factorized_rejects_unsupported_solver_object():
+    with pytest.raises(TypeError, match="FactorizedSolve"):
+        preconditioners.from_factorized(object())
 
 
 def test_diagonal_preconditioner_apply_rank1_and_rank2(mx, to_numpy):
@@ -186,6 +528,29 @@ def test_diagonal_preconditioner_rejects_nonfinite_setup_values(mx):
     with pytest.raises(ValueError, match="finite"):
         preconditioners.diagonal(
             mx.array([1.0, np.inf], dtype=mx.float32), inverse=True
+        )
+
+
+def test_diagonal_preconditioner_rejects_shape_and_policy_errors(mx):
+    with pytest.raises(ValueError, match="expected 3"):
+        preconditioners.diagonal(mx.array([1.0, 2.0], dtype=mx.float32), shape=(3, 3))
+
+    with pytest.raises(ValueError, match="zero_atol"):
+        preconditioners.diagonal(mx.array([1.0, 2.0], dtype=mx.float32), zero_atol=-1.0)
+
+    with pytest.raises(ValueError, match="zero or near-zero"):
+        preconditioners.diagonal(mx.array([0.0, 2.0], dtype=mx.float32))
+
+    with pytest.raises(TypeError, match="float32"):
+        preconditioners.diagonal(
+            mx.array([1.0, 2.0], dtype=mx.float32), dtype=mx.float16
+        )
+
+
+def test_diagonal_preconditioner_rejects_direct_length_mismatch(mx):
+    with pytest.raises(ValueError, match="inverse_diagonal has length"):
+        preconditioners.DiagonalPreconditioner(
+            mx.array([1.0, 2.0], dtype=mx.float32), (3, 3)
         )
 
 
@@ -250,6 +615,48 @@ def test_jacobi_rejects_zero_diagonal_by_default(mx):
 
     with pytest.raises(ValueError, match="zero or near-zero"):
         preconditioners.jacobi(A)
+
+
+def test_jacobi_rejects_invalid_policy_rectangular_and_nonfinite_shift(mx):
+    A = _spd_2x2(mx)
+
+    with pytest.raises(ValueError, match="zero_policy"):
+        preconditioners.jacobi(A, zero_policy="ignore")
+
+    with pytest.raises(ValueError, match="finite"):
+        preconditioners.jacobi(A, shift=np.inf)
+
+    with pytest.raises(ValueError, match="zero_atol"):
+        preconditioners.jacobi(A, zero_atol=-1.0)
+
+    rectangular = ms.csr_array(
+        (
+            mx.array([1.0, 2.0], dtype=mx.float32),
+            mx.array([0, 2], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 3),
+        canonical=True,
+    )
+    with pytest.raises(ValueError, match="square matrix"):
+        preconditioners.jacobi(rectangular)
+
+
+def test_jacobi_unit_policy_explicitly_replaces_zero_diagonal(mx, to_numpy):
+    A = ms.csr_array(
+        (
+            mx.array([0.0, 2.0], dtype=mx.float32),
+            mx.array([0, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+
+    M = preconditioners.jacobi(A, zero_policy="unit")
+
+    got = M(mx.array([3.0, 4.0], dtype=mx.float32))
+    np.testing.assert_allclose(to_numpy(got), [3.0, 2.0], rtol=1e-6)
 
 
 def test_jacobi_check_rejects_nonpositive_shifted_diagonal(mx):
@@ -334,6 +741,40 @@ def test_cg_identity_preconditioner_uses_native_cg(mx, to_numpy):
     assert info_base == 0
     assert info_identity == 0
     np.testing.assert_allclose(to_numpy(x_identity), to_numpy(x_base), rtol=1e-6)
+
+
+def test_aspreconditioner_rejects_ambiguous_or_mismatched_inputs(mx):
+    with pytest.raises(ValueError, match="A is required"):
+        preconditioners.aspreconditioner(None)
+
+    with pytest.raises(ValueError, match="does not match"):
+        preconditioners.aspreconditioner(preconditioners.identity((2, 2)), (3, 3))
+
+    with pytest.raises(TypeError, match="sparse matrices"):
+        preconditioners.aspreconditioner(_spd_2x2(mx), _spd_2x2(mx))
+
+    with pytest.raises(TypeError, match="must apply the inverse"):
+        preconditioners.aspreconditioner(lambda x: x, (2, 2), assume_inverse=False)
+
+    with pytest.raises(ValueError, match="A is required"):
+        preconditioners.aspreconditioner(lambda x: x)
+
+    with pytest.raises(TypeError, match="M must be"):
+        preconditioners.aspreconditioner(object(), (2, 2))
+
+
+def test_aspreconditioner_rejects_custom_object_shape_mismatch(mx):
+    class _SolveObject:
+        shape = (3, 3)
+
+        def solve(self, rhs):
+            return rhs
+
+    with pytest.raises(ValueError, match="does not match"):
+        preconditioners.aspreconditioner(_SolveObject(), (2, 2))
+
+    with pytest.raises(TypeError, match="must apply the inverse"):
+        preconditioners.aspreconditioner(_SolveObject(), (3, 3), assume_inverse=False)
 
 
 def test_gmres_identity_preconditioner_matches_native_unpreconditioned(mx, to_numpy):
@@ -506,6 +947,92 @@ def test_gmres_callable_left_preconditioner_converges(mx, to_numpy):
     assert info == 0
     np.testing.assert_allclose(x_np, expected, rtol=2e-5, atol=2e-5)
     assert _relative_residual(A_dense, x_np, b_np) <= 2e-6
+
+
+def test_gmres_exact_factor_preconditioner_converges_to_direct_solution(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _general_3x3(mx)
+    b_np = np.array([2.0, -1.0, 0.5], dtype=np.float32)
+
+    x, info = linalg.gmres(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=preconditioners.exact(A, method="lu"),
+        rtol=1e-6,
+        atol=1e-7,
+        restart=2,
+        maxiter=4,
+    )
+
+    x_np = to_numpy(x)
+    dense = to_numpy(A.todense())
+    expected = np.linalg.solve(dense, b_np)
+    assert info == 0
+    np.testing.assert_allclose(x_np, expected, rtol=1e-3, atol=1e-3)
+    assert _relative_residual(dense, x_np, b_np) <= 1e-5
+
+
+def test_gmres_exact_lu_preconditioner_uses_native_path(mx, to_numpy, monkeypatch):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    import mlx_sparse.linalg._iterative as iterative_module
+
+    A = _general_3x3(mx)
+    b_np = np.array([2.0, -1.0, 0.5], dtype=np.float32)
+    M = preconditioners.from_factorized(linalg.sparse_lu(A))
+
+    def forbidden_host_fallback(*args, **kwargs):
+        raise AssertionError("exact LU GMRES used the Python host fallback")
+
+    monkeypatch.setattr(iterative_module, "_left_pgmres_host", forbidden_host_fallback)
+    x, info = linalg.gmres(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=M,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=2,
+        maxiter=4,
+    )
+
+    x_np = to_numpy(x)
+    dense = to_numpy(A.todense())
+    assert info == 0
+    np.testing.assert_allclose(x_np, np.linalg.solve(dense, b_np), rtol=1e-3, atol=1e-3)
+    assert _relative_residual(dense, x_np, b_np) <= 1e-5
+
+
+def test_gmres_exact_cholesky_preconditioner_uses_native_path(
+    mx, to_numpy, monkeypatch
+):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    import mlx_sparse.linalg._iterative as iterative_module
+
+    A = _spd_2x2(mx)
+    b_np = np.array([1.0, 2.0], dtype=np.float32)
+    M = preconditioners.from_factorized(linalg.sparse_cholesky(A))
+
+    def forbidden_host_fallback(*args, **kwargs):
+        raise AssertionError("exact Cholesky GMRES used the Python host fallback")
+
+    monkeypatch.setattr(iterative_module, "_left_pgmres_host", forbidden_host_fallback)
+    x, info = linalg.gmres(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=M,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=2,
+        maxiter=4,
+    )
+
+    x_np = to_numpy(x)
+    dense = to_numpy(A.todense())
+    assert info == 0
+    np.testing.assert_allclose(x_np, np.linalg.solve(dense, b_np), rtol=1e-4, atol=1e-4)
+    assert _relative_residual(dense, x_np, b_np) <= 1e-6
 
 
 def test_cg_jacobi_preconditioner_converges(mx, to_numpy):
