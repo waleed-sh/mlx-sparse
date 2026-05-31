@@ -90,6 +90,12 @@ Key characteristics
    notebooks/index
 
 .. toctree::
+   :maxdepth: 2
+   :caption: Parallelism and performance
+
+   parallelism/index
+
+.. toctree::
    :maxdepth: 1
    :caption: Reference
 
