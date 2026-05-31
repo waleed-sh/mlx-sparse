@@ -17,258 +17,39 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import mlx.core as mx
-import numpy as np
 
 import mlx_sparse._native as _native
-from mlx_sparse._coo import COOArray
-from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
-from mlx_sparse._host import to_numpy
-from mlx_sparse._validation import ensure_mx_array
-
-_REAL_DIRECT_DTYPES = {mx.float32, mx.float16, mx.bfloat16}
-_FACTORIZED_METHODS = {"auto", "lu", "cholesky", "ldlt", "qr", "cholesky_ata"}
-_ACCELERATE_ONLY_METHODS = {"ldlt", "qr", "cholesky_ata"}
-_ACCELERATE_SPSOLVE_RESIDUAL_RTOL = 1e-3
-
-
-def _as_csr(A) -> CSRArray:
-    if isinstance(A, CSRArray):
-        return A.canonicalize()
-    if isinstance(A, COOArray):
-        return A.tocsr(canonical=True)
-    if isinstance(A, CSCArray):
-        return A.tocsr(canonical=True)
-    raise TypeError(
-        "sparse factorization expects CSRArray, COOArray, or CSCArray. "
-        "Dense MLX arrays belong in mlx.linalg, not mlx_sparse.linalg."
-    )
-
-
-def _as_sparse(A) -> CSRArray | CSCArray | COOArray:
-    if isinstance(A, (CSRArray, CSCArray, COOArray)):
-        return A
-    raise TypeError(
-        "sparse factorization expects CSRArray, COOArray, or CSCArray. "
-        "Dense MLX arrays belong in mlx.linalg, not mlx_sparse.linalg."
-    )
-
-
-def _float32_csr(A: CSRArray) -> CSRArray:
-    if A.data.dtype == mx.float32:
-        return A
-    if A.data.dtype in {mx.float16, mx.bfloat16}:
-        return CSRArray(
-            data=A.data.astype(mx.float32),
-            indices=A.indices,
-            indptr=A.indptr,
-            shape=A.shape,
-            sorted_indices=A.sorted_indices,
-            has_canonical_format=A.has_canonical_format,
-        )
-    raise TypeError("sparse direct factorizations currently require real float data.")
-
-
-def _float32_sparse(
-    A: CSRArray | CSCArray | COOArray,
-) -> CSRArray | CSCArray | COOArray:
-    if A.data.dtype == mx.float32:
-        return A
-    if A.data.dtype not in _REAL_DIRECT_DTYPES:
-        raise TypeError(
-            "sparse direct factorizations currently require real float data."
-        )
-    if isinstance(A, CSRArray):
-        return CSRArray(
-            data=A.data.astype(mx.float32),
-            indices=A.indices,
-            indptr=A.indptr,
-            shape=A.shape,
-            sorted_indices=A.sorted_indices,
-            has_canonical_format=A.has_canonical_format,
-        )
-    if isinstance(A, CSCArray):
-        return CSCArray(
-            data=A.data.astype(mx.float32),
-            indices=A.indices,
-            indptr=A.indptr,
-            shape=A.shape,
-            sorted_indices=A.sorted_indices,
-            has_canonical_format=A.has_canonical_format,
-        )
-    return COOArray(
-        data=A.data.astype(mx.float32),
-        row=A.row,
-        col=A.col,
-        shape=A.shape,
-        has_canonical_format=A.has_canonical_format,
-    )
-
-
-def _triangular_solve(
-    factor: CSRArray,
-    b,
-    *,
-    lower: bool,
-    unit_diagonal: bool,
-    diagonal_positions: mx.array | None = None,
-    level_schedule: tuple[mx.array, mx.array] | None = None,
-):
-    rhs = ensure_mx_array(b, dtype=mx.float32)
-    if rhs.ndim not in (1, 2):
-        raise ValueError(f"right-hand side must be rank-1 or rank-2, got {rhs.shape}.")
-    if rhs.shape[0] != factor.shape[0]:
-        expected = (factor.shape[0],) if rhs.ndim == 1 else (factor.shape[0], "nrhs")
-        raise ValueError(
-            f"right-hand side has incompatible shape {rhs.shape}; expected {expected}."
-        )
-    if rhs.ndim == 2 and rhs.shape[1] <= 0:
-        raise ValueError("right-hand side must include at least one column.")
-    return _native.csr_triangular_solve(
-        factor.data,
-        factor.indices,
-        factor.indptr,
-        rhs,
-        factor.shape,
-        lower=lower,
-        unit_diagonal=unit_diagonal,
-        diagonal_positions=diagonal_positions,
-        level_schedule=level_schedule,
-    )
-
-
-def _normalize_factorized_method(method: str) -> str:
-    normalized = method.lower().replace("-", "_")
-    aliases = {
-        "chol": "cholesky",
-        "spd": "cholesky",
-        "posdef": "cholesky",
-        "positive_definite": "cholesky",
-        "least_squares": "qr",
-        "normal_equations": "cholesky_ata",
-    }
-    normalized = aliases.get(normalized, normalized)
-    if normalized not in _FACTORIZED_METHODS:
-        allowed = ", ".join(sorted(_FACTORIZED_METHODS))
-        raise ValueError(f"factorized method must be one of {allowed}.")
-    return normalized
-
-
-def _auto_factorized_method(A: CSRArray | CSCArray | COOArray) -> str:
-    if A.shape[0] == A.shape[1]:
-        return "lu"
-    return "qr"
-
-
-def _accelerate_method_available(method: str) -> bool:
-    if not _native.accelerate_solvers_available():
-        return False
-    if method == "lu":
-        return _native.accelerate_lu_solvers_available()
-    return True
-
-
-def _should_use_accelerate(A: CSRArray | CSCArray | COOArray, method: str) -> bool:
-    return A.data.dtype in _REAL_DIRECT_DTYPES and _accelerate_method_available(method)
-
-
-def _solve_columns(solver, b, *, rhs_size: int) -> mx.array:
-    rhs = ensure_mx_array(b, dtype=mx.float32)
-    if rhs.ndim == 1:
-        if rhs.shape[0] != rhs_size:
-            raise ValueError(
-                f"right-hand side has incompatible shape {rhs.shape}; "
-                f"expected ({rhs_size},)."
-            )
-        return solver.solve(rhs)
-    if rhs.ndim == 2:
-        if rhs.shape[0] != rhs_size:
-            raise ValueError(
-                f"right-hand side has incompatible shape {rhs.shape}; "
-                f"expected first dimension {rhs_size}."
-            )
-        if rhs.shape[1] <= 0:
-            raise ValueError("right-hand side must include at least one column.")
-        return solver.solve(rhs)
-    raise ValueError(f"right-hand side must be rank-1 or rank-2, got {rhs.shape}.")
-
-
-def _host_norm(values) -> float:
-    array = np.asarray(values, dtype=np.float64).ravel()
-    return float(np.sqrt(np.sum(array * array)))
-
-
-def _check_accelerate_direct_residual(
-    A: CSRArray | CSCArray | COOArray,
-    x: mx.array,
-    rhs: mx.array,
-) -> None:
-    x_np = np.asarray(to_numpy(x), dtype=np.float64)
-    if not np.all(np.isfinite(x_np)):
-        raise RuntimeError(
-            "Accelerate sparse direct solve produced non-finite values; "
-            "the matrix may be singular or ill-conditioned."
-        )
-
-    residual = A @ x - rhs
-    residual_np = np.asarray(to_numpy(residual), dtype=np.float64)
-    rhs_np = np.asarray(to_numpy(rhs), dtype=np.float64)
-    scale = max(_host_norm(rhs_np), 1.0)
-    relative_residual = _host_norm(residual_np) / scale
-    if (
-        not np.isfinite(relative_residual)
-        or relative_residual > _ACCELERATE_SPSOLVE_RESIDUAL_RTOL
-    ):
-        raise RuntimeError(
-            "Accelerate sparse direct solve residual is too large; "
-            "the matrix may be singular or ill-conditioned."
-        )
-
-
-def _accelerate_singularity_probe(n: int) -> mx.array:
-    values = np.ones((n,), dtype=np.float32)
-    values[1::2] = -1.0
-    return mx.array(values, dtype=mx.float32)
-
-
-def _solve_accelerate_spsolve_checked(
-    A: CSRArray | CSCArray | COOArray,
-    solver,
-    rhs: mx.array,
-) -> mx.array:
-    probe = _accelerate_singularity_probe(A.shape[0])
-    if rhs.ndim == 1:
-        combined_rhs = mx.concatenate([rhs[:, None], probe[:, None]], axis=1)
-        combined_x = solver.solve(combined_rhs)
-        user_x = combined_x[:, 0]
-        probe_x = combined_x[:, 1]
-    elif rhs.ndim == 2:
-        combined_rhs = mx.concatenate([rhs, probe[:, None]], axis=1)
-        combined_x = solver.solve(combined_rhs)
-        user_x = combined_x[:, : rhs.shape[1]]
-        probe_x = combined_x[:, rhs.shape[1]]
-    else:
-        raise ValueError(f"right-hand side must be rank-1 or rank-2, got {rhs.shape}.")
-
-    A_float32 = _float32_sparse(A)
-    _check_accelerate_direct_residual(A_float32, user_x, rhs)
-    try:
-        _check_accelerate_direct_residual(A_float32, probe_x, probe)
-    except RuntimeError as exc:
-        try:
-            sparse_lu(A_float32)
-        except RuntimeError:
-            raise exc
-    return user_x
-
-
-@dataclass(frozen=True, slots=True)
-class _NativeFactorizedSolve:
-    factorization: SparseCholesky | SparseLU
-    rhs_size: int
-
-    def solve(self, b) -> mx.array:
-        return _solve_columns(self.factorization, b, rhs_size=self.rhs_size)
+from mlx_sparse.linalg.utils.arrays import ensure_array
+from mlx_sparse.linalg.utils.factorization import (
+    ACCELERATE_ONLY_METHODS as _ACCELERATE_ONLY_METHODS,
+)
+from mlx_sparse.linalg.utils.factorization import (
+    NativeFactorizedSolve,
+    accelerate_factorize_sparse,
+)
+from mlx_sparse.linalg.utils.factorization import (
+    accelerate_method_available as _accelerate_method_available,
+)
+from mlx_sparse.linalg.utils.factorization import as_csr as _as_csr
+from mlx_sparse.linalg.utils.factorization import as_sparse as _as_sparse
+from mlx_sparse.linalg.utils.factorization import (
+    auto_factorized_method as _auto_factorized_method,
+)
+from mlx_sparse.linalg.utils.factorization import (
+    ensure_factor_rhs,
+)
+from mlx_sparse.linalg.utils.factorization import float32_csr as _float32_csr
+from mlx_sparse.linalg.utils.factorization import (
+    normalize_factorized_method as _normalize_factorized_method,
+)
+from mlx_sparse.linalg.utils.factorization import (
+    should_use_accelerate as _should_use_accelerate,
+)
+from mlx_sparse.linalg.utils.factorization import (
+    solve_accelerate_spsolve_checked as _solve_accelerate_spsolve_checked,
+)
+from mlx_sparse.linalg.utils.factorization import triangular_solve as _triangular_solve
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +73,8 @@ class SparseCholesky:
 
     @property
     def shape(self) -> tuple[int, int]:
+        """Shape of the factored square matrix."""
+
         return self.L.shape
 
     def _upper(self) -> CSRArray:
@@ -352,6 +135,8 @@ class SparseLU:
 
     @property
     def shape(self) -> tuple[int, int]:
+        """Shape of the factored square matrix."""
+
         return self.L.shape
 
     def solve(self, b) -> mx.array:
@@ -376,18 +161,7 @@ class SparseLU:
         Raises:
             ValueError: If ``b`` has the wrong shape.
         """
-        rhs = ensure_mx_array(b, dtype=mx.float32)
-        if rhs.ndim not in (1, 2):
-            raise ValueError(
-                f"right-hand side must be rank-1 or rank-2, got {rhs.shape}."
-            )
-        if rhs.shape[0] != self.shape[0]:
-            raise ValueError(
-                f"right-hand side has incompatible shape {rhs.shape}; "
-                f"expected first dimension {self.shape[0]}."
-            )
-        if rhs.ndim == 2 and rhs.shape[1] <= 0:
-            raise ValueError("right-hand side must include at least one column.")
+        rhs = ensure_factor_rhs(b, leading_dim=self.shape[0])
         permuted = _native.csr_permute_vector(rhs, self.perm)
         y = _triangular_solve(self.L, permuted, lower=True, unit_diagonal=True)
         return _triangular_solve(self.U, y, lower=False, unit_diagonal=False)
@@ -426,74 +200,12 @@ class FactorizedSolve:
             Solution array of shape ``(solution_size,)`` or
             ``(solution_size, nrhs)``.
         """
-        rhs = ensure_mx_array(b, dtype=mx.float32)
+        rhs = ensure_array(b, dtype=mx.float32)
         return self._solver.solve(rhs)
 
     def __call__(self, b) -> mx.array:
         """Alias for :meth:`solve`."""
         return self.solve(b)
-
-
-def _make_native_factorized(
-    A: CSRArray | CSCArray | COOArray,
-    method: str,
-) -> FactorizedSolve:
-    if method == "lu":
-        if A.shape[0] != A.shape[1]:
-            raise ValueError("LU factorized solves require a square matrix.")
-        factor = sparse_lu(A)
-        solver = _NativeFactorizedSolve(factor, rhs_size=A.shape[0])
-        return FactorizedSolve(
-            _solver=solver,
-            shape=A.shape,
-            method="lu",
-            backend="native",
-            rhs_size=A.shape[0],
-            solution_size=A.shape[1],
-        )
-    if method == "cholesky":
-        if A.shape[0] != A.shape[1]:
-            raise ValueError("Cholesky factorized solves require a square matrix.")
-        factor = sparse_cholesky(A)
-        solver = _NativeFactorizedSolve(factor, rhs_size=A.shape[0])
-        return FactorizedSolve(
-            _solver=solver,
-            shape=A.shape,
-            method="cholesky",
-            backend="native",
-            rhs_size=A.shape[0],
-            solution_size=A.shape[1],
-        )
-    raise NotImplementedError(
-        f"factorized(method={method!r}) requires an Accelerate-enabled Apple build."
-    )
-
-
-def _make_accelerate_factorized(
-    A: CSRArray | CSCArray | COOArray,
-    method: str,
-) -> FactorizedSolve:
-    sparse = _float32_sparse(A)
-    if isinstance(sparse, CSRArray):
-        solver = _native.accelerate_factorize_csr_float32(
-            sparse.data, sparse.indices, sparse.indptr, sparse.shape, method
-        )
-    elif isinstance(sparse, CSCArray):
-        solver = _native.accelerate_factorize_csc_float32(
-            sparse.data, sparse.indices, sparse.indptr, sparse.shape, method
-        )
-    else:
-        solver = _native.accelerate_factorize_coo_float32(
-            sparse.data, sparse.row, sparse.col, sparse.shape, method
-        )
-    return FactorizedSolve(
-        _solver=solver,
-        shape=sparse.shape,
-        method=method,
-        backend="accelerate",
-        rhs_size=int(solver.rhs_size),
-        solution_size=int(solver.solution_size),
-    )
 
 
 def sparse_cholesky(A, *, upper: bool = False) -> SparseCholesky:
@@ -724,11 +436,55 @@ def factorized(A, *, method: str = "auto") -> FactorizedSolve:
                 f"factorized(method={selected!r}) requires an "
                 "Accelerate-enabled Apple build."
             )
-        return _make_accelerate_factorized(sparse, selected)
+        sparse, solver = accelerate_factorize_sparse(sparse, selected)
+        return FactorizedSolve(
+            _solver=solver,
+            shape=sparse.shape,
+            method=selected,
+            backend="accelerate",
+            rhs_size=int(solver.rhs_size),
+            solution_size=int(solver.solution_size),
+        )
 
     if _should_use_accelerate(sparse, selected):
-        return _make_accelerate_factorized(sparse, selected)
-    return _make_native_factorized(sparse, selected)
+        sparse, solver = accelerate_factorize_sparse(sparse, selected)
+        return FactorizedSolve(
+            _solver=solver,
+            shape=sparse.shape,
+            method=selected,
+            backend="accelerate",
+            rhs_size=int(solver.rhs_size),
+            solution_size=int(solver.solution_size),
+        )
+    if selected == "lu":
+        if sparse.shape[0] != sparse.shape[1]:
+            raise ValueError("LU factorized solves require a square matrix.")
+        factor = sparse_lu(sparse)
+        solver = NativeFactorizedSolve(factor, rhs_size=sparse.shape[0])
+        return FactorizedSolve(
+            _solver=solver,
+            shape=sparse.shape,
+            method="lu",
+            backend="native",
+            rhs_size=sparse.shape[0],
+            solution_size=sparse.shape[1],
+        )
+    if selected == "cholesky":
+        if sparse.shape[0] != sparse.shape[1]:
+            raise ValueError("Cholesky factorized solves require a square matrix.")
+        factor = sparse_cholesky(sparse)
+        solver = NativeFactorizedSolve(factor, rhs_size=sparse.shape[0])
+        return FactorizedSolve(
+            _solver=solver,
+            shape=sparse.shape,
+            method="cholesky",
+            backend="native",
+            rhs_size=sparse.shape[0],
+            solution_size=sparse.shape[1],
+        )
+    raise NotImplementedError(
+        f"factorized(method={selected!r}) requires an Accelerate-enabled Apple build."
+    )
 
 
 def spsolve(A, b) -> mx.array:
@@ -764,8 +520,13 @@ def spsolve(A, b) -> mx.array:
     sparse = _as_sparse(A)
     if sparse.shape[0] != sparse.shape[1]:
         raise ValueError("spsolve requires a square sparse matrix.")
-    rhs = ensure_mx_array(b, dtype=mx.float32)
+    rhs = ensure_array(b, dtype=mx.float32)
     solver = factorized(sparse, method="lu")
     if solver.backend == "accelerate":
-        return _solve_accelerate_spsolve_checked(sparse, solver, rhs)
+        return _solve_accelerate_spsolve_checked(
+            sparse,
+            solver,
+            rhs,
+            singularity_checker=sparse_lu,
+        )
     return solver.solve(rhs)

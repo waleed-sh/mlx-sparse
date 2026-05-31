@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Backward-compatible import shim for linalg array utilities.
-
-New linalg code should import from :mod:`mlx_sparse.linalg.utils.arrays`.
-"""
+"""Preconditioner-specific validation helpers."""
 
 from __future__ import annotations
 
-from mlx_sparse.linalg.utils.arrays import ensure_array
+import mlx.core as mx
 
-__all__ = ["ensure_array"]
+
+def normalize_identity_dtype(dtype):
+    """Normalize the identity preconditioner dtype argument."""
+
+    if dtype is None or dtype == mx.float32:
+        return mx.float32
+    raise TypeError("identity preconditioners currently use float32 values.")

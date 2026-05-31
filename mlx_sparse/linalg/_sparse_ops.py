@@ -14,21 +14,7 @@
 
 from __future__ import annotations
 
-from mlx_sparse._coo import COOArray
-from mlx_sparse._csc import CSCArray
-from mlx_sparse._csr import CSRArray
-
-
-def _as_csr(A) -> CSRArray:
-    if isinstance(A, CSRArray):
-        return A
-    if isinstance(A, COOArray):
-        return A.tocsr(canonical=True)
-    if isinstance(A, CSCArray):
-        return A.tocsr(canonical=True)
-    raise TypeError(
-        f"expected CSRArray, COOArray, or CSCArray, got {type(A).__name__}."
-    )
+from mlx_sparse.linalg.utils.sparse import inner_product_csr as _as_csr
 
 
 def vdot(a, b):

@@ -217,4 +217,6 @@ Preconditioners
 preconditioners from ``mlx_sparse.linalg.preconditioners``. ``identity`` uses
 the existing unpreconditioned CG path. ``diagonal`` and ``jacobi`` dispatch to
 native Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX
-device. ``gmres`` and ``minres`` still reject non-``None`` preconditioners.
+device and still test convergence against the true residual
+``||b - A @ x||``. ``gmres`` and ``minres`` still reject non-``None``
+preconditioners.

@@ -26,6 +26,36 @@ New Features
   ``src/preconditioners/diagonal``, with Python bindings through
   :mod:`mlx_sparse._native`.
 
+Improvements
+~~~~~~~~~~~~
+
+* Hardened diagonal and Jacobi preconditioner validation with explicit finite
+  setup checks, finite RHS checks for standalone inverse application,
+  conservative positive-definite metadata, and an opt-in ``check=True`` path
+  for positive shifted Jacobi diagonals.
+
+* Refactored shared sparse linalg helpers into the
+  :mod:`mlx_sparse.linalg.utils` subpackage, separating array/dtype handling,
+  sparse input normalization, iterative solver bookkeeping, direct-solver
+  validation, spectral sizing, operator construction, and preconditioner
+  validation from the public algorithm modules.
+
+Tests
+~~~~~
+
+* Expanded preconditioner coverage for rank-1/rank-2 RHS application,
+  low-precision RHS promotion, CSR/COO/CSC Jacobi setup, input immutability,
+  SciPy PCG comparison, dense NumPy residual checks, and pathological
+  near-singular or singular PCG behavior.
+
+Benchmarks
+~~~~~~~~~~
+
+* Added a focused Jacobi PCG validation benchmark entrypoint that writes setup
+  time, solve time, true residual, matrix metadata, preconditioner metadata,
+  and SciPy CG/Jacobi reference measurements.
+
+
 Documentation
 ~~~~~~~~~~~~~
 

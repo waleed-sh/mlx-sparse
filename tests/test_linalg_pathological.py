@@ -20,6 +20,7 @@ import pytest
 import mlx_sparse as ms
 from mlx_sparse import linalg
 from mlx_sparse._ext_loader import extension_available
+from mlx_sparse.linalg import preconditioners
 
 pytestmark = pytest.mark.native
 
@@ -262,6 +263,50 @@ def test_near_singular_diagonal_iterative_solver_converges(solver, mx, to_numpy)
     got = to_numpy(x)
     assert info == 0, solver.__name__
     _assert_solution_residual(dense, got, b_np, rtol=1e-5, atol=1e-5)
+
+
+def test_jacobi_pcg_near_singular_diagonal_converges(mx, to_numpy):
+    _require_native()
+    dense = np.diag(np.array([1e-8, 1.0, 2.0, 3.0], dtype=np.float32))
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([1.0, -1.0, 0.5, 2.0], dtype=np.float32)
+    b = mx.array(b_np)
+
+    x, info = linalg.cg(
+        csr,
+        b,
+        M=preconditioners.jacobi(csr, check=True),
+        rtol=1e-6,
+        atol=1e-7,
+        maxiter=8,
+    )
+
+    got = to_numpy(x)
+    assert info == 0
+    assert np.all(np.isfinite(got))
+    _assert_solution_residual(dense, got, b_np, rtol=1e-5, atol=1e-5)
+
+
+def test_jacobi_pcg_singular_incompatible_system_reports_failure_finitely(mx, to_numpy):
+    _require_native()
+    dense = np.diag(np.array([0.0, 1.0], dtype=np.float32))
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([1.0, 1.0], dtype=np.float32)
+    b = mx.array(b_np)
+
+    x, info = linalg.cg(
+        csr,
+        b,
+        M=preconditioners.jacobi(csr, zero_policy="unit"),
+        rtol=1e-7,
+        atol=0.0,
+        maxiter=8,
+    )
+
+    got = to_numpy(x)
+    assert info != 0
+    assert np.all(np.isfinite(got))
+    assert np.linalg.norm(dense @ got - b_np) > 1e-2
 
 
 def test_near_singular_diagonal_direct_solver_residual_is_small(mx, to_numpy):
