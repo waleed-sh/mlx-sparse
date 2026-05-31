@@ -1,6 +1,38 @@
 Changelog
 =========
 
+mlx-sparse v0.0.5b0 (Unreleased)
+--------------------------------
+
+.. note::
+
+    This release focuses on making sparse iterative solves materially more
+    robust and complete by adding first-class native-backed preconditioners
+    under :mod:`mlx_sparse.linalg.preconditioners`, wiring them into the Krylov
+    solver surface, and tightening true-residual and numerical-breakdown
+    behavior across the iterative linalg stack. See the roadmap
+    `here <https://github.com/waleed-sh/mlx-sparse/issues/26>`_.
+
+New Features
+~~~~~~~~~~~~
+
+* Added the public :mod:`mlx_sparse.linalg.preconditioners` namespace with
+  identity, diagonal, and Jacobi preconditioner objects. Diagonal application
+  uses a native CPU/Metal primitive, and ``cg(..., M=jacobi(A))`` dispatches to
+  a native Jacobi-preconditioned CG primitive rather than a Python solver loop.
+
+* Added native ``csr_pcg_jacobi`` and ``diagonal_preconditioner_apply`` entry
+  points under ``src/preconditioners/pcg`` and
+  ``src/preconditioners/diagonal``, with Python bindings through
+  :mod:`mlx_sparse._native`.
+
+Documentation
+~~~~~~~~~~~~~
+
+* Added a Preconditioners user-guide page and updated linalg solver docs to
+  describe the current native CG preconditioner support and the remaining
+  GMRES/MINRES preconditioner gap.
+
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------
 

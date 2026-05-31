@@ -51,6 +51,8 @@ def test_native_linalg_symbols_are_exported_when_extension_loads():
 
     required = {
         "csr_cg",
+        "csr_pcg_jacobi",
+        "diagonal_preconditioner_apply",
         "csr_gmres",
         "csr_minres",
         "csr_lanczos",

@@ -28,6 +28,8 @@
 #include "linalg/accelerate/factorization/factorization.h"
 #include "linalg/accelerate/solve/solve.h"
 #include "linalg/linalg.h"
+#include "preconditioners/diagonal/diagonal.h"
+#include "preconditioners/pcg/pcg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
 #include "sparse/coo_col_sums/coo_col_sums.h"
@@ -981,6 +983,32 @@ NB_MODULE(_ext, m) {
       "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a, "n_cols"_a,
       "rtol"_a, "atol"_a, "maxiter"_a,
       "Solve a float32 SPD CSR system with conjugate gradients.");
+
+  m.def(
+      "csr_pcg_jacobi",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &inv_diag,
+         int n_rows, int n_cols, float rtol, float atol, int maxiter) {
+        return mlx_sparse::csr_pcg_jacobi(data, indices, indptr, b, x0,
+                                          inv_diag, n_rows, n_cols, rtol, atol,
+                                          maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "inv_diag"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 SPD CSR system with Jacobi-preconditioned conjugate "
+      "gradients.");
+
+  m.def(
+      "diagonal_preconditioner_apply",
+      [](const mlx_sparse::mx::array &inv_diag,
+         const mlx_sparse::mx::array &rhs) {
+        return mlx_sparse::diagonal_preconditioner_apply(inv_diag, rhs);
+      },
+      "inv_diag"_a, "rhs"_a,
+      "Apply a float32 diagonal inverse preconditioner to a vector or matrix "
+      "right-hand side.");
 
   m.def(
       "csr_lanczos",

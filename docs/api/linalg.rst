@@ -23,6 +23,14 @@ Iterative solvers
 .. autofunction:: gmres
 .. autofunction:: minres
 
+Preconditioners
+---------------
+
+.. automodule:: mlx_sparse.linalg.preconditioners
+   :members:
+
+.. currentmodule:: mlx_sparse.linalg
+
 Spectral routines
 -----------------
 
