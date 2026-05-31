@@ -135,6 +135,99 @@ least_squares_normal_equations(const std::vector<double> &a,
   return solve_dense_system(std::move(normal), std::move(rhs), cols);
 }
 
+inline std::vector<double>
+least_squares_upper_hessenberg_givens_qr(const std::vector<double> &a,
+                                         const std::vector<double> &b, int rows,
+                                         int cols) {
+  if (rows != cols + 1 || rows <= 1 || cols <= 0) {
+    throw std::invalid_argument(
+        "upper-Hessenberg Givens least-squares solve requires rows == cols + "
+        "1.");
+  }
+  if (a.size() != static_cast<size_t>(rows) * cols ||
+      b.size() != static_cast<size_t>(rows)) {
+    throw std::invalid_argument(
+        "upper-Hessenberg Givens least-squares solve received inconsistent "
+        "dimensions.");
+  }
+
+  std::vector<double> r = a;
+  std::vector<double> rhs = b;
+  double scale = 0.0;
+  for (double value : r) {
+    if (!std::isfinite(value)) {
+      throw std::runtime_error(
+          "upper-Hessenberg Givens least-squares solve received a non-finite "
+          "matrix value.");
+    }
+    scale = std::max(scale, std::abs(value));
+  }
+  for (double value : rhs) {
+    if (!std::isfinite(value)) {
+      throw std::runtime_error(
+          "upper-Hessenberg Givens least-squares solve received a non-finite "
+          "right-hand side.");
+    }
+  }
+  const double rank_tol = std::numeric_limits<double>::epsilon() *
+                          static_cast<double>(std::max(rows, cols)) *
+                          std::max(1.0, scale);
+  if (scale <= rank_tol) {
+    throw std::runtime_error(
+        "upper-Hessenberg Givens least-squares solve encountered a "
+        "rank-deficient matrix.");
+  }
+
+  for (int col = 0; col < cols; ++col) {
+    const int row = col + 1;
+    const double pivot = r[static_cast<size_t>(col) * cols + col];
+    const double entry = r[static_cast<size_t>(row) * cols + col];
+    if (entry == 0.0) {
+      continue;
+    }
+    const double radius = std::hypot(pivot, entry);
+    if (!std::isfinite(radius) || radius <= rank_tol) {
+      throw std::runtime_error(
+          "upper-Hessenberg Givens least-squares solve encountered a "
+          "degenerate rotation.");
+    }
+    const double c = pivot / radius;
+    const double s = entry / radius;
+    for (int j = col; j < cols; ++j) {
+      const double top = r[static_cast<size_t>(col) * cols + j];
+      const double bottom = r[static_cast<size_t>(row) * cols + j];
+      r[static_cast<size_t>(col) * cols + j] = c * top + s * bottom;
+      r[static_cast<size_t>(row) * cols + j] = -s * top + c * bottom;
+    }
+    const double rhs_top = rhs[static_cast<size_t>(col)];
+    const double rhs_bottom = rhs[static_cast<size_t>(row)];
+    rhs[static_cast<size_t>(col)] = c * rhs_top + s * rhs_bottom;
+    rhs[static_cast<size_t>(row)] = -s * rhs_top + c * rhs_bottom;
+  }
+
+  std::vector<double> x(static_cast<size_t>(cols), 0.0);
+  for (int row = cols - 1; row >= 0; --row) {
+    double sum = rhs[static_cast<size_t>(row)];
+    for (int col = row + 1; col < cols; ++col) {
+      sum -= r[static_cast<size_t>(row) * cols + col] *
+             x[static_cast<size_t>(col)];
+    }
+    const double diag = r[static_cast<size_t>(row) * cols + row];
+    if (!std::isfinite(diag) || std::abs(diag) <= rank_tol) {
+      throw std::runtime_error(
+          "upper-Hessenberg Givens least-squares solve encountered a "
+          "rank-deficient R factor.");
+    }
+    x[static_cast<size_t>(row)] = sum / diag;
+    if (!std::isfinite(x[static_cast<size_t>(row)])) {
+      throw std::runtime_error(
+          "upper-Hessenberg Givens least-squares solve produced a non-finite "
+          "solution.");
+    }
+  }
+  return x;
+}
+
 template <typename I>
 std::vector<float> host_csr_spmv(const float *data, const I *indices,
                                  const I *indptr, const std::vector<float> &x,

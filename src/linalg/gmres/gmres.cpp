@@ -97,6 +97,10 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
     const int used = static_cast<int>(actual_k_mx.item<int32_t>());
     const float *h_ptr = h_mx.data<float>();
     const float *basis_ptr = basis_mx.data<float>();
+    if (used == 0) {
+      status = -1;
+      break;
+    }
 
     // Build (used+1)×used Hessenberg from the (steps+1)×steps output
     std::vector<double> h_used(static_cast<size_t>(used + 1) * used, 0.0);
@@ -108,7 +112,13 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
     }
     std::vector<double> e1(static_cast<size_t>(used + 1), 0.0);
     e1[0] = beta;
-    auto y = least_squares_normal_equations(h_used, e1, used + 1, used);
+    std::vector<double> y;
+    try {
+      y = least_squares_upper_hessenberg_givens_qr(h_used, e1, used + 1, used);
+    } catch (const std::exception &) {
+      status = -1;
+      break;
+    }
 
     // x += V[:,0:used] * y  (basis has shape (n_rows, steps+1))
     for (int row = 0; row < n_rows; ++row) {
@@ -120,8 +130,17 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
       x[static_cast<size_t>(row)] += static_cast<float>(update);
     }
     iterations += used;
-    if (used == 0) {
-      status = -1;
+    if (iterations >= maxiter) {
+      auto ax = host_csr_spmv(data_ptr, indices_ptr, indptr_ptr, x, n_rows);
+      std::vector<float> r(static_cast<size_t>(n_rows));
+      for (int i = 0; i < n_rows; ++i) {
+        r[static_cast<size_t>(i)] =
+            rhs[static_cast<size_t>(i)] - ax[static_cast<size_t>(i)];
+      }
+      residual_norm = norm_float(r);
+      if (residual_norm <= tolerance) {
+        status = 0;
+      }
       break;
     }
   }

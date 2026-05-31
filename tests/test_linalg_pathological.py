@@ -107,6 +107,10 @@ def _assert_solution_residual(dense, x, b, *, rtol=1e-4, atol=1e-4):
     assert np.linalg.norm(residual) <= atol + rtol * scale
 
 
+def _relative_residual(dense, x, b):
+    return np.linalg.norm(dense @ x - b) / max(np.linalg.norm(b), 1.0)
+
+
 def test_iterative_solvers_canonicalize_duplicate_unsorted_csr(mx, to_numpy):
     _require_native()
     csr, dense = _noncanonical_spd(mx)
@@ -325,11 +329,150 @@ def test_near_singular_diagonal_direct_solver_residual_is_small(mx, to_numpy):
     )
 
 
+def test_gmres_reports_success_when_final_restart_reaches_true_tolerance(mx, to_numpy):
+    _require_native()
+    dense = np.array(
+        [
+            [4.0, -1.0, 0.25],
+            [0.5, 3.5, -0.75],
+            [0.0, 0.4, 2.75],
+        ],
+        dtype=np.float32,
+    )
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([1.0, -2.0, 0.5], dtype=np.float32)
+
+    x, info = linalg.gmres(
+        csr,
+        mx.array(b_np),
+        rtol=1e-6,
+        atol=1e-7,
+        restart=3,
+        maxiter=3,
+    )
+
+    assert info == 0
+    expected = np.linalg.solve(dense.astype(np.float64), b_np.astype(np.float64))
+    np.testing.assert_allclose(to_numpy(x), expected, rtol=5e-5, atol=5e-5)
+    assert _relative_residual(dense, to_numpy(x), b_np) <= 2e-6
+
+
+def test_gmres_nonsymmetric_diagonal_dominant_matches_scipy_and_numpy(mx, to_numpy):
+    _require_native()
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    scipy_linalg = pytest.importorskip("scipy.sparse.linalg")
+    dense = np.array(
+        [
+            [5.0, -1.0, 0.5, 0.0, 0.0],
+            [0.2, 4.5, -0.7, 0.4, 0.0],
+            [0.0, -0.3, 5.2, 1.1, 0.2],
+            [0.0, 0.6, -0.2, 4.8, -1.0],
+            [0.1, 0.0, 0.5, -0.4, 3.9],
+        ],
+        dtype=np.float32,
+    )
+    scipy_A = scipy_sparse.csr_array(dense)
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([1.0, -2.0, 0.5, 3.0, -1.5], dtype=np.float32)
+
+    x_mlx, info_mlx = linalg.gmres(
+        csr,
+        mx.array(b_np),
+        rtol=1e-6,
+        atol=1e-7,
+        restart=4,
+        maxiter=40,
+    )
+    x_scipy, info_scipy = scipy_linalg.gmres(
+        scipy_A,
+        b_np,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=4,
+        maxiter=40,
+    )
+
+    assert info_mlx == 0
+    assert info_scipy == 0
+    expected = np.linalg.solve(dense.astype(np.float64), b_np.astype(np.float64))
+    np.testing.assert_allclose(to_numpy(x_mlx), expected, rtol=5e-5, atol=5e-5)
+    np.testing.assert_allclose(to_numpy(x_mlx), x_scipy, rtol=5e-5, atol=5e-5)
+    assert _relative_residual(dense, to_numpy(x_mlx), b_np) <= 2e-6
+
+
+def test_gmres_convection_diffusion_like_system_matches_scipy(mx, to_numpy):
+    _require_native()
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    scipy_linalg = pytest.importorskip("scipy.sparse.linalg")
+    n = 16
+    diffusion = np.float32(0.35)
+    convection = np.float32(1.15)
+    diagonal = (2.0 * diffusion + convection + 1.0) * np.ones(n, dtype=np.float32)
+    lower = -(diffusion + convection) * np.ones(n - 1, dtype=np.float32)
+    upper = -diffusion * np.ones(n - 1, dtype=np.float32)
+    scipy_A = scipy_sparse.diags(
+        [lower, diagonal, upper],
+        offsets=[-1, 0, 1],
+        format="csr",
+        dtype=np.float32,
+    )
+    csr = ms.from_scipy(scipy_A)
+    x_true = np.sin(np.linspace(0.15, 1.35, n, dtype=np.float32)).astype(np.float32)
+    b_np = (scipy_A @ x_true).astype(np.float32)
+
+    x_mlx, info_mlx = linalg.gmres(
+        csr,
+        mx.array(b_np),
+        rtol=1e-6,
+        atol=1e-7,
+        restart=8,
+        maxiter=80,
+    )
+    x_scipy, info_scipy = scipy_linalg.gmres(
+        scipy_A,
+        b_np,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=8,
+        maxiter=80,
+    )
+
+    assert info_mlx == 0
+    assert info_scipy == 0
+    dense = scipy_A.toarray().astype(np.float32)
+    np.testing.assert_allclose(to_numpy(x_mlx), x_scipy, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(to_numpy(x_mlx), x_true, rtol=1e-4, atol=1e-4)
+    assert _relative_residual(dense, to_numpy(x_mlx), b_np) <= 3e-6
+
+
+def test_ill_conditioned_hilbert_like_gmres_residual_remains_bounded(mx, to_numpy):
+    _require_native()
+    n = 5
+    i = np.arange(n, dtype=np.float32)
+    dense = (1.0 / (i[:, None] + i[None, :] + 1.0)).astype(np.float32)
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.linspace(0.25, 1.25, n, dtype=np.float32)
+
+    x_gmres, info = linalg.gmres(
+        csr,
+        mx.array(b_np),
+        rtol=1e-6,
+        atol=1e-7,
+        restart=5,
+        maxiter=64,
+    )
+    residual = _relative_residual(dense, to_numpy(x_gmres), b_np)
+
+    assert info > 0
+    assert np.isfinite(residual)
+    assert residual < 2e-4
+
+
 @pytest.mark.xfail(
     reason=(
-        "GMRES does not converge to the requested tolerance on this "
-        "ill-conditioned Hilbert-like system, although its residual remains "
-        "bounded."
+        "GMRES now uses a stable projected QR solve, but this float32 "
+        "Hilbert-like case still needs stronger Arnoldi/restart robustness "
+        "to meet the strict tolerance, its residual is covered separately."
     ),
     strict=True,
 )
