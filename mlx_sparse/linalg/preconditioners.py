@@ -23,7 +23,7 @@ and MLX scalar array expressions to build immutable setup data.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 import mlx.core as mx
@@ -33,6 +33,7 @@ from mlx_sparse._coo import COOArray
 from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse.linalg.utils.arrays import (
+    ensure_float32_csr,
     ensure_float32_vector,
     ensure_rank1_or_rank2_rhs,
     finite_scalar,
@@ -538,6 +539,193 @@ class ExactFactorPreconditioner:
         return self.solve(x)
 
 
+@dataclass(frozen=True, slots=True)
+class ILU0Preconditioner:
+    """Natural-order no-fill incomplete LU preconditioner.
+
+    ``ILU0Preconditioner`` stores explicit CSR factors ``L`` and ``U`` from a
+    native CPU ILU(0) setup. ``L`` has a unit diagonal and the factors preserve
+    the lower/upper sparsity pattern of the canonical CSR input without
+    fill-reducing ordering or pivoting. Application performs the standard
+    forward and backward triangular solves ``L y = x`` and ``U z = y`` using
+    native CSR triangular-solve kernels.
+
+    Stored fields include the lower/upper CSR factors, explicit diagonal
+    ``shift`` used during setup, validation ``check`` mode, optional
+    triangular-analysis reuse flag, and conservative nonsymmetric metadata.
+    """
+
+    L: CSRArray
+    U: CSRArray
+    shift: float = 0.0
+    check: bool = True
+    reuse_analysis: bool = False
+    kind: str = "ilu0"
+    is_symmetric: bool = False
+    is_positive_definite: bool = False
+    _l_diagonal_positions: mx.array | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
+    _u_diagonal_positions: mx.array | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
+    _l_level_schedule: tuple[mx.array, mx.array] | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
+    _u_level_schedule: tuple[mx.array, mx.array] | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        """Validate factor metadata and optionally cache triangular analysis."""
+
+        shape = square_shape(self.L.shape)
+        if square_shape(self.U.shape) != shape:
+            raise ValueError("ILU0 L and U factors must have matching square shapes.")
+        if self.L.data.dtype != mx.float32 or self.U.data.dtype != mx.float32:
+            raise TypeError("ILU0 factors currently require float32 values.")
+        object.__setattr__(self, "shift", finite_scalar("shift", self.shift))
+        object.__setattr__(self, "check", bool(self.check))
+        object.__setattr__(self, "reuse_analysis", bool(self.reuse_analysis))
+        if self.reuse_analysis:
+            l_diag = _native.csr_triangular_diagonal_positions(
+                self.L.indices, self.L.indptr, shape
+            )
+            u_diag = _native.csr_triangular_diagonal_positions(
+                self.U.indices, self.U.indptr, shape
+            )
+            l_levels = _native.csr_triangular_level_schedule(
+                self.L.indices, self.L.indptr, shape, lower=True
+            )
+            u_levels = _native.csr_triangular_level_schedule(
+                self.U.indices, self.U.indptr, shape, lower=False
+            )
+            object.__setattr__(self, "_l_diagonal_positions", l_diag)
+            object.__setattr__(self, "_u_diagonal_positions", u_diag)
+            object.__setattr__(self, "_l_level_schedule", l_levels)
+            object.__setattr__(self, "_u_level_schedule", u_levels)
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Shape of the preconditioned square operator."""
+
+        return self.L.shape
+
+    @property
+    def dtype(self):
+        """Value dtype used by the stored factors."""
+
+        return mx.float32
+
+    @property
+    def nnz_L(self) -> int:
+        """Stored nonzero count in the unit lower factor."""
+
+        return int(self.L.nnz)
+
+    @property
+    def nnz_U(self) -> int:
+        """Stored nonzero count in the upper factor."""
+
+        return int(self.U.nnz)
+
+    @property
+    def nnz(self) -> int:
+        """Total stored factor entries."""
+
+        return self.nnz_L + self.nnz_U
+
+    @property
+    def setup_device(self) -> str:
+        """Device category used during ILU(0) setup."""
+
+        return "native_cpu"
+
+    @property
+    def apply_device(self) -> str:
+        """Device category used during inverse application."""
+
+        return "native_cpu_or_metal"
+
+    @property
+    def setup_info(self) -> Mapping[str, object]:
+        """Structured metadata describing ILU(0) setup choices."""
+
+        return {
+            "kind": self.kind,
+            "shape": self.shape,
+            "shift": self.shift,
+            "check": self.check,
+            "reuse_analysis": self.reuse_analysis,
+            "ordering": "natural",
+            "fill": 0,
+            "unit_diagonal_L": True,
+            "nnz_L": self.nnz_L,
+            "nnz_U": self.nnz_U,
+            "nnz": self.nnz,
+            "is_symmetric": self.is_symmetric,
+            "is_positive_definite": self.is_positive_definite,
+        }
+
+    def solve(self, x) -> mx.array:
+        """Apply the ILU(0) inverse approximation to a vector or matrix RHS.
+
+        Args:
+            x: Right-hand side with shape ``(n,)`` or ``(n, nrhs)``.
+
+        Returns:
+            Native triangular-solve result ``U^{-1} L^{-1} x`` with the same
+            rank and leading dimension as ``x``.
+        """
+
+        rhs = ensure_rank1_or_rank2_rhs(
+            x, leading_dim=self.shape[0], require_finite=True
+        )
+        if self.reuse_analysis:
+            y = _native.csr_triangular_solve(
+                self.L.data,
+                self.L.indices,
+                self.L.indptr,
+                rhs,
+                self.shape,
+                lower=True,
+                unit_diagonal=True,
+                diagonal_positions=self._l_diagonal_positions,
+                level_schedule=self._l_level_schedule,
+            )
+            return _native.csr_triangular_solve(
+                self.U.data,
+                self.U.indices,
+                self.U.indptr,
+                y,
+                self.shape,
+                lower=False,
+                unit_diagonal=False,
+                diagonal_positions=self._u_diagonal_positions,
+                level_schedule=self._u_level_schedule,
+            )
+        return _native.csr_ilu0_preconditioner_apply(
+            self.L.data,
+            self.L.indices,
+            self.L.indptr,
+            self.U.data,
+            self.U.indices,
+            self.U.indptr,
+            rhs,
+            self.shape,
+        )
+
+    def matvec(self, x) -> mx.array:
+        """Alias for :meth:`solve` for inverse-operator composition."""
+
+        return self.solve(x)
+
+    def __call__(self, x) -> mx.array:
+        """Alias for :meth:`solve`."""
+
+        return self.solve(x)
+
+
 def identity(A_or_shape, *, dtype=None) -> IdentityPreconditioner:
     """Create a no-op preconditioner for a square shape or sparse matrix.
 
@@ -691,6 +879,82 @@ def jacobi(
     )
 
 
+def ilu0(
+    A,
+    *,
+    shift: float = 0.0,
+    check: bool = True,
+    reuse_analysis: bool = False,
+) -> ILU0Preconditioner:
+    """Create a natural-order no-fill ILU(0) preconditioner.
+
+    The setup normalizes ``A`` to canonical CSR, promotes real low-precision
+    values to ``float32``, and runs a native CPU ILU(0) factorization with no
+    fill-reducing ordering and no pivoting. The original sparse matrix is not
+    mutated. ``shift`` is added only to existing diagonal entries before setup;
+    a missing diagonal remains an error.
+
+    Args:
+        A: ``CSRArray``, ``COOArray``, ``CSCArray``, or sparse-backed
+            ``LinearOperator`` describing a square nonsingular matrix.
+        shift: Explicit diagonal shift added before factorization.
+        check: When ``True`` (default), native setup uses a scale-aware
+            near-zero pivot guard. When ``False``, only exact zero and
+            non-finite pivots are rejected during setup.
+        reuse_analysis: When ``True``, cache triangular diagonal-position and
+            level-schedule analysis for repeated explicit ``M(rhs)`` calls.
+            The default is ``False`` because v0.0.4b1 triangular-analysis
+            benchmarks showed this must be workload-measured before enabling.
+
+    Returns:
+        An :class:`ILU0Preconditioner` whose application uses native CSR
+        triangular solves.
+    """
+
+    shift_value = finite_scalar("shift", shift)
+    csr = ensure_float32_csr(
+        canonical_csr(
+            A,
+            context="ILU(0)",
+            dense_guidance="Dense MLX arrays belong in mlx.linalg, not "
+            "mlx_sparse.linalg.preconditioners.",
+            allow_sparse_linear_operator=True,
+        ),
+        context="ILU(0)",
+    )
+    if csr.shape[0] != csr.shape[1]:
+        raise ValueError(f"ilu0 requires a square matrix, got {csr.shape}.")
+    l_data, l_indices, l_indptr, u_data, u_indices, u_indptr = _native.csr_ilu0(
+        csr.data,
+        csr.indices,
+        csr.indptr,
+        csr.shape,
+        shift=shift_value,
+        check=bool(check),
+    )
+    return ILU0Preconditioner(
+        L=CSRArray(
+            data=l_data,
+            indices=l_indices,
+            indptr=l_indptr,
+            shape=csr.shape,
+            sorted_indices=True,
+            has_canonical_format=True,
+        ),
+        U=CSRArray(
+            data=u_data,
+            indices=u_indices,
+            indptr=u_indptr,
+            shape=csr.shape,
+            sorted_indices=True,
+            has_canonical_format=True,
+        ),
+        shift=shift_value,
+        check=bool(check),
+        reuse_analysis=bool(reuse_analysis),
+    )
+
+
 def from_factorized(solver) -> ExactFactorPreconditioner:
     """Wrap an existing sparse factorization as an exact preconditioner.
 
@@ -838,6 +1102,7 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
             DiagonalPreconditioner,
             CallablePreconditioner,
             ExactFactorPreconditioner,
+            ILU0Preconditioner,
         ),
     ):
         if A is not None and M.shape != square_shape(A):
@@ -846,7 +1111,8 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
     if isinstance(M, (CSRArray, COOArray, CSCArray)):
         raise TypeError(
             "sparse matrices are not inverse-apply preconditioners; use "
-            "preconditioners.jacobi(A) or preconditioners.diagonal(...)."
+            "preconditioners.jacobi(A), preconditioners.ilu0(A), or "
+            "preconditioners.diagonal(...)."
         )
     from mlx_sparse.linalg._factorizations import (
         FactorizedSolve,
@@ -885,6 +1151,7 @@ __all__ = [
     "DiagonalPreconditioner",
     "CallablePreconditioner",
     "ExactFactorPreconditioner",
+    "ILU0Preconditioner",
     "IdentityPreconditioner",
     "JacobiPreconditioner",
     "Preconditioner",
@@ -893,5 +1160,6 @@ __all__ = [
     "exact",
     "from_factorized",
     "identity",
+    "ilu0",
     "jacobi",
 ]

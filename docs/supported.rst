@@ -264,7 +264,8 @@ For a solver-centric view of CPU, Metal GPU, and Accelerate coverage, see
      - Done
      - CPU + GPU
      - Each restart's Arnoldi step dispatches the ``csr_arnoldi`` Metal
-       kernel, convergence bookkeeping and the small least-squares solve
+       kernel. Diagonal/Jacobi and ILU(0) preconditioned native paths are
+       available; convergence bookkeeping and the small least-squares solve
        run on CPU.
    * - ``linalg.minres``
      - Done
@@ -298,6 +299,12 @@ For a solver-centric view of CPU, Metal GPU, and Accelerate coverage, see
      - LU factorisation (partial pivoting) runs on CPU. Triangular
        forward/back-substitution and permutation dispatch to Metal GPU via
        ``csr_triangular_solve`` and ``csr_permute_vector`` kernels.
+   * - ``preconditioners.ilu0``
+     - Done
+     - CPU + GPU
+     - Natural-order ILU(0) setup runs on CPU and preserves the canonical CSR
+       sparsity pattern. Application uses native CSR triangular solves for
+       rank-1 or rank-2 right-hand sides on CPU or Metal.
    * - ``linalg.factorized`` / ``linalg.spsolve``
      - Optional
      - CPU only
@@ -335,11 +342,12 @@ is:
   ``mx.eval()`` synchronisation separates the two phases, at very small
   ``n`` (≲ 1 000) the synchronisation overhead can exceed the GPU savings.
 
-* **Cholesky / LU factorisation**: row-by-row elimination with fill-in is
-  inherently sequential and runs on CPU.  The resulting triangular **solve**
-  (``SparseCholesky.solve``, ``SparseLU.solve``, ``spsolve``) dispatches
-  the ``csr_triangular_solve`` Metal kernel and the ``csr_permute_vector``
-  Metal kernel for the LU row-permutation step.
+* **Cholesky / LU / ILU(0) factorisation**: row-by-row elimination with fill-in
+  or no-fill incomplete updates runs on CPU.  The resulting triangular
+  **solve** (``SparseCholesky.solve``, ``SparseLU.solve``, ``spsolve``, and
+  ``preconditioners.ilu0`` application) dispatches the ``csr_triangular_solve``
+  Metal kernel and the ``csr_permute_vector`` Metal kernel for the LU
+  row-permutation step where a permutation is present.
 
 * **svds**: uses a dedicated normal-operator Lanczos step for
   ``A.T @ (A @ x)``.  The implementation does not materialize ``A.T @ A`` and

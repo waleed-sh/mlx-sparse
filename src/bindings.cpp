@@ -31,6 +31,7 @@
 #include "preconditioners/diagonal/diagonal.h"
 #include "preconditioners/exact/exact.h"
 #include "preconditioners/gmres/gmres.h"
+#include "preconditioners/ilu0/ilu0.h"
 #include "preconditioners/minres/minres.h"
 #include "preconditioners/pcg/pcg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
@@ -1049,6 +1050,36 @@ NB_MODULE(_ext, m) {
       "RHS.");
 
   m.def(
+      "csr_ilu0",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols,
+         float shift, bool check) {
+        return mlx_sparse::csr_ilu0(data, indices, indptr, n_rows, n_cols,
+                                    shift, check);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "shift"_a,
+      "check"_a,
+      "Compute a natural-order no-fill ILU(0) factorization for float32 CSR.");
+
+  m.def(
+      "csr_ilu0_preconditioner_apply",
+      [](const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &u_data,
+         const mlx_sparse::mx::array &u_indices,
+         const mlx_sparse::mx::array &u_indptr,
+         const mlx_sparse::mx::array &rhs, int n_rows, int n_cols) {
+        return mlx_sparse::csr_ilu0_preconditioner_apply(
+            l_data, l_indices, l_indptr, u_data, u_indices, u_indptr, rhs,
+            n_rows, n_cols);
+      },
+      "l_data"_a, "l_indices"_a, "l_indptr"_a, "u_data"_a, "u_indices"_a,
+      "u_indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Apply a native ILU(0) preconditioner to a vector or matrix RHS.");
+
+  m.def(
       "csr_lanczos",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -1113,6 +1144,28 @@ NB_MODULE(_ext, m) {
       "l_indices"_a, "l_indptr"_a, "u_data"_a, "u_indices"_a, "u_indptr"_a,
       "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
       "Solve a float32 CSR system with restarted native exact-LU "
+      "left-preconditioned GMRES.");
+
+  m.def(
+      "csr_gmres_ilu0",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &u_data,
+         const mlx_sparse::mx::array &u_indices,
+         const mlx_sparse::mx::array &u_indptr, int n_rows, int n_cols,
+         float rtol, float atol, int restart, int maxiter) {
+        return mlx_sparse::csr_gmres_ilu0(
+            data, indices, indptr, b, x0, l_data, l_indices, l_indptr, u_data,
+            u_indices, u_indptr, n_rows, n_cols, rtol, atol, restart, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "l_data"_a,
+      "l_indices"_a, "l_indptr"_a, "u_data"_a, "u_indices"_a, "u_indptr"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "restart"_a, "maxiter"_a,
+      "Solve a float32 CSR system with restarted native ILU(0) "
       "left-preconditioned GMRES.");
 
   m.def(

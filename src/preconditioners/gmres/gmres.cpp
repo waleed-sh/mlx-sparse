@@ -32,6 +32,7 @@
 
 #include "linalg/common/common.h"
 #include "preconditioners/exact/exact.h"
+#include "preconditioners/ilu0/ilu0.h"
 #include "sparse/csr_matvec/csr_matvec.h"
 
 #if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
@@ -817,6 +818,63 @@ csr_gmres_exact_lu(const mx::array &data, const mx::array &indices,
         perm_contig, l_data_contig, l_indices_contig, l_indptr_contig,
         u_data_contig, u_indices_contig, u_indptr_contig, rhs, n_rows, n_cols,
         stream);
+  };
+  return csr_gmres_native_left_preconditioned_impl(
+      data_contig, indices_contig, indptr_contig, b_contig, x0_contig, n_rows,
+      rtol, atol, restart, maxiter, stream, apply);
+}
+
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_gmres_ilu0(const mx::array &data, const mx::array &indices,
+               const mx::array &indptr, const mx::array &b, const mx::array &x0,
+               const mx::array &l_data, const mx::array &l_indices,
+               const mx::array &l_indptr, const mx::array &u_data,
+               const mx::array &u_indices, const mx::array &u_indptr,
+               int n_rows, int n_cols, float rtol, float atol, int restart,
+               int maxiter, mx::StreamOrDevice s) {
+  if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
+    throw std::invalid_argument(
+        "csr_gmres_ilu0 requires a non-empty square matrix.");
+  }
+  if (restart <= 0 || maxiter < 0) {
+    throw std::invalid_argument(
+        "csr_gmres_ilu0 requires restart > 0 and maxiter >= 0.");
+  }
+  require_rank(data, 1, "csr_gmres_ilu0 data");
+  require_rank(indices, 1, "csr_gmres_ilu0 indices");
+  require_rank(indptr, 1, "csr_gmres_ilu0 indptr");
+  require_rank(b, 1, "csr_gmres_ilu0 b");
+  require_rank(x0, 1, "csr_gmres_ilu0 x0");
+  require_linalg_float32(data, "csr_gmres_ilu0 data");
+  require_linalg_float32(b, "csr_gmres_ilu0 b");
+  require_linalg_float32(x0, "csr_gmres_ilu0 x0");
+  require_same_index_dtype(indices, indptr, "csr_gmres_ilu0 indices",
+                           "csr_gmres_ilu0 indptr");
+  require_size(indptr, n_rows + 1, "csr_gmres_ilu0 indptr");
+  require_size(b, n_rows, "csr_gmres_ilu0 b");
+  require_size(x0, n_cols, "csr_gmres_ilu0 x0");
+  if (indices.size() != data.size()) {
+    throw std::invalid_argument(
+        "csr_gmres_ilu0 data and indices must have equal length.");
+  }
+
+  auto stream = mx::to_stream(s);
+  auto data_contig = mx::contiguous(data, false, stream);
+  auto indices_contig = mx::contiguous(indices, false, stream);
+  auto indptr_contig = mx::contiguous(indptr, false, stream);
+  auto b_contig = mx::contiguous(b, false, stream);
+  auto x0_contig = mx::contiguous(x0, false, stream);
+  auto l_data_contig = mx::contiguous(l_data, false, stream);
+  auto l_indices_contig = mx::contiguous(l_indices, false, stream);
+  auto l_indptr_contig = mx::contiguous(l_indptr, false, stream);
+  auto u_data_contig = mx::contiguous(u_data, false, stream);
+  auto u_indices_contig = mx::contiguous(u_indices, false, stream);
+  auto u_indptr_contig = mx::contiguous(u_indptr, false, stream);
+
+  auto apply = [&](const mx::array &rhs) {
+    return csr_ilu0_preconditioner_apply(
+        l_data_contig, l_indices_contig, l_indptr_contig, u_data_contig,
+        u_indices_contig, u_indptr_contig, rhs, n_rows, n_cols, stream);
   };
   return csr_gmres_native_left_preconditioned_impl(
       data_contig, indices_contig, indptr_contig, b_contig, x0_contig, n_rows,

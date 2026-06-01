@@ -209,11 +209,11 @@ def gmres(
         M: Optional inverse-apply preconditioner.  ``None`` uses the existing
             native unpreconditioned GMRES path. ``preconditioners.identity``
             is treated equivalently. ``preconditioners.diagonal`` and
-            ``preconditioners.jacobi`` dispatch to native left-preconditioned
-            GMRES. Custom callables and inverse-apply objects use a host
-            fallback loop. All preconditioned paths build Krylov vectors for
-            ``M^{-1} A`` while convergence is tested against the true residual
-            ``b - A @ x``.
+            ``preconditioners.jacobi`` and ``preconditioners.ilu0`` dispatch to
+            native left-preconditioned GMRES. Custom callables and
+            inverse-apply objects use a host fallback loop. All preconditioned
+            paths build Krylov vectors for ``M^{-1} A`` while convergence is
+            tested against the true residual ``b - A @ x``.
         callback: Not supported.  Pass ``None`` (the default).
         callback_type: Accepted for API compatibility but ignored.
 
@@ -323,6 +323,26 @@ def gmres(
                 "gmres exact-factor preconditioners require a native LU, "
                 "native Cholesky, or guarded Accelerate factorization."
             )
+        if isinstance(pc, preconditioners.ILU0Preconditioner):
+            x, info, _, _ = _native.csr_gmres_ilu0(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.L.data,
+                pc.L.indices,
+                pc.L.indptr,
+                pc.U.data,
+                pc.U.indices,
+                pc.U.indptr,
+                csr.shape,
+                rtol=float(rtol),
+                atol=float(atol),
+                restart=restart_value,
+                maxiter=maxiter_value,
+            )
+            return x, _info(info)
         if not isinstance(pc, preconditioners.IdentityPreconditioner):
             x, info, _, _ = _left_pgmres_host(
                 csr,
