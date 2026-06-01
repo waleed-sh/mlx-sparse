@@ -54,17 +54,18 @@ Solver support matrix
      - Notes
    * - ``linalg.cg``
      - Iterative solve for square symmetric positive-definite systems.
-     - Full CPU + GPU
+     - Partial
      - No
      - The unpreconditioned and Jacobi-preconditioned CG iterations run in
-       native kernels. On GPU, each path uses a Metal solver kernel.
+       native CPU/Metal kernels. IC(0)-preconditioned CG is a native CPU-hosted
+       loop because the preconditioner apply is a pair of triangular solves.
    * - ``linalg.gmres``
      - Iterative solve for square general systems.
      - Partial
      - No
      - Unpreconditioned, diagonal/Jacobi-preconditioned,
        ILU(0)-preconditioned, and exact-factor preconditioned entries are
-       native. Arnoldi work can run on GPU when selected, restart bookkeeping,
+       native. Arnoldi work can run on GPU when selected; restart bookkeeping,
        true-residual checks, and the small least-squares solve run on CPU.
        Custom callable preconditioners use a documented host fallback.
    * - ``linalg.minres``
@@ -217,12 +218,15 @@ Choosing a solver
 Preconditioners
 ---------------
 
-``linalg.cg`` accepts native-backed ``identity``, ``diagonal``, and ``jacobi``
+``linalg.cg`` accepts native-backed ``identity``, ``diagonal``, ``jacobi``, and
+``ichol0``
 preconditioners from ``mlx_sparse.linalg.preconditioners``. ``identity`` uses
 the existing unpreconditioned CG path. ``diagonal`` and ``jacobi`` dispatch to
 native Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX
 device and still test convergence against the true residual
-``||b - A @ x||``.
+``||b - A @ x||``. ``ichol0`` dispatches to a native C++ IC(0)-preconditioned
+CG loop; setup runs on CPU and standalone preconditioner application uses
+native CSR triangular solves on CPU or Metal.
 
 ``linalg.gmres`` accepts ``identity``, ``diagonal``/``jacobi``, ``ilu0``,
 exact-factor preconditioners, and explicit inverse-apply callables or objects.
@@ -230,7 +234,7 @@ The diagonal/Jacobi, ILU(0), and exact-factor paths build Krylov vectors for
 ``M^{-1} A`` through native solver entrypoints and test convergence against the
 true residual ``b - A @ x``. ILU(0) setup runs on CPU and applies through native
 CSR triangular solves on CPU or Metal. Explicit native LU/Cholesky factors apply
-through native permutation/triangular-solve bindings, guarded Accelerate
+through native permutation/triangular-solve bindings; guarded Accelerate
 factorized objects use Apple's CPU sparse solver when that support is built in.
 Custom callable/object preconditioners still use a slower host fallback because
 arbitrary Python cannot be called from native solver kernels.

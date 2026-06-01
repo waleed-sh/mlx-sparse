@@ -752,6 +752,47 @@ def csr_pcg_jacobi(
     )
 
 
+def csr_pcg_ic0(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    lt_data: mx.array,
+    lt_indices: mx.array,
+    lt_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_pcg_ic0 requires the native mlx_sparse extension.")
+    return ext.csr_pcg_ic0(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        l_data,
+        l_indices,
+        l_indptr,
+        lt_data,
+        lt_indices,
+        lt_indptr,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
 def diagonal_preconditioner_apply(inv_diag: mx.array, rhs: mx.array):
     ext = extension()
     if ext is None:
@@ -844,6 +885,29 @@ def csr_ilu0(
     )
 
 
+def csr_ic0(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    shift: float,
+    check: bool,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_ic0 requires the native mlx_sparse extension.")
+    return ext.csr_ic0(
+        data,
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        float(shift),
+        bool(check),
+    )
+
+
 def csr_ilu0_preconditioner_apply(
     l_data: mx.array,
     l_indices: mx.array,
@@ -866,6 +930,34 @@ def csr_ilu0_preconditioner_apply(
         u_data,
         u_indices,
         u_indptr,
+        rhs,
+        shape[0],
+        shape[1],
+    )
+
+
+def csr_ic0_preconditioner_apply(
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    lt_data: mx.array,
+    lt_indices: mx.array,
+    lt_indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_ic0_preconditioner_apply requires the native mlx_sparse extension."
+        )
+    return ext.csr_ic0_preconditioner_apply(
+        l_data,
+        l_indices,
+        l_indptr,
+        lt_data,
+        lt_indices,
+        lt_indptr,
         rhs,
         shape[0],
         shape[1],
