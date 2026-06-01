@@ -31,13 +31,13 @@ indefinite systems and supports the shifted system ``(A - shift * I) x = b``.
 All three return ``(x, info)`` where ``info == 0`` means convergence.
 
 ``cg`` accepts native-backed identity, diagonal, and Jacobi preconditioners
-through ``M``. ``gmres`` accepts identity, diagonal/Jacobi, exact-factor
-wrappers, and explicit inverse-apply callables or objects, diagonal/Jacobi and
-exact-factor GMRES use native left-preconditioned solver entrypoints and
-true-residual convergence checks. ``minres`` accepts only identity and
-symmetric positive-definite diagonal/Jacobi preconditioners. See
-:doc:`preconditioners` for the current support matrix and CPU/Metal/Accelerate
-boundaries.
+through ``M``. ``gmres`` accepts identity, diagonal/Jacobi, ILU(0),
+exact-factor wrappers, and explicit inverse-apply callables or objects,
+diagonal/Jacobi, ILU(0), and exact-factor GMRES use native left-preconditioned
+solver entrypoints and true-residual convergence checks. ``minres`` accepts
+only identity and symmetric positive-definite diagonal/Jacobi preconditioners.
+See :doc:`preconditioners` for the current support matrix and
+CPU/Metal/Accelerate boundaries.
 
 Sparse direct factorizations
 ----------------------------

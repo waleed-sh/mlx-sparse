@@ -195,6 +195,12 @@ def test_native_index_dtype_bits_rejects_unsupported_dtype(mx):
             "csr_gmres",
         ),
         (
+            "csr_gmres_ilu0",
+            "solver_ilu0",
+            {"rtol": 1e-5, "atol": 0.0, "restart": 2, "maxiter": 4},
+            "csr_gmres_ilu0",
+        ),
+        (
             "csr_minres",
             "solver",
             {"rtol": 1e-5, "atol": 0.0, "maxiter": 4, "shift": 0.0},
@@ -219,6 +225,13 @@ def test_native_index_dtype_bits_rejects_unsupported_dtype(mx):
         ),
         ("csr_cholesky", "factorization", {}, "csr_cholesky"),
         ("csr_lu", "factorization", {}, "csr_lu"),
+        ("csr_ilu0", "ilu0_setup", {"shift": 0.0, "check": True}, "csr_ilu0"),
+        (
+            "csr_ilu0_preconditioner_apply",
+            "ilu0_apply",
+            {},
+            "csr_ilu0_preconditioner_apply",
+        ),
         (
             "csr_triangular_solve",
             "triangular",
@@ -262,6 +275,21 @@ def test_native_extension_required_error_paths(
         call_args = (data, indices, indptr, vector, vector, (1, 1))
     elif args == "solver_jacobi":
         call_args = (data, indices, indptr, vector, vector, vector, (1, 1))
+    elif args == "solver_ilu0":
+        call_args = (
+            data,
+            indices,
+            indptr,
+            vector,
+            vector,
+            data,
+            indices,
+            indptr,
+            data,
+            indices,
+            indptr,
+            (1, 1),
+        )
     elif args == "lanczos":
         call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "spectral":
@@ -270,6 +298,10 @@ def test_native_extension_required_error_paths(
         call_args = (data, indices, indptr, (1, 1))
     elif args == "factorization":
         call_args = (data, indices, indptr, (1, 1))
+    elif args == "ilu0_setup":
+        call_args = (data, indices, indptr, (1, 1))
+    elif args == "ilu0_apply":
+        call_args = (data, indices, indptr, data, indices, indptr, vector, (1, 1))
     elif args == "triangular":
         call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "triangular_analysis":

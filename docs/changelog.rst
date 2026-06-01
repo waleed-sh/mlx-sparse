@@ -46,6 +46,13 @@ New Features
   solves ``(A - s I) x = b``, and ``minres(..., M=jacobi(A, check=True))``
   accepts only symmetric positive-definite diagonal preconditioners by default.
 
+* Added native ILU(0) preconditioners through
+  ``preconditioners.ilu0(A, shift=0.0, check=True, reuse_analysis=False)``.
+  Setup is natural-order, no-fill, CPU-native C++ over canonical CSR input;
+  application reuses native CSR triangular solves for rank-1/rank-2 right-hand
+  sides on CPU or Metal. ``gmres(..., M=ilu0(A))`` routes through a native
+  left-preconditioned GMRES entrypoint.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -80,6 +87,15 @@ Improvements
   setup checks, finite RHS checks for standalone inverse application,
   conservative positive-definite metadata, and an opt-in ``check=True`` path
   for positive shifted Jacobi diagonals.
+
+* Hardened ILU(0) setup with explicit failures for rectangular systems, missing
+  diagonal structure, non-finite input or shift values, unsupported dtypes, and
+  zero or near-zero pivots. Diagonal shifts are explicit and are applied only to
+  existing diagonal entries.
+
+* Kept ILU(0) triangular analysis caching opt-in through ``reuse_analysis``
+  after focused CPU/GPU apply benchmarks showed mixed benefits across RHS rank
+  and device.
 
 * Refactored shared sparse linalg helpers into the
   :mod:`mlx_sparse.linalg.utils` subpackage, separating array/dtype handling,
@@ -118,6 +134,12 @@ Tests
   preconditioning, near-singular diagonal preconditioning, and strict rejection
   of non-SPD or non-native MINRES preconditioners.
 
+* Added ILU(0) tests against an internal natural-order ILU(0) reference,
+  dense NumPy triangular-solve results, SciPy ``spilu`` quality comparisons,
+  native rank-1/rank-2 apply paths on CPU and GPU-capable devices, explicit
+  failure modes, input immutability, and GMRES iteration reduction on
+  nonsymmetric diagonal-dominant and convection-diffusion-like systems.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -131,6 +153,21 @@ Benchmarks
   unchanged unpreconditioned GMRES utility benchmark and a focused native
   Jacobi-GMRES timing.
 
+* Recorded the pre-change MINRES utility benchmark under
+  ``benchmarks/reports/v0.0.5b0/minres_recurrence_before`` before replacing the
+  normal-equation projection path.
+
+* Recorded the post-change MINRES utility benchmark under
+  ``benchmarks/reports/v0.0.5b0/minres_recurrence_after``. On the sampled
+  ``n=256`` CPU benchmark, MINRES changed from ``25.9457 ms`` to ``0.0373 ms``
+  while preserving convergence.
+
+* Added ``benchmarks/bench_ilu0_preconditioner.py`` and recorded ILU(0)
+  before/after reports under ``benchmarks/reports/v0.0.5b0/ilu0_*``. The report
+  includes setup time, rank-1/rank-2 apply time, analyzed-apply timing, GMRES
+  iteration counts, true residuals, fill ratio, CPU/GPU device, and SciPy
+  ``spilu`` comparison context.
+
 Documentation
 ~~~~~~~~~~~~~
 
@@ -138,8 +175,8 @@ Documentation
   describe the current native CG and GMRES preconditioner support,
   exact-factor wrappers, callable GMRES host fallback behavior, native
   exact-factor GMRES routing, native shifted/diagonal-preconditioned MINRES,
-  CPU/Metal and Accelerate boundaries, and the remaining incomplete-factor
-  preconditioner gaps.
+  native ILU(0) GMRES routing, CPU/Metal and Accelerate boundaries, and the
+  remaining incomplete-factor preconditioner gaps.
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------

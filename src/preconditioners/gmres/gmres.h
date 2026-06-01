@@ -37,6 +37,15 @@ csr_gmres_exact_lu(const mx::array &data, const mx::array &indices,
                    int n_rows, int n_cols, float rtol, float atol, int restart,
                    int maxiter, mx::StreamOrDevice s = {});
 
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_gmres_ilu0(const mx::array &data, const mx::array &indices,
+               const mx::array &indptr, const mx::array &b, const mx::array &x0,
+               const mx::array &l_data, const mx::array &l_indices,
+               const mx::array &l_indptr, const mx::array &u_data,
+               const mx::array &u_indices, const mx::array &u_indptr,
+               int n_rows, int n_cols, float rtol, float atol, int restart,
+               int maxiter, mx::StreamOrDevice s = {});
+
 std::tuple<mx::array, mx::array, mx::array, mx::array> csr_gmres_exact_cholesky(
     const mx::array &data, const mx::array &indices, const mx::array &indptr,
     const mx::array &b, const mx::array &x0, const mx::array &l_data,

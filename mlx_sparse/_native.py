@@ -821,6 +821,57 @@ def csr_exact_cholesky_preconditioner_apply(
     )
 
 
+def csr_ilu0(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    shift: float,
+    check: bool,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_ilu0 requires the native mlx_sparse extension.")
+    return ext.csr_ilu0(
+        data,
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        float(shift),
+        bool(check),
+    )
+
+
+def csr_ilu0_preconditioner_apply(
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    u_data: mx.array,
+    u_indices: mx.array,
+    u_indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_ilu0_preconditioner_apply requires the native mlx_sparse " "extension."
+        )
+    return ext.csr_ilu0_preconditioner_apply(
+        l_data,
+        l_indices,
+        l_indptr,
+        u_data,
+        u_indices,
+        u_indptr,
+        rhs,
+        shape[0],
+        shape[1],
+    )
+
+
 def csr_lanczos(
     data: mx.array,
     indices: mx.array,
@@ -942,6 +993,49 @@ def csr_gmres_exact_lu(
         b,
         x0,
         perm,
+        l_data,
+        l_indices,
+        l_indptr,
+        u_data,
+        u_indices,
+        u_indptr,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(restart),
+        int(maxiter),
+    )
+
+
+def csr_gmres_ilu0(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    u_data: mx.array,
+    u_indices: mx.array,
+    u_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    restart: int,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_gmres_ilu0 requires the native mlx_sparse extension.")
+    return ext.csr_gmres_ilu0(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
         l_data,
         l_indices,
         l_indptr,
