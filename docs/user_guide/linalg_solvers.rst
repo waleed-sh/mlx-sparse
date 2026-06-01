@@ -56,9 +56,10 @@ Solver support matrix
      - Iterative solve for square symmetric positive-definite systems.
      - Partial
      - No
-     - The unpreconditioned and Jacobi-preconditioned CG iterations run in
-       native CPU/Metal kernels. IC(0)-preconditioned CG is a native CPU-hosted
-       loop because the preconditioner apply is a pair of triangular solves.
+     - The unpreconditioned, Jacobi-preconditioned, and
+       Chebyshev-preconditioned CG iterations run in native CPU/Metal kernels.
+       IC(0)-preconditioned CG is a native CPU-hosted loop because the
+       preconditioner apply is a pair of triangular solves.
    * - ``linalg.gmres``
      - Iterative solve for square general systems.
      - Partial
@@ -218,12 +219,14 @@ Choosing a solver
 Preconditioners
 ---------------
 
-``linalg.cg`` accepts native-backed ``identity``, ``diagonal``, ``jacobi``, and
-``ichol0``
-preconditioners from ``mlx_sparse.linalg.preconditioners``. ``identity`` uses
-the existing unpreconditioned CG path. ``diagonal`` and ``jacobi`` dispatch to
-native Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX
-device and still test convergence against the true residual
+``linalg.cg`` accepts native-backed ``identity``, ``diagonal``, ``jacobi``,
+``ichol0``, and ``chebyshev`` preconditioners from
+``mlx_sparse.linalg.preconditioners``. ``identity`` uses the existing
+unpreconditioned CG path. ``diagonal`` and ``jacobi`` dispatch to native
+Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX device.
+``chebyshev`` dispatches to a native polynomial-preconditioned CG path whose
+preconditioner application uses only sparse matrix-vector products and vector
+updates. These paths still test convergence against the true residual
 ``||b - A @ x||``. ``ichol0`` dispatches to a native C++ IC(0)-preconditioned
 CG loop; setup runs on CPU and standalone preconditioner application uses
 native CSR triangular solves on CPU or Metal.

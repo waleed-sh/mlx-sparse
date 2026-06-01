@@ -77,7 +77,10 @@ def cg(
             ``preconditioners.jacobi`` dispatch to native Jacobi-preconditioned
             CG. ``preconditioners.ichol0`` dispatches to a native CPU
             IC(0)-preconditioned CG loop whose preconditioner application uses
-            the stored incomplete Cholesky factors.
+            the stored incomplete Cholesky factors. ``preconditioners.chebyshev``
+            dispatches to a native Chebyshev-polynomial PCG loop whose
+            preconditioner application uses only sparse matrix-vector products
+            and vector updates.
         callback: Not supported.  Pass ``None`` (the default).
 
     Returns:
@@ -163,10 +166,29 @@ def cg(
                 maxiter=_maxiter(csr, maxiter),
             )
             return x, _info(info)
+        elif isinstance(pc, preconditioners.ChebyshevPreconditioner):
+            x, info, _, _ = _native.csr_pcg_chebyshev(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.A.data,
+                pc.A.indices,
+                pc.A.indptr,
+                csr.shape,
+                degree=pc.degree,
+                lambda_min=pc.lambda_min,
+                lambda_max=pc.lambda_max,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=_maxiter(csr, maxiter),
+            )
+            return x, _info(info)
         else:
             raise TypeError(
-                "cg currently supports only identity, diagonal, Jacobi, and IC(0) "
-                "native-backed preconditioners."
+                "cg currently supports only identity, diagonal, Jacobi, IC(0), "
+                "and Chebyshev native-backed preconditioners."
             )
     x, info, _, _ = _native.csr_cg(
         csr.data,

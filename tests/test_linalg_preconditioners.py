@@ -207,6 +207,30 @@ def _solve_cholesky_dense(L, rhs):
     return x[:, 0].astype(np.float32) if vector_input else x.astype(np.float32)
 
 
+def _reference_chebyshev_apply(A_dense, rhs, *, degree, lambda_min, lambda_max):
+    A = np.asarray(A_dense, dtype=np.float64)
+    rhs_arr = np.asarray(rhs, dtype=np.float64)
+    vector_input = rhs_arr.ndim == 1
+    if vector_input:
+        rhs_arr = rhs_arr[:, None]
+    scale = 2.0 / (float(lambda_max) + float(lambda_min))
+    alpha = 1.0 - scale * float(lambda_min)
+    mu = 1.0 / alpha
+    omega_prod = 2.0 / alpha
+    c_prev = 1.0
+    c_cur = mu
+    x_prev = np.zeros_like(rhs_arr, dtype=np.float64)
+    x_cur = scale * rhs_arr
+    for _ in range(1, int(degree)):
+        residual = rhs_arr - A @ x_cur
+        c_next = 2.0 * mu * c_cur - c_prev
+        omega = omega_prod * c_cur / c_next
+        x_next = (1.0 - omega) * x_prev + omega * x_cur + omega * scale * residual
+        x_prev, x_cur = x_cur, x_next
+        c_prev, c_cur = c_cur, c_next
+    return x_cur[:, 0].astype(np.float32) if vector_input else x_cur.astype(np.float32)
+
+
 def _poisson_2d_scipy(scipy_sparse, grid):
     main = 4.0 * np.ones(grid, dtype=np.float32)
     off = -1.0 * np.ones(grid - 1, dtype=np.float32)
@@ -287,6 +311,7 @@ def test_preconditioner_namespace_is_public():
     assert callable(preconditioners.identity)
     assert callable(preconditioners.ilu0)
     assert callable(preconditioners.ichol0)
+    assert callable(preconditioners.chebyshev)
     assert callable(preconditioners.from_factorized)
     assert callable(preconditioners.exact)
 
@@ -302,6 +327,7 @@ def test_preconditioner_metadata_is_explicit_and_conservative(mx):
     jacobi_checked = preconditioners.jacobi(A, check=True)
     ilu0 = preconditioners.ilu0(A)
     ichol0 = preconditioners.ichol0(A)
+    chebyshev = preconditioners.chebyshev(A, degree=2, estimate=True)
 
     assert identity.shape == A.shape
     assert identity.nnz == A.shape[0]
@@ -350,6 +376,18 @@ def test_preconditioner_metadata_is_explicit_and_conservative(mx):
     assert ichol0.setup_info["ordering"] == "natural"
     assert ichol0.setup_info["fill"] == 0
     assert ichol0.setup_info["factor"] == "lower"
+
+    assert chebyshev.shape == A.shape
+    assert chebyshev.kind == "chebyshev"
+    assert chebyshev.degree == 2
+    assert chebyshev.setup_device == "native_cpu"
+    assert chebyshev.apply_device == "native_cpu_or_metal"
+    assert chebyshev.is_symmetric is True
+    assert chebyshev.is_positive_definite is True
+    assert chebyshev.nnz == A.nnz
+    assert chebyshev.setup_info["lambda_min"] > 0.0
+    assert chebyshev.setup_info["lambda_max"] > chebyshev.setup_info["lambda_min"]
+    assert "spectral_info" in chebyshev.setup_info
 
 
 def test_aspreconditioner_wraps_callable_inverse_apply(mx, to_numpy):
@@ -1174,6 +1212,101 @@ def test_jacobi_csr_coo_csc_gpu_correctness(mx, to_numpy):
     _assert_jacobi_csr_coo_csc_correctness(mx, to_numpy)
 
 
+def _assert_chebyshev_apply_matches_dense_reference(mx, to_numpy, scipy_sparse):
+    dense = np.array(
+        [
+            [5.0, -1.0, 0.0, 0.0],
+            [-1.0, 4.0, -0.5, 0.0],
+            [0.0, -0.5, 3.5, -0.75],
+            [0.0, 0.0, -0.75, 3.0],
+        ],
+        dtype=np.float32,
+    )
+    eigvals = np.linalg.eigvalsh(dense.astype(np.float64))
+    scipy_A = scipy_sparse.csr_array(dense)
+    A = _csr_from_scipy(mx, scipy_A)
+    rhs = mx.array([1.0, -2.0, 0.5, 3.0], dtype=mx.float32)
+    rhs_matrix_np = np.array(
+        [[1.0, 0.5], [-2.0, 1.0], [0.5, -1.5], [3.0, 2.0]], dtype=np.float32
+    )
+    rhs_matrix = mx.array(rhs_matrix_np, dtype=mx.float32)
+
+    M = preconditioners.chebyshev(
+        A,
+        degree=4,
+        lambda_min=float(0.95 * eigvals[0]),
+        lambda_max=float(1.05 * eigvals[-1]),
+        estimate=False,
+    )
+
+    expected_vector = _reference_chebyshev_apply(
+        dense,
+        to_numpy(rhs),
+        degree=M.degree,
+        lambda_min=M.lambda_min,
+        lambda_max=M.lambda_max,
+    )
+    expected_matrix = _reference_chebyshev_apply(
+        dense,
+        rhs_matrix_np,
+        degree=M.degree,
+        lambda_min=M.lambda_min,
+        lambda_max=M.lambda_max,
+    )
+    np.testing.assert_allclose(to_numpy(M(rhs)), expected_vector, rtol=2e-6, atol=2e-6)
+    np.testing.assert_allclose(
+        to_numpy(M(rhs_matrix)), expected_matrix, rtol=2e-6, atol=2e-6
+    )
+
+
+@pytest.mark.cpu_only
+def test_chebyshev_apply_cpu_rank1_rank2_matches_dense_reference(
+    mx, to_numpy, scipy_sparse
+):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    _assert_chebyshev_apply_matches_dense_reference(mx, to_numpy, scipy_sparse)
+
+
+@pytest.mark.gpu
+def test_chebyshev_apply_gpu_rank1_rank2_matches_dense_reference(
+    mx, to_numpy, scipy_sparse
+):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    _assert_chebyshev_apply_matches_dense_reference(mx, to_numpy, scipy_sparse)
+
+
+def test_chebyshev_uses_native_spectral_estimates_for_poisson(mx, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 6)
+    A = _csr_from_scipy(mx, scipy_A)
+
+    M = preconditioners.chebyshev(A, degree=2, estimate=True)
+
+    assert M.lambda_min > 0.0
+    assert M.lambda_max > M.lambda_min
+    assert M.spectral_info["gershgorin_min"] == pytest.approx(0.0)
+    assert M.spectral_info["lambda_min_source"] == "lanczos_0.5"
+    assert M.spectral_info["lambda_max_source"] == "gershgorin"
+    assert M.spectral_info["estimate_steps"] > 0
+
+
+def test_chebyshev_rejects_invalid_or_unsafe_intervals(mx, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 4)
+    A = _csr_from_scipy(mx, scipy_A)
+
+    with pytest.raises(ValueError, match="lower spectral bound"):
+        preconditioners.chebyshev(A, estimate=False)
+    with pytest.raises(ValueError, match="0 < lambda_min < lambda_max"):
+        preconditioners.chebyshev(A, lambda_min=2.0, lambda_max=1.0)
+    with pytest.raises(ValueError, match="degree"):
+        preconditioners.chebyshev(A, degree=0)
+
+
 def test_jacobi_rejects_zero_diagonal_by_default(mx):
     A = ms.csr_array(
         (
@@ -1941,6 +2074,142 @@ def test_native_pcg_reports_true_residual_and_iteration_count(mx, to_numpy):
     assert residual_np == pytest.approx(
         np.linalg.norm(to_numpy(A.todense()) @ x_np - to_numpy(b)), abs=1e-4
     )
+
+
+def test_cg_chebyshev_matches_dense_numpy_on_small_spd(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    dense = np.array(
+        [
+            [5.0, -1.0, 0.0, 0.0],
+            [-1.0, 4.0, -0.5, 0.0],
+            [0.0, -0.5, 3.5, -0.75],
+            [0.0, 0.0, -0.75, 3.0],
+        ],
+        dtype=np.float32,
+    )
+    eigvals = np.linalg.eigvalsh(dense.astype(np.float64))
+    A = _csr_from_scipy(mx, scipy_sparse.csr_array(dense))
+    b_np = np.array([1.0, -2.0, 0.5, 3.0], dtype=np.float32)
+    M = preconditioners.chebyshev(
+        A,
+        degree=4,
+        lambda_min=float(0.95 * eigvals[0]),
+        lambda_max=float(1.05 * eigvals[-1]),
+        estimate=False,
+    )
+
+    x, info = linalg.cg(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=M,
+        rtol=1e-5,
+        atol=1e-7,
+        maxiter=32,
+    )
+
+    x_np = to_numpy(x)
+    assert info == 0
+    np.testing.assert_allclose(
+        x_np,
+        np.linalg.solve(dense.astype(np.float64), b_np.astype(np.float64)),
+        rtol=5e-5,
+        atol=5e-5,
+    )
+    assert _relative_residual(dense, x_np, b_np) <= 5e-5
+
+
+def test_native_pcg_chebyshev_reduces_poisson_iterations_vs_jacobi(
+    mx, to_numpy, scipy_sparse
+):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 8)
+    A = _csr_from_scipy(mx, scipy_A)
+    b = mx.ones((A.shape[0],), dtype=mx.float32)
+    x0 = mx.zeros((A.shape[0],), dtype=mx.float32)
+    jacobi = preconditioners.jacobi(A, check=True)
+    chebyshev = preconditioners.chebyshev(A, degree=2)
+
+    _, jacobi_info, _, jacobi_iterations = _native.csr_pcg_jacobi(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        jacobi.inverse_diagonal,
+        A.shape,
+        rtol=1e-4,
+        atol=1e-7,
+        maxiter=500,
+    )
+    x, cheb_info, residual, cheb_iterations = _native.csr_pcg_chebyshev(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        chebyshev.A.data,
+        chebyshev.A.indices,
+        chebyshev.A.indptr,
+        A.shape,
+        degree=chebyshev.degree,
+        lambda_min=chebyshev.lambda_min,
+        lambda_max=chebyshev.lambda_max,
+        rtol=1e-4,
+        atol=1e-7,
+        maxiter=500,
+    )
+
+    assert int(np.asarray(to_numpy(jacobi_info)).item()) == 0
+    assert int(np.asarray(to_numpy(cheb_info)).item()) == 0
+    assert int(np.asarray(to_numpy(cheb_iterations)).item()) < int(
+        np.asarray(to_numpy(jacobi_iterations)).item()
+    )
+    residual_np = float(np.asarray(to_numpy(residual)).item())
+    assert residual_np == pytest.approx(
+        np.linalg.norm(scipy_A @ to_numpy(x) - np.ones(A.shape[0], dtype=np.float32)),
+        abs=2e-5,
+    )
+    assert residual_np / np.sqrt(A.shape[0]) <= 1.5e-4
+
+
+@pytest.mark.gpu
+def test_native_pcg_chebyshev_gpu_solves_poisson(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 6)
+    A = _csr_from_scipy(mx, scipy_A)
+    b = mx.ones((A.shape[0],), dtype=mx.float32)
+    x0 = mx.zeros((A.shape[0],), dtype=mx.float32)
+    M = preconditioners.chebyshev(A, degree=2)
+
+    x, info, residual, iterations = _native.csr_pcg_chebyshev(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        M.A.data,
+        M.A.indices,
+        M.A.indptr,
+        A.shape,
+        degree=M.degree,
+        lambda_min=M.lambda_min,
+        lambda_max=M.lambda_max,
+        rtol=1e-4,
+        atol=1e-7,
+        maxiter=256,
+    )
+
+    assert int(np.asarray(to_numpy(info)).item()) == 0
+    assert int(np.asarray(to_numpy(iterations)).item()) > 0
+    residual_np = float(np.asarray(to_numpy(residual)).item())
+    assert residual_np == pytest.approx(
+        np.linalg.norm(scipy_A @ to_numpy(x) - np.ones(A.shape[0], dtype=np.float32)),
+        abs=2e-5,
+    )
+    assert residual_np / np.sqrt(A.shape[0]) <= 1.5e-4
 
 
 def test_cg_ichol0_matches_dense_numpy_on_small_spd(mx, to_numpy, scipy_sparse):

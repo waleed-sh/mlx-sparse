@@ -11,9 +11,10 @@ implicitly.
 Python preconditioner objects are API containers and dispatch helpers. Diagonal
 application, Jacobi-preconditioned CG, diagonal/Jacobi-preconditioned GMRES,
 ILU(0)-preconditioned GMRES, IC(0)-preconditioned CG,
-diagonal/Jacobi-preconditioned MINRES, and exact LU/Cholesky preconditioner
-application run through native primitives under ``src/preconditioners``. These
-paths do not execute a Python callback inside native Krylov iterations.
+Chebyshev-preconditioned CG, diagonal/Jacobi-preconditioned MINRES, and exact
+LU/Cholesky preconditioner application run through native primitives under
+``src/preconditioners``. These paths do not execute a Python callback inside
+native Krylov iterations.
 Exact-factor preconditioners wrap existing direct solve objects and reuse typed
 native or guarded Accelerate apply paths.
 
@@ -73,12 +74,18 @@ Current support
        sparsity pattern with no fill. Application uses two native CSR
        triangular solves and can run on CPU or Metal. ``cg(..., M=ichol0(A))``
        dispatches to a native IC(0)-preconditioned CG entrypoint.
+   * - ``chebyshev(A, degree=2)``
+     - GPU-friendly polynomial preconditioner/smoother for SPD systems.
+     - Setup runs in native C++ on CPU to compute Gershgorin bounds and
+       optional Lanczos Ritz estimates. Application and
+       ``cg(..., M=chebyshev(A))`` use native CPU/Metal kernels with only
+       sparse matrix products and vector updates.
 
 ``cg`` currently supports native-backed ``identity``, ``diagonal``,
-``jacobi``, and ``ichol0`` preconditioners. ``gmres`` supports ``identity``,
-``diagonal``/``jacobi``, ``ilu0``, exact-factor preconditioners, and explicit
-inverse-apply callables or objects. For ``diagonal``/``jacobi``, ``ilu0``, and
-exact native or Accelerate factors, GMRES builds the Krylov basis for
+``jacobi``, ``ichol0``, and ``chebyshev`` preconditioners. ``gmres`` supports
+``identity``, ``diagonal``/``jacobi``, ``ilu0``, exact-factor preconditioners,
+and explicit inverse-apply callables or objects. For ``diagonal``/``jacobi``,
+``ilu0``, and exact native or Accelerate factors, GMRES builds the Krylov basis for
 ``M^{-1} A`` and checks convergence against the true residual ``b - A @ x``
 inside native solver entrypoints. Custom callable preconditioners use the
 documented host GMRES fallback for inverse applications.
@@ -102,7 +109,9 @@ phase can run on CPU or Metal depending on the selected MLX device. The native
 triangular dependency chain rather than an elementwise preconditioner. ILU(0)
 and IC(0) do not use Accelerate because Apple's sparse solver APIs do not
 expose incomplete-factor setup or explicit factors compatible with
-``CSRArray``. Exact-factor
+``CSRArray``. Chebyshev setup does not use Accelerate because it is spectral
+interval estimation over CSR data; Chebyshev application is SpMV plus vector
+updates and follows the native CPU or Metal sparse kernels. Exact-factor
 preconditioners preserve the existing Accelerate guards from
 ``linalg.factorized`` and use Accelerate only on Apple builds where it is
 available and helpful, otherwise they reuse the native sparse LU/Cholesky solve
@@ -327,6 +336,44 @@ Example: MINRES with Jacobi
 
    assert info == 0
 
+Chebyshev
+---------
+
+``chebyshev(A, degree=2, lambda_min=None, lambda_max=None, estimate=True)``
+constructs a fixed-degree polynomial inverse approximation for SPD matrices.
+It is useful as a GPU-friendly smoother because each application uses only
+``A @ x`` and vector updates. When explicit spectral bounds are omitted, setup
+uses native Gershgorin bounds and, by default, native Lanczos Ritz estimates to
+obtain a positive interval. If no valid interval can be established, setup
+raises and asks for explicit ``lambda_min``/``lambda_max`` values.
+
+.. code-block:: python
+
+   import mlx.core as mx
+   import numpy as np
+   import scipy.sparse
+   import mlx_sparse as ms
+
+   grid = 16
+   main = 4.0 * np.ones(grid, dtype=np.float32)
+   off = -1.0 * np.ones(grid - 1, dtype=np.float32)
+   T = scipy.sparse.diags([off, main, off], [-1, 0, 1], format="csr")
+   I = scipy.sparse.eye(grid, format="csr", dtype=np.float32)
+   Y = scipy.sparse.diags([off, off], [-1, 1], shape=(grid, grid), format="csr")
+   A = ms.from_scipy((scipy.sparse.kron(I, T) + scipy.sparse.kron(Y, I)).astype(np.float32))
+   b = mx.ones((A.shape[0],), dtype=mx.float32)
+
+   M = ms.linalg.preconditioners.chebyshev(A, degree=2)
+   x, info = ms.linalg.cg(A, b, M=M, rtol=1e-4, maxiter=512)
+
+   assert info == 0
+
+Chebyshev is not an incomplete factorization and does not require triangular
+solves, so it is attractive on Metal for Poisson-like SPD problems. The
+tradeoff is that quality depends on the spectral interval and polynomial
+degree; each preconditioner application costs ``degree`` sparse matrix-vector
+products.
+
 Example: GMRES with an Exact Factor
 -----------------------------------
 
@@ -387,6 +434,9 @@ For the current v0.0.5b0 support:
 * Use ``ichol0`` with ``cg`` for SPD systems when a stronger native
   preconditioner than Jacobi is worth the CPU setup and two triangular solves
   per application.
+* Use ``chebyshev`` with ``cg`` for SPD systems when a GPU-friendly polynomial
+  smoother is preferred over triangular solves. It needs a positive spectral
+  interval and costs ``degree`` sparse matrix-vector products per application.
 * Use ``exact`` or ``from_factorized`` as a diagnostic baseline or when a
   reusable direct factorization already exists.
 * Use custom callables with ``gmres`` only when the convenience of a host

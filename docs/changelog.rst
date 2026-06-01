@@ -53,7 +53,7 @@ New Features
 
 * Added native ILU(0) preconditioners through
   ``preconditioners.ilu0(A, shift=0.0, check=True, reuse_analysis=False)``.
-  Setup is natural-order, no-fill, CPU-native C++ over canonical CSR input;
+  Setup is natural-order, no-fill, CPU-native C++ over canonical CSR input,
   application reuses native CSR triangular solves for rank-1/rank-2 right-hand
   sides on CPU or Metal. ``gmres(..., M=ilu0(A))`` routes through a native
   left-preconditioned GMRES entrypoint
@@ -61,10 +61,17 @@ New Features
 
 * Added native IC(0) preconditioners through
   ``preconditioners.ichol0(A, shift=0.0, check=True)``. Setup is
-  natural-order, no-fill, CPU-native C++ over canonical CSR input; application
+  natural-order, no-fill, CPU-native C++ over canonical CSR input, application
   reuses native CSR triangular solves for rank-1/rank-2 right-hand sides on
   CPU or Metal. ``cg(..., M=ichol0(A))`` routes through a native
   IC(0)-preconditioned CG entrypoint.
+
+* Added native Chebyshev polynomial preconditioners through
+  ``preconditioners.chebyshev(A, degree=2, lambda_min=None,
+  lambda_max=None, estimate=True)``. Setup computes native Gershgorin bounds
+  and optional Lanczos Ritz estimates over canonical CSR input, application and
+  ``cg(..., M=chebyshev(A))`` use native CPU/Metal kernels with only sparse
+  matrix-vector products and vector updates.
 
 Improvements
 ~~~~~~~~~~~~
@@ -124,6 +131,13 @@ Improvements
   non-positive or near-zero pivots. Diagonal shifts are explicit and are
   applied only to existing diagonal entries.
 
+* Added Chebyshev spectral-interval validation with clear failures for missing
+  positive lower/upper bounds, invalid explicit intervals, non-positive
+  degrees, non-finite CSR values, and unsupported dtypes. Gershgorin lower
+  bounds are used when positive, otherwise the default setup uses native
+  Lanczos estimates to obtain a conservative positive lower bound for
+  Poisson-like SPD systems.
+
 * Refactored shared sparse linalg helpers into the
   :mod:`mlx_sparse.linalg.utils` subpackage, separating array/dtype handling,
   sparse input normalization, iterative solver bookkeeping, direct-solver
@@ -180,6 +194,12 @@ Tests
   coverage for 2-D Poisson, anisotropic diffusion, scaled diagonal, and
   shifted near-singular SPD systems.
 
+* Added Chebyshev tests against dense NumPy polynomial-apply references,
+  native CPU and Metal rank-1/rank-2 apply paths, spectral-estimate metadata,
+  explicit invalid-interval failures, public ``cg(..., M=chebyshev(A))``
+  routing, and native Chebyshev-PCG iteration reduction against Jacobi on
+  Poisson-like SPD systems.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -206,6 +226,11 @@ Benchmarks
   rank-1/rank-2 apply, PCG iteration counts, true residuals, fill ratio, and
   CPU/GPU device metadata against Jacobi and unpreconditioned CG baselines.
 
+* Added ``benchmarks/bench_chebyshev_preconditioner.py`` for Chebyshev setup,
+  rank-1/rank-2 apply, PCG iteration counts, true residuals, spectral interval
+  metadata, CPU/GPU device metadata, and comparison against Jacobi and
+  unpreconditioned CG baselines on Poisson-like SPD systems.
+
 Documentation
 ~~~~~~~~~~~~~
 
@@ -213,9 +238,9 @@ Documentation
   describe the current native CG and GMRES preconditioner support,
   exact-factor wrappers, callable GMRES host fallback behavior, native
   exact-factor GMRES routing, native shifted/diagonal-preconditioned MINRES,
-  native ILU(0) GMRES routing, native IC(0) PCG routing, CPU/Metal and
-  Accelerate boundaries, and the remaining incomplete-factor preconditioner
-  gaps
+  native ILU(0) GMRES routing, native IC(0) PCG routing, native Chebyshev PCG
+  routing, CPU/Metal and Accelerate boundaries, and the remaining
+  incomplete-factor preconditioner gaps
   (`PR #27 <https://github.com/waleed-sh/mlx-sparse/pull/27>`_,
   `PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_,
   `PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_,

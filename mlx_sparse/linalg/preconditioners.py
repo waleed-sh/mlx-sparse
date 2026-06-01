@@ -22,6 +22,7 @@ and MLX scalar array expressions to build immutable setup data.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
@@ -863,6 +864,137 @@ class IC0Preconditioner:
         return self.solve(x)
 
 
+@dataclass(frozen=True, slots=True)
+class ChebyshevPreconditioner:
+    """Polynomial inverse preconditioner for SPD sparse matrices.
+
+    ``ChebyshevPreconditioner`` stores a canonical ``float32`` CSR operator and
+    applies a fixed-degree first-kind Chebyshev semi-iteration with zero initial
+    guess. Application uses only sparse matrix-vector/matrix products and
+    vector updates, so it follows the selected native CPU or Metal device path
+    without triangular solves or dense factorization.
+
+    Stored fields include the CSR operator, polynomial ``degree``, validated
+    positive spectral interval ``[lambda_min, lambda_max]``, whether setup used
+    native spectral ``estimate`` data, and detailed ``spectral_info`` metadata.
+    """
+
+    A: CSRArray
+    degree: int = 2
+    lambda_min: float = 0.0
+    lambda_max: float = 0.0
+    estimate: bool = True
+    spectral_info: Mapping[str, object] = field(default_factory=dict)
+    kind: str = "chebyshev"
+    is_symmetric: bool = True
+    is_positive_definite: bool = True
+
+    def __post_init__(self) -> None:
+        """Validate polynomial metadata and CSR storage."""
+
+        shape = square_shape(self.A.shape)
+        if self.A.data.dtype != mx.float32:
+            raise TypeError("Chebyshev preconditioners require float32 CSR values.")
+        degree_value = int(self.degree)
+        if degree_value <= 0:
+            raise ValueError("degree must be positive.")
+        lambda_min_value = finite_scalar("lambda_min", self.lambda_min)
+        lambda_max_value = finite_scalar("lambda_max", self.lambda_max)
+        if lambda_min_value <= 0.0 or lambda_max_value <= lambda_min_value:
+            raise ValueError(
+                "Chebyshev spectral interval must satisfy "
+                "0 < lambda_min < lambda_max."
+            )
+        object.__setattr__(self, "degree", degree_value)
+        object.__setattr__(self, "lambda_min", lambda_min_value)
+        object.__setattr__(self, "lambda_max", lambda_max_value)
+        object.__setattr__(self, "estimate", bool(self.estimate))
+        if shape != self.A.shape:
+            raise ValueError("Chebyshev operator shape must be square.")
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Shape of the preconditioned square operator."""
+
+        return self.A.shape
+
+    @property
+    def dtype(self):
+        """Value dtype used by the stored operator."""
+
+        return mx.float32
+
+    @property
+    def nnz(self) -> int:
+        """Number of sparse operator entries used during polynomial apply."""
+
+        return int(self.A.nnz)
+
+    @property
+    def setup_device(self) -> str:
+        """Device category used during spectral setup."""
+
+        return "native_cpu"
+
+    @property
+    def apply_device(self) -> str:
+        """Device category used during inverse application."""
+
+        return "native_cpu_or_metal"
+
+    @property
+    def setup_info(self) -> Mapping[str, object]:
+        """Structured metadata describing Chebyshev setup choices."""
+
+        return {
+            "kind": self.kind,
+            "shape": self.shape,
+            "degree": self.degree,
+            "lambda_min": self.lambda_min,
+            "lambda_max": self.lambda_max,
+            "estimate": self.estimate,
+            "nnz": self.nnz,
+            "is_symmetric": self.is_symmetric,
+            "is_positive_definite": self.is_positive_definite,
+            "spectral_info": dict(self.spectral_info),
+        }
+
+    def solve(self, x) -> mx.array:
+        """Apply the Chebyshev polynomial inverse to a vector or matrix RHS.
+
+        Args:
+            x: Right-hand side with shape ``(n,)`` or ``(n, nrhs)``.
+
+        Returns:
+            Native Chebyshev semi-iteration result with the same shape as
+            ``x``.
+        """
+
+        rhs = ensure_rank1_or_rank2_rhs(
+            x, leading_dim=self.shape[0], require_finite=True
+        )
+        return _native.csr_chebyshev_preconditioner_apply(
+            self.A.data,
+            self.A.indices,
+            self.A.indptr,
+            rhs,
+            self.shape,
+            degree=self.degree,
+            lambda_min=self.lambda_min,
+            lambda_max=self.lambda_max,
+        )
+
+    def matvec(self, x) -> mx.array:
+        """Alias for :meth:`solve` for inverse-operator composition."""
+
+        return self.solve(x)
+
+    def __call__(self, x) -> mx.array:
+        """Alias for :meth:`solve`."""
+
+        return self.solve(x)
+
+
 def identity(A_or_shape, *, dtype=None) -> IdentityPreconditioner:
     """Create a no-op preconditioner for a square shape or sparse matrix.
 
@@ -1155,6 +1287,146 @@ def ichol0(A, *, shift: float = 0.0, check: bool = True) -> IC0Preconditioner:
     )
 
 
+def chebyshev(
+    A,
+    *,
+    degree: int = 2,
+    lambda_min: float | None = None,
+    lambda_max: float | None = None,
+    estimate: bool = True,
+) -> ChebyshevPreconditioner:
+    """Create a GPU-friendly Chebyshev polynomial preconditioner.
+
+    The setup normalizes ``A`` to canonical CSR, promotes real low-precision
+    values to ``float32``, and computes native Gershgorin spectral bounds plus
+    optional native Lanczos Ritz estimates.  The resulting preconditioner
+    applies a fixed-degree first-kind Chebyshev semi-iteration with zero
+    initial guess, using only sparse matrix products and vector updates.
+
+    Args:
+        A: ``CSRArray``, ``COOArray``, ``CSCArray``, or sparse-backed
+            ``LinearOperator`` describing a real SPD square matrix.
+        degree: Positive polynomial degree. Defaults to ``2``.
+        lambda_min: Optional positive lower spectral bound. If omitted, setup
+            uses a positive Gershgorin lower bound when available, otherwise a
+            conservative Lanczos-derived lower estimate when ``estimate=True``.
+        lambda_max: Optional upper spectral bound. If omitted, setup uses the
+            Gershgorin upper bound when available, with Lanczos metadata
+            recorded for diagnostics.
+        estimate: Whether native Lanczos Ritz estimates should be computed as
+            a fallback/refinement for the spectral interval. Defaults to
+            ``True``.
+
+    Returns:
+        A :class:`ChebyshevPreconditioner` with native CPU/Metal apply support.
+
+    Raises:
+        ValueError: If no valid positive interval can be established.
+    """
+
+    degree_value = int(degree)
+    if degree_value <= 0:
+        raise ValueError("degree must be positive.")
+    csr = ensure_float32_csr(
+        canonical_csr(
+            A,
+            context="Chebyshev",
+            dense_guidance="Dense MLX arrays belong in mlx.linalg, not "
+            "mlx_sparse.linalg.preconditioners.",
+            allow_sparse_linear_operator=True,
+        ),
+        context="Chebyshev",
+    )
+    if csr.shape[0] != csr.shape[1]:
+        raise ValueError(f"chebyshev requires a square matrix, got {csr.shape}.")
+
+    (
+        gershgorin_min,
+        gershgorin_max,
+        ritz_min,
+        ritz_max,
+        diagonal_min,
+        diagonal_max,
+        estimate_steps,
+    ) = _native.csr_chebyshev_spectral_bounds(
+        csr.data,
+        csr.indices,
+        csr.indptr,
+        csr.shape,
+        estimate=bool(estimate),
+        estimate_steps=0,
+    )
+
+    def positive_finite(value: float) -> bool:
+        return math.isfinite(float(value)) and float(value) > 0.0
+
+    if lambda_max is None:
+        if positive_finite(gershgorin_max):
+            lambda_max_value = float(gershgorin_max)
+            lambda_max_source = "gershgorin"
+        elif bool(estimate) and positive_finite(ritz_max):
+            lambda_max_value = 1.1 * float(ritz_max)
+            lambda_max_source = "lanczos_1.1"
+        else:
+            raise ValueError(
+                "could not determine a positive Chebyshev upper spectral "
+                "bound; pass lambda_max explicitly."
+            )
+    else:
+        lambda_max_value = finite_scalar("lambda_max", lambda_max)
+        lambda_max_source = "explicit"
+
+    tiny = max(1.0e-12, 16.0 * 1.1920928955078125e-7)
+    if lambda_min is None:
+        if positive_finite(gershgorin_min):
+            lambda_min_value = float(gershgorin_min)
+            lambda_min_source = "gershgorin"
+        elif bool(estimate) and positive_finite(ritz_min):
+            lambda_min_value = max(
+                tiny, min(0.5 * float(ritz_min), 0.1 * lambda_max_value)
+            )
+            lambda_min_source = "lanczos_0.5"
+        else:
+            raise ValueError(
+                "could not determine a positive Chebyshev lower spectral "
+                "bound; pass lambda_min explicitly or use estimate=True for "
+                "SPD matrices whose Gershgorin lower bound is non-positive."
+            )
+    else:
+        lambda_min_value = finite_scalar("lambda_min", lambda_min)
+        lambda_min_source = "explicit"
+
+    if (
+        not math.isfinite(lambda_min_value)
+        or not math.isfinite(lambda_max_value)
+        or lambda_min_value <= 0.0
+        or lambda_max_value <= lambda_min_value
+    ):
+        raise ValueError(
+            "Chebyshev spectral interval must satisfy 0 < lambda_min < lambda_max."
+        )
+
+    spectral_info = {
+        "gershgorin_min": float(gershgorin_min),
+        "gershgorin_max": float(gershgorin_max),
+        "ritz_min": float(ritz_min),
+        "ritz_max": float(ritz_max),
+        "diagonal_min": float(diagonal_min),
+        "diagonal_max": float(diagonal_max),
+        "estimate_steps": int(estimate_steps),
+        "lambda_min_source": lambda_min_source,
+        "lambda_max_source": lambda_max_source,
+    }
+    return ChebyshevPreconditioner(
+        A=csr,
+        degree=degree_value,
+        lambda_min=lambda_min_value,
+        lambda_max=lambda_max_value,
+        estimate=bool(estimate),
+        spectral_info=spectral_info,
+    )
+
+
 def from_factorized(solver) -> ExactFactorPreconditioner:
     """Wrap an existing sparse factorization as an exact preconditioner.
 
@@ -1301,6 +1573,7 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
             IdentityPreconditioner,
             DiagonalPreconditioner,
             CallablePreconditioner,
+            ChebyshevPreconditioner,
             ExactFactorPreconditioner,
             IC0Preconditioner,
             ILU0Preconditioner,
@@ -1351,6 +1624,7 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
 __all__ = [
     "DiagonalPreconditioner",
     "CallablePreconditioner",
+    "ChebyshevPreconditioner",
     "ExactFactorPreconditioner",
     "IC0Preconditioner",
     "ILU0Preconditioner",
@@ -1358,6 +1632,7 @@ __all__ = [
     "JacobiPreconditioner",
     "Preconditioner",
     "aspreconditioner",
+    "chebyshev",
     "diagonal",
     "exact",
     "from_factorized",

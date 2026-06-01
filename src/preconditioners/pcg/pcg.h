@@ -35,4 +35,11 @@ csr_pcg_ic0(const mx::array &data, const mx::array &indices,
             int n_cols, float rtol, float atol, int maxiter,
             mx::StreamOrDevice s = {});
 
+std::tuple<mx::array, mx::array, mx::array, mx::array> csr_pcg_chebyshev(
+    const mx::array &data, const mx::array &indices, const mx::array &indptr,
+    const mx::array &b, const mx::array &x0, const mx::array &m_data,
+    const mx::array &m_indices, const mx::array &m_indptr, int n_rows,
+    int n_cols, int degree, float lambda_min, float lambda_max, float rtol,
+    float atol, int maxiter, mx::StreamOrDevice s = {});
+
 } // namespace mlx_sparse
