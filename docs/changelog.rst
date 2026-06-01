@@ -53,11 +53,18 @@ New Features
 
 * Added native ILU(0) preconditioners through
   ``preconditioners.ilu0(A, shift=0.0, check=True, reuse_analysis=False)``.
-  Setup is natural-order, no-fill, CPU-native C++ over canonical CSR input,
+  Setup is natural-order, no-fill, CPU-native C++ over canonical CSR input;
   application reuses native CSR triangular solves for rank-1/rank-2 right-hand
   sides on CPU or Metal. ``gmres(..., M=ilu0(A))`` routes through a native
   left-preconditioned GMRES entrypoint
   (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
+
+* Added native IC(0) preconditioners through
+  ``preconditioners.ichol0(A, shift=0.0, check=True)``. Setup is
+  natural-order, no-fill, CPU-native C++ over canonical CSR input; application
+  reuses native CSR triangular solves for rank-1/rank-2 right-hand sides on
+  CPU or Metal. ``cg(..., M=ichol0(A))`` routes through a native
+  IC(0)-preconditioned CG entrypoint.
 
 Improvements
 ~~~~~~~~~~~~
@@ -111,6 +118,12 @@ Improvements
   after focused CPU/GPU apply benchmarks showed mixed benefits across RHS rank
   and device (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
+* Hardened IC(0) setup with explicit failures for rectangular systems, missing
+  diagonal structure, non-symmetric mirrored values when ``check=True``,
+  non-finite input or shift values, unsupported dtypes, negative shifts, and
+  non-positive or near-zero pivots. Diagonal shifts are explicit and are
+  applied only to existing diagonal entries.
+
 * Refactored shared sparse linalg helpers into the
   :mod:`mlx_sparse.linalg.utils` subpackage, separating array/dtype handling,
   sparse input normalization, iterative solver bookkeeping, direct-solver
@@ -161,6 +174,12 @@ Tests
   nonsymmetric diagonal-dominant and convection-diffusion-like systems
   (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
+* Added IC(0) tests against an internal natural-order no-fill reference,
+  dense NumPy triangular-solve results, native rank-1/rank-2 apply paths on CPU
+  and GPU-capable devices, explicit failure modes, input immutability, and PCG
+  coverage for 2-D Poisson, anisotropic diffusion, scaled diagonal, and
+  shifted near-singular SPD systems.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -183,6 +202,10 @@ Benchmarks
   comparison context
   (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
+* Added ``benchmarks/bench_ic0_preconditioner.py`` for IC(0) setup,
+  rank-1/rank-2 apply, PCG iteration counts, true residuals, fill ratio, and
+  CPU/GPU device metadata against Jacobi and unpreconditioned CG baselines.
+
 Documentation
 ~~~~~~~~~~~~~
 
@@ -190,8 +213,9 @@ Documentation
   describe the current native CG and GMRES preconditioner support,
   exact-factor wrappers, callable GMRES host fallback behavior, native
   exact-factor GMRES routing, native shifted/diagonal-preconditioned MINRES,
-  native ILU(0) GMRES routing, CPU/Metal and Accelerate boundaries, and the
-  remaining incomplete-factor preconditioner gaps
+  native ILU(0) GMRES routing, native IC(0) PCG routing, CPU/Metal and
+  Accelerate boundaries, and the remaining incomplete-factor preconditioner
+  gaps
   (`PR #27 <https://github.com/waleed-sh/mlx-sparse/pull/27>`_,
   `PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_,
   `PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_,

@@ -726,6 +726,143 @@ class ILU0Preconditioner:
         return self.solve(x)
 
 
+@dataclass(frozen=True, slots=True)
+class IC0Preconditioner:
+    """Natural-order no-fill incomplete Cholesky preconditioner.
+
+    ``IC0Preconditioner`` stores an explicit lower CSR factor ``L`` produced by
+    native CPU IC(0) setup. The factor uses natural ordering, preserves the
+    symmetric lower sparsity pattern of the canonical CSR input, and introduces
+    no fill. Application performs two native triangular solves,
+    ``L y = x`` followed by ``L.T z = y``.
+
+    Stored fields include the lower factor, explicit non-negative diagonal
+    ``shift`` used during setup, strict positive-pivot ``check`` mode, and SPD
+    metadata suitable for CG and MINRES-style solvers.
+    """
+
+    L: CSRArray
+    shift: float = 0.0
+    check: bool = True
+    kind: str = "ichol0"
+    is_symmetric: bool = True
+    is_positive_definite: bool = True
+    _upper_factor: CSRArray | None = field(
+        init=False, default=None, repr=False, compare=False
+    )
+
+    def __post_init__(self) -> None:
+        """Validate factor metadata and explicit shift policy."""
+
+        square_shape(self.L.shape)
+        if self.L.data.dtype != mx.float32:
+            raise TypeError("IC0 factors currently require float32 values.")
+        shift_value = finite_scalar("shift", self.shift)
+        if shift_value < 0.0:
+            raise ValueError("shift must be non-negative for IC0.")
+        object.__setattr__(self, "shift", shift_value)
+        object.__setattr__(self, "check", bool(self.check))
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Shape of the preconditioned square operator."""
+
+        return self.L.shape
+
+    @property
+    def dtype(self):
+        """Value dtype used by the stored factor."""
+
+        return mx.float32
+
+    @property
+    def nnz_L(self) -> int:
+        """Stored nonzero count in the lower factor."""
+
+        return int(self.L.nnz)
+
+    @property
+    def nnz(self) -> int:
+        """Total stored factor entries."""
+
+        return self.nnz_L
+
+    @property
+    def setup_device(self) -> str:
+        """Device category used during IC(0) setup."""
+
+        return "native_cpu"
+
+    @property
+    def apply_device(self) -> str:
+        """Device category used during inverse application."""
+
+        return "native_cpu_or_metal"
+
+    @property
+    def setup_info(self) -> Mapping[str, object]:
+        """Structured metadata describing IC(0) setup choices."""
+
+        return {
+            "kind": self.kind,
+            "shape": self.shape,
+            "shift": self.shift,
+            "check": self.check,
+            "ordering": "natural",
+            "fill": 0,
+            "factor": "lower",
+            "nnz_L": self.nnz_L,
+            "nnz": self.nnz,
+            "is_symmetric": self.is_symmetric,
+            "is_positive_definite": self.is_positive_definite,
+        }
+
+    def _upper(self) -> CSRArray:
+        """Return and cache ``L.T`` as a CSR upper factor."""
+
+        upper = self._upper_factor
+        if upper is None:
+            upper = self.L.T
+            object.__setattr__(self, "_upper_factor", upper)
+        return upper
+
+    def solve(self, x) -> mx.array:
+        """Apply the IC(0) inverse approximation to a vector or matrix RHS.
+
+        Args:
+            x: Right-hand side with shape ``(n,)`` or ``(n, nrhs)``.
+
+        Returns:
+            Native triangular-solve result ``L.T^{-1} L^{-1} x`` with the same
+            rank and leading dimension as ``x``.
+        """
+
+        rhs = ensure_rank1_or_rank2_rhs(
+            x, leading_dim=self.shape[0], require_finite=True
+        )
+        upper = self._upper()
+        return _native.csr_ic0_preconditioner_apply(
+            self.L.data,
+            self.L.indices,
+            self.L.indptr,
+            upper.data,
+            upper.indices,
+            upper.indptr,
+            rhs,
+            self.shape,
+        )
+
+    def matvec(self, x) -> mx.array:
+        """Alias for :meth:`solve` for inverse-operator composition."""
+
+        return self.solve(x)
+
+    def __call__(self, x) -> mx.array:
+        """Alias for :meth:`solve`."""
+
+        return self.solve(x)
+
+
 def identity(A_or_shape, *, dtype=None) -> IdentityPreconditioner:
     """Create a no-op preconditioner for a square shape or sparse matrix.
 
@@ -955,6 +1092,69 @@ def ilu0(
     )
 
 
+def ichol0(A, *, shift: float = 0.0, check: bool = True) -> IC0Preconditioner:
+    """Create a natural-order no-fill IC(0) preconditioner.
+
+    The setup normalizes ``A`` to canonical CSR, promotes real low-precision
+    values to ``float32``, and runs a native CPU incomplete Cholesky
+    factorization with zero fill and natural ordering. The original sparse
+    matrix is not mutated. ``shift`` is a non-negative scalar added only to
+    existing diagonal entries before setup; a missing diagonal remains an
+    error and no pivot is silently perturbed.
+
+    Args:
+        A: ``CSRArray``, ``COOArray``, ``CSCArray``, or sparse-backed
+            ``LinearOperator`` describing an SPD square matrix.
+        shift: Explicit non-negative diagonal shift added before
+            factorization. Defaults to ``0.0``.
+        check: When ``True`` (default), native setup enforces symmetry for
+            explicitly stored mirrored entries and uses a scale-aware positive
+            pivot guard. When ``False``, non-positive and non-finite pivots
+            are still rejected, but near-zero pivot and symmetry checks are
+            relaxed.
+
+    Returns:
+        An :class:`IC0Preconditioner` whose application uses native CSR
+        triangular solves ``L`` and ``L.T``.
+    """
+
+    shift_value = finite_scalar("shift", shift)
+    if shift_value < 0.0:
+        raise ValueError("shift must be non-negative for IC0.")
+    csr = ensure_float32_csr(
+        canonical_csr(
+            A,
+            context="IC(0)",
+            dense_guidance="Dense MLX arrays belong in mlx.linalg, not "
+            "mlx_sparse.linalg.preconditioners.",
+            allow_sparse_linear_operator=True,
+        ),
+        context="IC(0)",
+    )
+    if csr.shape[0] != csr.shape[1]:
+        raise ValueError(f"ichol0 requires a square matrix, got {csr.shape}.")
+    l_data, l_indices, l_indptr = _native.csr_ic0(
+        csr.data,
+        csr.indices,
+        csr.indptr,
+        csr.shape,
+        shift=shift_value,
+        check=bool(check),
+    )
+    return IC0Preconditioner(
+        L=CSRArray(
+            data=l_data,
+            indices=l_indices,
+            indptr=l_indptr,
+            shape=csr.shape,
+            sorted_indices=True,
+            has_canonical_format=True,
+        ),
+        shift=shift_value,
+        check=bool(check),
+    )
+
+
 def from_factorized(solver) -> ExactFactorPreconditioner:
     """Wrap an existing sparse factorization as an exact preconditioner.
 
@@ -1102,6 +1302,7 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
             DiagonalPreconditioner,
             CallablePreconditioner,
             ExactFactorPreconditioner,
+            IC0Preconditioner,
             ILU0Preconditioner,
         ),
     ):
@@ -1111,8 +1312,8 @@ def aspreconditioner(M, A=None, *, assume_inverse: bool = True) -> Preconditione
     if isinstance(M, (CSRArray, COOArray, CSCArray)):
         raise TypeError(
             "sparse matrices are not inverse-apply preconditioners; use "
-            "preconditioners.jacobi(A), preconditioners.ilu0(A), or "
-            "preconditioners.diagonal(...)."
+            "preconditioners.jacobi(A), preconditioners.ilu0(A), "
+            "preconditioners.ichol0(A), or preconditioners.diagonal(...)."
         )
     from mlx_sparse.linalg._factorizations import (
         FactorizedSolve,
@@ -1151,6 +1352,7 @@ __all__ = [
     "DiagonalPreconditioner",
     "CallablePreconditioner",
     "ExactFactorPreconditioner",
+    "IC0Preconditioner",
     "ILU0Preconditioner",
     "IdentityPreconditioner",
     "JacobiPreconditioner",
@@ -1160,6 +1362,7 @@ __all__ = [
     "exact",
     "from_factorized",
     "identity",
+    "ichol0",
     "ilu0",
     "jacobi",
 ]

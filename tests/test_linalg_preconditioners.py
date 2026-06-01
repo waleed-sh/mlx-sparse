@@ -130,6 +130,106 @@ def _solve_lu_dense(L, U, rhs):
     return x[:, 0].astype(np.float32) if vector_input else x.astype(np.float32)
 
 
+def _reference_ic0_lower_from_csr(scipy_csr, *, shift=0.0, check=True):
+    A = scipy_csr.astype(np.float64).tocsr()
+    n, m = A.shape
+    if n != m:
+        raise ValueError("reference IC0 requires a square matrix")
+
+    rows = []
+    for row in range(n):
+        entries = {
+            int(col): float(value)
+            for col, value in zip(
+                A.indices[A.indptr[row] : A.indptr[row + 1]],
+                A.data[A.indptr[row] : A.indptr[row + 1]],
+            )
+        }
+        rows.append(entries)
+
+    lower = [dict() for _ in range(n)]
+    for row, entries in enumerate(rows):
+        for col, value in entries.items():
+            if col <= row:
+                lower[row][col] = value
+    for row, entries in enumerate(rows):
+        for col, value in entries.items():
+            if col <= row:
+                continue
+            if row in lower[col]:
+                if check and not np.isclose(
+                    lower[col][row], value, rtol=1e-5, atol=1e-7
+                ):
+                    raise RuntimeError("nonsymmetric values")
+            else:
+                lower[col][row] = value
+    for row in range(n):
+        if row not in lower[row]:
+            raise RuntimeError("missing diagonal")
+        lower[row][row] += float(shift)
+
+    L = np.zeros((n, n), dtype=np.float64)
+    eps = np.finfo(np.float32).eps
+    for row in range(n):
+        entries = lower[row]
+        for col in sorted(k for k in entries if k < row):
+            acc = entries[col]
+            for k in sorted(k for k in entries if k < col):
+                acc -= L[row, k] * L[col, k]
+            threshold = (
+                eps * max(1.0, np.sum(np.abs(L[col, : col + 1]))) if check else 0.0
+            )
+            if L[col, col] <= threshold:
+                raise RuntimeError("nonpositive pivot")
+            L[row, col] = acc / L[col, col]
+        diag = entries[row] - np.dot(L[row, :row], L[row, :row])
+        threshold = (
+            eps * max(1.0, sum(abs(v) for v in entries.values())) if check else 0.0
+        )
+        if diag <= threshold:
+            raise RuntimeError("nonpositive pivot")
+        L[row, row] = np.sqrt(diag)
+    return L.astype(np.float32)
+
+
+def _solve_cholesky_dense(L, rhs):
+    rhs = np.asarray(rhs, dtype=np.float64)
+    vector_input = rhs.ndim == 1
+    if vector_input:
+        rhs = rhs[:, None]
+    n = L.shape[0]
+    y = np.zeros_like(rhs, dtype=np.float64)
+    for row in range(n):
+        y[row] = (rhs[row] - L[row, :row] @ y[:row]) / L[row, row]
+    x = np.zeros_like(rhs, dtype=np.float64)
+    for row in range(n - 1, -1, -1):
+        x[row] = (y[row] - L[row + 1 :, row] @ x[row + 1 :]) / L[row, row]
+    return x[:, 0].astype(np.float32) if vector_input else x.astype(np.float32)
+
+
+def _poisson_2d_scipy(scipy_sparse, grid):
+    main = 4.0 * np.ones(grid, dtype=np.float32)
+    off = -1.0 * np.ones(grid - 1, dtype=np.float32)
+    T = scipy_sparse.diags([off, main, off], [-1, 0, 1], format="csr")
+    I = scipy_sparse.eye(grid, format="csr", dtype=np.float32)
+    S = scipy_sparse.diags([off, off], [-1, 1], shape=(grid, grid), format="csr")
+    return (
+        scipy_sparse.kron(I, T, format="csr") + scipy_sparse.kron(S, I, format="csr")
+    ).astype(np.float32)
+
+
+def _anisotropic_diffusion_2d_scipy(scipy_sparse, grid, *, ax=0.15, ay=1.5):
+    diag = (2.0 * ax + 2.0 * ay + 0.25) * np.ones(grid, dtype=np.float32)
+    off_x = -ax * np.ones(grid - 1, dtype=np.float32)
+    off_y = -ay * np.ones(grid - 1, dtype=np.float32)
+    T = scipy_sparse.diags([off_x, diag, off_x], [-1, 0, 1], format="csr")
+    I = scipy_sparse.eye(grid, format="csr", dtype=np.float32)
+    Y = scipy_sparse.diags([off_y, off_y], [-1, 1], shape=(grid, grid), format="csr")
+    return (
+        scipy_sparse.kron(I, T, format="csr") + scipy_sparse.kron(Y, I, format="csr")
+    ).astype(np.float32)
+
+
 def _spd_2x2(mx):
     return ms.csr_array(
         (
@@ -186,6 +286,7 @@ def test_preconditioner_namespace_is_public():
     assert callable(preconditioners.diagonal)
     assert callable(preconditioners.identity)
     assert callable(preconditioners.ilu0)
+    assert callable(preconditioners.ichol0)
     assert callable(preconditioners.from_factorized)
     assert callable(preconditioners.exact)
 
@@ -200,6 +301,7 @@ def test_preconditioner_metadata_is_explicit_and_conservative(mx):
     jacobi_unchecked = preconditioners.jacobi(A)
     jacobi_checked = preconditioners.jacobi(A, check=True)
     ilu0 = preconditioners.ilu0(A)
+    ichol0 = preconditioners.ichol0(A)
 
     assert identity.shape == A.shape
     assert identity.nnz == A.shape[0]
@@ -237,6 +339,17 @@ def test_preconditioner_metadata_is_explicit_and_conservative(mx):
     assert ilu0.setup_info["ordering"] == "natural"
     assert ilu0.setup_info["fill"] == 0
     assert ilu0.setup_info["unit_diagonal_L"] is True
+
+    assert ichol0.shape == A.shape
+    assert ichol0.kind == "ichol0"
+    assert ichol0.setup_device == "native_cpu"
+    assert ichol0.apply_device == "native_cpu_or_metal"
+    assert ichol0.is_symmetric is True
+    assert ichol0.is_positive_definite is True
+    assert ichol0.nnz == ichol0.nnz_L
+    assert ichol0.setup_info["ordering"] == "natural"
+    assert ichol0.setup_info["fill"] == 0
+    assert ichol0.setup_info["factor"] == "lower"
 
 
 def test_aspreconditioner_wraps_callable_inverse_apply(mx, to_numpy):
@@ -624,6 +737,202 @@ def test_ilu0_setup_does_not_mutate_input_csr_metadata(mx, to_numpy, scipy_spars
     )
 
     M = preconditioners.ilu0(A)
+
+    assert M.shape == A.shape
+    assert A.sorted_indices == before[3]
+    assert A.has_canonical_format == before[4]
+    np.testing.assert_array_equal(to_numpy(A.data), before[0])
+    np.testing.assert_array_equal(to_numpy(A.indices), before[1])
+    np.testing.assert_array_equal(to_numpy(A.indptr), before[2])
+
+
+def test_ichol0_setup_matches_internal_reference_and_preserves_lower_pattern(
+    mx, to_numpy, scipy_sparse
+):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 3)
+    A = _csr_from_scipy(mx, scipy_A)
+
+    M = preconditioners.ichol0(A)
+    L_ref = _reference_ic0_lower_from_csr(scipy_A)
+
+    np.testing.assert_allclose(to_numpy(M.L.todense()), L_ref, rtol=2e-6, atol=2e-6)
+    assert M.nnz_L == int(np.count_nonzero(np.tril(scipy_A.toarray())))
+    assert M.setup_info["ordering"] == "natural"
+    assert M.setup_info["fill"] == 0
+    assert M.setup_info["factor"] == "lower"
+
+
+def _assert_ichol0_apply_rank1_rank2_correctness(mx, to_numpy, scipy_sparse):
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 3)
+    A = _csr_from_scipy(mx, scipy_A)
+    M = preconditioners.ichol0(A)
+    L_ref = _reference_ic0_lower_from_csr(scipy_A)
+    rhs_matrix = np.column_stack(
+        [
+            np.linspace(0.25, 1.25, A.shape[0], dtype=np.float32),
+            np.cos(np.linspace(0.0, 1.0, A.shape[0], dtype=np.float32)),
+        ]
+    ).astype(np.float32)
+    upper = M._upper()
+
+    got_matrix = M(mx.array(rhs_matrix, dtype=mx.float32))
+    got_vector = M(mx.array(rhs_matrix[:, 0], dtype=mx.float32))
+    native_matrix = _native.csr_ic0_preconditioner_apply(
+        M.L.data,
+        M.L.indices,
+        M.L.indptr,
+        upper.data,
+        upper.indices,
+        upper.indptr,
+        mx.array(rhs_matrix, dtype=mx.float32),
+        A.shape,
+    )
+    expected = _solve_cholesky_dense(L_ref, rhs_matrix)
+
+    np.testing.assert_allclose(to_numpy(got_matrix), expected, rtol=3e-5, atol=3e-5)
+    np.testing.assert_allclose(
+        to_numpy(got_vector), expected[:, 0], rtol=3e-5, atol=3e-5
+    )
+    np.testing.assert_allclose(to_numpy(native_matrix), expected, rtol=3e-5, atol=3e-5)
+
+
+@pytest.mark.cpu_only
+def test_ichol0_apply_cpu_rank1_rank2_correctness(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    _assert_ichol0_apply_rank1_rank2_correctness(mx, to_numpy, scipy_sparse)
+
+
+@pytest.mark.gpu
+def test_ichol0_apply_gpu_rank1_rank2_correctness(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    _assert_ichol0_apply_rank1_rank2_correctness(mx, to_numpy, scipy_sparse)
+
+
+def test_ichol0_supports_upper_only_symmetric_storage(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    dense = np.array(
+        [[4.0, -1.0, 0.0], [-1.0, 4.0, -1.0], [0.0, -1.0, 3.0]],
+        dtype=np.float32,
+    )
+    scipy_A = scipy_sparse.csr_array(np.triu(dense))
+    A = _csr_from_scipy(mx, scipy_A)
+
+    M = preconditioners.ichol0(A)
+    L_ref = _reference_ic0_lower_from_csr(scipy_A)
+
+    np.testing.assert_allclose(to_numpy(M.L.todense()), L_ref, rtol=2e-6, atol=2e-6)
+    assert M.nnz_L == int(np.count_nonzero(np.tril(dense)))
+
+
+def test_ichol0_shift_is_explicit_and_can_recover_near_spd_input(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    weak = ms.csr_array(
+        (
+            mx.array([1.0e-7, 1.0], dtype=mx.float32),
+            mx.array([0, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+
+    with pytest.raises(RuntimeError, match="pivot"):
+        preconditioners.ichol0(weak)
+    shifted = preconditioners.ichol0(weak, shift=1.0e-5)
+
+    np.testing.assert_allclose(
+        np.diag(to_numpy(shifted.L.todense())) ** 2,
+        [1.01e-5, 1.00001],
+        rtol=2e-5,
+        atol=2e-8,
+    )
+
+
+def test_ichol0_failure_modes_are_explicit(mx):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    missing_diag = ms.csr_array(
+        (
+            mx.array([1.0, 2.0], dtype=mx.float32),
+            mx.array([1, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+    indefinite = ms.csr_array(
+        (
+            mx.array([1.0, 2.0, 2.0, 1.0], dtype=mx.float32),
+            mx.array([0, 1, 0, 1], dtype=mx.int32),
+            mx.array([0, 2, 4], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+    nonsymmetric = ms.csr_array(
+        (
+            mx.array([4.0, 2.0, 1.0, 3.0], dtype=mx.float32),
+            mx.array([0, 1, 0, 1], dtype=mx.int32),
+            mx.array([0, 2, 4], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+    rectangular = ms.csr_array(
+        (
+            mx.array([1.0, 2.0], dtype=mx.float32),
+            mx.array([0, 2], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 3),
+        canonical=True,
+    )
+    complex_data = ms.csr_array(
+        (
+            mx.array([1.0 + 0.0j, 2.0 + 0.0j], dtype=mx.complex64),
+            mx.array([0, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+
+    with pytest.raises(RuntimeError, match="diagonal"):
+        preconditioners.ichol0(missing_diag)
+    with pytest.raises(RuntimeError, match="pivot"):
+        preconditioners.ichol0(indefinite)
+    with pytest.raises(RuntimeError, match="symmetric"):
+        preconditioners.ichol0(nonsymmetric)
+    with pytest.raises(ValueError, match="square"):
+        preconditioners.ichol0(rectangular)
+    with pytest.raises(TypeError, match="real float"):
+        preconditioners.ichol0(complex_data)
+    with pytest.raises(ValueError, match="finite"):
+        preconditioners.ichol0(_spd_2x2(mx), shift=np.inf)
+    with pytest.raises(ValueError, match="non-negative"):
+        preconditioners.ichol0(_spd_2x2(mx), shift=-1.0)
+
+
+def test_ichol0_setup_does_not_mutate_input_csr_metadata(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 3)
+    A = _csr_from_scipy(mx, scipy_A)
+    before = (
+        to_numpy(A.data).copy(),
+        to_numpy(A.indices).copy(),
+        to_numpy(A.indptr).copy(),
+        A.sorted_indices,
+        A.has_canonical_format,
+    )
+
+    M = preconditioners.ichol0(A)
 
     assert M.shape == A.shape
     assert A.sorted_indices == before[3]
@@ -1632,6 +1941,198 @@ def test_native_pcg_reports_true_residual_and_iteration_count(mx, to_numpy):
     assert residual_np == pytest.approx(
         np.linalg.norm(to_numpy(A.todense()) @ x_np - to_numpy(b)), abs=1e-4
     )
+
+
+def test_cg_ichol0_matches_dense_numpy_on_small_spd(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    dense = np.array(
+        [
+            [6.0, -1.0, 0.0, 0.0],
+            [-1.0, 5.0, -1.0, 0.0],
+            [0.0, -1.0, 4.0, -1.0],
+            [0.0, 0.0, -1.0, 3.5],
+        ],
+        dtype=np.float32,
+    )
+    A = _csr_from_scipy(mx, scipy_sparse.csr_array(dense))
+    b_np = np.array([1.0, -2.0, 0.5, 3.0], dtype=np.float32)
+
+    x, info = linalg.cg(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=preconditioners.ichol0(A),
+        rtol=1e-5,
+        atol=1e-7,
+        maxiter=32,
+    )
+
+    x_np = to_numpy(x)
+    assert info == 0
+    np.testing.assert_allclose(
+        x_np,
+        np.linalg.solve(dense.astype(np.float64), b_np.astype(np.float64)),
+        rtol=2e-5,
+        atol=2e-5,
+    )
+    assert _relative_residual(dense, x_np, b_np) <= 2e-5
+
+
+def test_native_pcg_ichol0_reduces_poisson_iterations_vs_jacobi(
+    mx, to_numpy, scipy_sparse
+):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _poisson_2d_scipy(scipy_sparse, 8)
+    A = _csr_from_scipy(mx, scipy_A)
+    b = mx.ones((A.shape[0],), dtype=mx.float32)
+    x0 = mx.zeros((A.shape[0],), dtype=mx.float32)
+    jacobi = preconditioners.jacobi(A, check=True)
+    ichol0 = preconditioners.ichol0(A)
+    upper = ichol0._upper()
+
+    _, jacobi_info, _, jacobi_iterations = _native.csr_pcg_jacobi(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        jacobi.inverse_diagonal,
+        A.shape,
+        rtol=1e-4,
+        atol=1e-7,
+        maxiter=500,
+    )
+    x, ic0_info, residual, ic0_iterations = _native.csr_pcg_ic0(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        ichol0.L.data,
+        ichol0.L.indices,
+        ichol0.L.indptr,
+        upper.data,
+        upper.indices,
+        upper.indptr,
+        A.shape,
+        rtol=1e-4,
+        atol=1e-7,
+        maxiter=500,
+    )
+
+    assert int(np.asarray(to_numpy(jacobi_info)).item()) == 0
+    assert int(np.asarray(to_numpy(ic0_info)).item()) == 0
+    assert int(np.asarray(to_numpy(ic0_iterations)).item()) < int(
+        np.asarray(to_numpy(jacobi_iterations)).item()
+    )
+    residual_np = float(np.asarray(to_numpy(residual)).item())
+    assert residual_np == pytest.approx(
+        np.linalg.norm(scipy_A @ to_numpy(x) - np.ones(A.shape[0], dtype=np.float32)),
+        abs=2e-5,
+    )
+    assert residual_np / np.sqrt(A.shape[0]) <= 1.5e-4
+
+
+def test_cg_ichol0_handles_anisotropic_diffusion(mx, to_numpy, scipy_sparse):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    scipy_A = _anisotropic_diffusion_2d_scipy(scipy_sparse, 5)
+    A = _csr_from_scipy(mx, scipy_A)
+    x_true = np.sin(np.linspace(0.2, 1.3, A.shape[0], dtype=np.float32))
+    b_np = np.asarray(scipy_A @ x_true, dtype=np.float32)
+
+    x, info = linalg.cg(
+        A,
+        mx.array(b_np, dtype=mx.float32),
+        M=preconditioners.ichol0(A),
+        rtol=2e-4,
+        atol=1e-7,
+        maxiter=128,
+    )
+
+    x_np = to_numpy(x)
+    assert info == 0
+    assert _relative_residual(scipy_A.toarray(), x_np, b_np) <= 2.5e-4
+    np.testing.assert_allclose(x_np, x_true, rtol=2e-3, atol=2e-3)
+
+
+def test_native_pcg_ichol0_scaled_diagonal_converges_in_one_iteration(
+    mx, to_numpy, scipy_sparse
+):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    diag = np.geomspace(1.0e-6, 1.0e3, 16).astype(np.float32)
+    scipy_A = scipy_sparse.diags(diag, 0, format="csr", dtype=np.float32)
+    A = _csr_from_scipy(mx, scipy_A)
+    x_true = np.linspace(-1.0, 1.0, A.shape[0], dtype=np.float32)
+    b = mx.array(diag * x_true, dtype=mx.float32)
+    x0 = mx.zeros((A.shape[0],), dtype=mx.float32)
+    M = preconditioners.ichol0(A)
+    upper = M._upper()
+
+    x, info, residual, iterations = _native.csr_pcg_ic0(
+        A.data,
+        A.indices,
+        A.indptr,
+        b,
+        x0,
+        M.L.data,
+        M.L.indices,
+        M.L.indptr,
+        upper.data,
+        upper.indices,
+        upper.indptr,
+        A.shape,
+        rtol=1e-6,
+        atol=1e-8,
+        maxiter=16,
+    )
+
+    assert int(np.asarray(to_numpy(info)).item()) == 0
+    assert int(np.asarray(to_numpy(iterations)).item()) == 1
+    assert float(np.asarray(to_numpy(residual)).item()) <= 2e-4
+    np.testing.assert_allclose(to_numpy(x), x_true, rtol=2e-4, atol=2e-4)
+
+
+def test_cg_ichol0_shifted_near_singular_spd_stays_finite(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    diag = np.array([1.0e-7, 1.0, 2.0, 3.0, 5.0], dtype=np.float32)
+    A = ms.csr_array(
+        (
+            mx.array(diag, dtype=mx.float32),
+            mx.array(np.arange(diag.size, dtype=np.int32), dtype=mx.int32),
+            mx.array(np.arange(diag.size + 1, dtype=np.int32), dtype=mx.int32),
+        ),
+        shape=(diag.size, diag.size),
+        canonical=True,
+    )
+    x_true = np.linspace(0.5, 1.5, diag.size, dtype=np.float32)
+    b = mx.array((diag + 1.0e-5) * x_true, dtype=mx.float32)
+
+    M = preconditioners.ichol0(A, shift=1.0e-5)
+    shifted_A = ms.csr_array(
+        (
+            mx.array(diag + 1.0e-5, dtype=mx.float32),
+            mx.array(np.arange(diag.size, dtype=np.int32), dtype=mx.int32),
+            mx.array(np.arange(diag.size + 1, dtype=np.int32), dtype=mx.int32),
+        ),
+        shape=A.shape,
+        canonical=True,
+    )
+    x, info = linalg.cg(
+        shifted_A,
+        b,
+        M=M,
+        rtol=1e-6,
+        atol=1e-8,
+        maxiter=16,
+    )
+
+    assert info == 0
+    assert np.all(np.isfinite(to_numpy(x)))
+    np.testing.assert_allclose(to_numpy(x), x_true, rtol=2e-4, atol=2e-4)
 
 
 def test_diagonal_preconditioner_rejects_wrong_rhs_shape(mx):

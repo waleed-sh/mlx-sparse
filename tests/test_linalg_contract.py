@@ -52,6 +52,7 @@ def test_native_linalg_symbols_are_exported_when_extension_loads():
     required = {
         "csr_cg",
         "csr_pcg_jacobi",
+        "csr_pcg_ic0",
         "diagonal_preconditioner_apply",
         "csr_gmres",
         "csr_gmres_jacobi",
@@ -67,6 +68,8 @@ def test_native_linalg_symbols_are_exported_when_extension_loads():
         "csr_lu",
         "csr_ilu0",
         "csr_ilu0_preconditioner_apply",
+        "csr_ic0",
+        "csr_ic0_preconditioner_apply",
         "csr_triangular_solve",
         "csr_triangular_diagonal_positions",
         "csr_triangular_level_schedule",

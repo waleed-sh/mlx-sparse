@@ -10,11 +10,12 @@ implicitly.
 
 Python preconditioner objects are API containers and dispatch helpers. Diagonal
 application, Jacobi-preconditioned CG, diagonal/Jacobi-preconditioned GMRES,
-ILU(0)-preconditioned GMRES, diagonal/Jacobi-preconditioned MINRES, and exact
-LU/Cholesky preconditioner application run through native primitives under
-``src/preconditioners``. These paths do not execute a Python callback inside
-native Krylov iterations. Exact-factor preconditioners wrap existing direct
-solve objects and reuse typed native or guarded Accelerate apply paths.
+ILU(0)-preconditioned GMRES, IC(0)-preconditioned CG,
+diagonal/Jacobi-preconditioned MINRES, and exact LU/Cholesky preconditioner
+application run through native primitives under ``src/preconditioners``. These
+paths do not execute a Python callback inside native Krylov iterations.
+Exact-factor preconditioners wrap existing direct solve objects and reuse typed
+native or guarded Accelerate apply paths.
 
 Current support
 ---------------
@@ -65,9 +66,16 @@ Current support
        pattern for ``L`` and ``U``. Application uses two native CSR triangular
        solves and can run on CPU or Metal. ``gmres(..., M=ilu0(A))`` dispatches
        to a native left-preconditioned GMRES entrypoint.
+   * - ``ichol0(A)``
+     - Natural-order, no-fill incomplete Cholesky preconditioner for SPD
+       systems.
+     - Setup runs in native C++ on CPU and preserves the symmetric lower CSR
+       sparsity pattern with no fill. Application uses two native CSR
+       triangular solves and can run on CPU or Metal. ``cg(..., M=ichol0(A))``
+       dispatches to a native IC(0)-preconditioned CG entrypoint.
 
-``cg`` currently supports native-backed ``identity``, ``diagonal``, and
-``jacobi`` preconditioners. ``gmres`` supports ``identity``,
+``cg`` currently supports native-backed ``identity``, ``diagonal``,
+``jacobi``, and ``ichol0`` preconditioners. ``gmres`` supports ``identity``,
 ``diagonal``/``jacobi``, ``ilu0``, exact-factor preconditioners, and explicit
 inverse-apply callables or objects. For ``diagonal``/``jacobi``, ``ilu0``, and
 exact native or Accelerate factors, GMRES builds the Krylov basis for
@@ -87,11 +95,14 @@ Jacobi and diagonal preconditioner application do not use Accelerate because
 the current mlx-sparse Accelerate integration is for direct sparse
 factorization/solve objects. The native diagonal/Jacobi Krylov paths use the
 selected MLX CPU or Metal device, including PCG and preconditioned MINRES solver
-kernels. ILU(0) setup is a native CPU incomplete-factorization pass, application
-uses the existing native CSR triangular-solve kernels, so the apply phase can
-run on CPU or Metal depending on the selected MLX device. ILU(0) does not use
-Accelerate because Apple's sparse solver APIs do not expose an ILU(0) factor
-setup or explicit factors compatible with ``CSRArray``. Exact-factor
+kernels. ILU(0) and IC(0) setup are native CPU incomplete-factorization passes;
+application uses the existing native CSR triangular-solve kernels, so the apply
+phase can run on CPU or Metal depending on the selected MLX device. The native
+``cg(..., M=ichol0(A))`` loop is CPU-hosted because IC(0) application is a
+triangular dependency chain rather than an elementwise preconditioner. ILU(0)
+and IC(0) do not use Accelerate because Apple's sparse solver APIs do not
+expose incomplete-factor setup or explicit factors compatible with
+``CSRArray``. Exact-factor
 preconditioners preserve the existing Accelerate guards from
 ``linalg.factorized`` and use Accelerate only on Apple builds where it is
 available and helpful, otherwise they reuse the native sparse LU/Cholesky solve
@@ -242,6 +253,52 @@ Example: GMRES with ILU(0)
 
    assert info == 0
 
+IC(0)
+-----
+
+``ichol0(A, shift=0.0, check=True)`` accepts square ``CSRArray``,
+``COOArray``, ``CSCArray``, and sparse-backed ``LinearOperator`` inputs that
+represent symmetric positive-definite systems. Inputs are normalized to
+canonical CSR before setup. The setup is natural-order IC(0): no
+fill-reducing ordering, no pivoting, and no new off-diagonal entries are
+introduced. The stored ``L`` factor uses the symmetric lower pattern of the
+input, so upper-only symmetric storage is mirrored into the lower factor
+without densifying the matrix.
+
+Every row must contain an explicit diagonal entry. ``shift`` is a non-negative
+scalar added only to existing diagonal entries and is never used to create
+missing structure. With ``check=True`` the setup rejects non-symmetric mirrored
+numeric entries and non-positive or near-zero pivots using a scale-aware guard.
+``check=False`` relaxes the symmetry and near-zero pivot checks, but non-finite
+and non-positive pivots remain errors because the Cholesky square root would be
+invalid.
+
+Example: PCG with IC(0)
+-----------------------
+
+.. code-block:: python
+
+   import mlx.core as mx
+   import numpy as np
+   import scipy.sparse
+   import mlx_sparse as ms
+
+   grid = 16
+   main = 4.0 * np.ones(grid, dtype=np.float32)
+   off = -1.0 * np.ones(grid - 1, dtype=np.float32)
+   T = scipy.sparse.diags([off, main, off], [-1, 0, 1], format="csr")
+   I = scipy.sparse.eye(grid, format="csr", dtype=np.float32)
+   Y = scipy.sparse.diags([off, off], [-1, 1], shape=(grid, grid), format="csr")
+   A_sp = (scipy.sparse.kron(I, T) + scipy.sparse.kron(Y, I)).astype(np.float32)
+
+   A = ms.from_scipy(A_sp)
+   b = mx.ones((A.shape[0],), dtype=mx.float32)
+
+   M = ms.linalg.preconditioners.ichol0(A)
+   x, info = ms.linalg.cg(A, b, M=M, rtol=1e-4, maxiter=512)
+
+   assert info == 0
+
 Example: MINRES with Jacobi
 ---------------------------
 
@@ -308,10 +365,11 @@ Preconditioner metadata
 
 Preconditioner objects expose ``shape``, ``dtype``, ``kind``,
 ``is_symmetric``, ``is_positive_definite``, ``setup_device``,
-``apply_device``, ``nnz``, and ``setup_info``. ILU(0) also exposes ``nnz_L`` and
-``nnz_U``. For unchecked Jacobi, ``is_positive_definite`` is conservative and
-remains ``False`` even when the diagonal is positive. Use ``check=True`` to
-request the cheap positive-diagonal validation described above.
+``apply_device``, ``nnz``, and ``setup_info``. ILU(0) exposes ``nnz_L`` and
+``nnz_U``; IC(0) exposes ``nnz_L``. For unchecked Jacobi,
+``is_positive_definite`` is conservative and remains ``False`` even when the
+diagonal is positive. Use ``check=True`` to request the cheap positive-diagonal
+validation described above.
 
 Choosing a preconditioner
 -------------------------
@@ -326,10 +384,13 @@ For the current v0.0.5b0 support:
 * Use ``ilu0`` with ``gmres`` for general nonsymmetric systems when a stronger
   native preconditioner is worth the CPU setup and two triangular solves per
   application.
+* Use ``ichol0`` with ``cg`` for SPD systems when a stronger native
+  preconditioner than Jacobi is worth the CPU setup and two triangular solves
+  per application.
 * Use ``exact`` or ``from_factorized`` as a diagnostic baseline or when a
   reusable direct factorization already exists.
 * Use custom callables with ``gmres`` only when the convenience of a host
   fallback outweighs the Python callback cost.
 
-IC(0), ILUT, ILU(k), sparse approximate inverse methods, and AMG are not part
-of the current support surface.
+ILUT, ILU(k), sparse approximate inverse methods, and AMG are not part of the
+current support surface.

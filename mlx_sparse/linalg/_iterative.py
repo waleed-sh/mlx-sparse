@@ -75,7 +75,9 @@ def cg(
             unpreconditioned native CG path.  ``preconditioners.identity`` also
             uses that path.  ``preconditioners.diagonal`` and
             ``preconditioners.jacobi`` dispatch to native Jacobi-preconditioned
-            CG.
+            CG. ``preconditioners.ichol0`` dispatches to a native CPU
+            IC(0)-preconditioned CG loop whose preconditioner application uses
+            the stored incomplete Cholesky factors.
         callback: Not supported.  Pass ``None`` (the default).
 
     Returns:
@@ -141,9 +143,29 @@ def cg(
                 maxiter=_maxiter(csr, maxiter),
             )
             return x, _info(info)
+        elif isinstance(pc, preconditioners.IC0Preconditioner):
+            upper = pc._upper()
+            x, info, _, _ = _native.csr_pcg_ic0(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.L.data,
+                pc.L.indices,
+                pc.L.indptr,
+                upper.data,
+                upper.indices,
+                upper.indptr,
+                csr.shape,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=_maxiter(csr, maxiter),
+            )
+            return x, _info(info)
         else:
             raise TypeError(
-                "cg currently supports only identity, diagonal, and Jacobi "
+                "cg currently supports only identity, diagonal, Jacobi, and IC(0) "
                 "native-backed preconditioners."
             )
     x, info, _, _ = _native.csr_cg(

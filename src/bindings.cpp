@@ -31,6 +31,7 @@
 #include "preconditioners/diagonal/diagonal.h"
 #include "preconditioners/exact/exact.h"
 #include "preconditioners/gmres/gmres.h"
+#include "preconditioners/ic0/ic0.h"
 #include "preconditioners/ilu0/ilu0.h"
 #include "preconditioners/minres/minres.h"
 #include "preconditioners/pcg/pcg.h"
@@ -1005,6 +1006,28 @@ NB_MODULE(_ext, m) {
       "gradients.");
 
   m.def(
+      "csr_pcg_ic0",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &lt_data,
+         const mlx_sparse::mx::array &lt_indices,
+         const mlx_sparse::mx::array &lt_indptr, int n_rows, int n_cols,
+         float rtol, float atol, int maxiter) {
+        return mlx_sparse::csr_pcg_ic0(
+            data, indices, indptr, b, x0, l_data, l_indices, l_indptr, lt_data,
+            lt_indices, lt_indptr, n_rows, n_cols, rtol, atol, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "l_data"_a,
+      "l_indices"_a, "l_indptr"_a, "lt_data"_a, "lt_indices"_a, "lt_indptr"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 SPD CSR system with IC(0)-preconditioned conjugate "
+      "gradients.");
+
+  m.def(
       "diagonal_preconditioner_apply",
       [](const mlx_sparse::mx::array &inv_diag,
          const mlx_sparse::mx::array &rhs) {
@@ -1063,6 +1086,19 @@ NB_MODULE(_ext, m) {
       "Compute a natural-order no-fill ILU(0) factorization for float32 CSR.");
 
   m.def(
+      "csr_ic0",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols,
+         float shift, bool check) {
+        return mlx_sparse::csr_ic0(data, indices, indptr, n_rows, n_cols, shift,
+                                   check);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "shift"_a,
+      "check"_a,
+      "Compute a natural-order no-fill IC(0) factorization for float32 CSR.");
+
+  m.def(
       "csr_ilu0_preconditioner_apply",
       [](const mlx_sparse::mx::array &l_data,
          const mlx_sparse::mx::array &l_indices,
@@ -1078,6 +1114,23 @@ NB_MODULE(_ext, m) {
       "l_data"_a, "l_indices"_a, "l_indptr"_a, "u_data"_a, "u_indices"_a,
       "u_indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
       "Apply a native ILU(0) preconditioner to a vector or matrix RHS.");
+
+  m.def(
+      "csr_ic0_preconditioner_apply",
+      [](const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &lt_data,
+         const mlx_sparse::mx::array &lt_indices,
+         const mlx_sparse::mx::array &lt_indptr,
+         const mlx_sparse::mx::array &rhs, int n_rows, int n_cols) {
+        return mlx_sparse::csr_ic0_preconditioner_apply(
+            l_data, l_indices, l_indptr, lt_data, lt_indices, lt_indptr, rhs,
+            n_rows, n_cols);
+      },
+      "l_data"_a, "l_indices"_a, "l_indptr"_a, "lt_data"_a, "lt_indices"_a,
+      "lt_indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "Apply a native IC(0) preconditioner to a vector or matrix RHS.");
 
   m.def(
       "csr_lanczos",

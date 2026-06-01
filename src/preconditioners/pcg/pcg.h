@@ -26,4 +26,13 @@ csr_pcg_jacobi(const mx::array &data, const mx::array &indices,
                const mx::array &inv_diag, int n_rows, int n_cols, float rtol,
                float atol, int maxiter, mx::StreamOrDevice s = {});
 
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_pcg_ic0(const mx::array &data, const mx::array &indices,
+            const mx::array &indptr, const mx::array &b, const mx::array &x0,
+            const mx::array &l_data, const mx::array &l_indices,
+            const mx::array &l_indptr, const mx::array &lt_data,
+            const mx::array &lt_indices, const mx::array &lt_indptr, int n_rows,
+            int n_cols, float rtol, float atol, int maxiter,
+            mx::StreamOrDevice s = {});
+
 } // namespace mlx_sparse
