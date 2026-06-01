@@ -26,15 +26,18 @@ Iterative solvers
 
 ``cg(A, b)`` solves symmetric positive-definite systems using native conjugate
 gradients. ``gmres(A, b)`` uses restarted Arnoldi/GMRES for nonsymmetric
-systems. ``minres(A, b)`` uses Lanczos projection for symmetric indefinite
-systems. All three return ``(x, info)`` where ``info == 0`` means convergence.
+systems. ``minres(A, b)`` uses a native Paige-Saunders recurrence for symmetric
+indefinite systems and supports the shifted system ``(A - shift * I) x = b``.
+All three return ``(x, info)`` where ``info == 0`` means convergence.
 
 ``cg`` accepts native-backed identity, diagonal, and Jacobi preconditioners
 through ``M``. ``gmres`` accepts identity, diagonal/Jacobi, exact-factor
 wrappers, and explicit inverse-apply callables or objects, diagonal/Jacobi and
 exact-factor GMRES use native left-preconditioned solver entrypoints and
-true-residual convergence checks. See :doc:`preconditioners` for the current
-support matrix and CPU/Metal/Accelerate boundaries.
+true-residual convergence checks. ``minres`` accepts only identity and
+symmetric positive-definite diagonal/Jacobi preconditioners. See
+:doc:`preconditioners` for the current support matrix and CPU/Metal/Accelerate
+boundaries.
 
 Sparse direct factorizations
 ----------------------------

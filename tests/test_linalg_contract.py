@@ -56,6 +56,7 @@ def test_native_linalg_symbols_are_exported_when_extension_loads():
         "csr_gmres",
         "csr_gmres_jacobi",
         "csr_minres",
+        "csr_minres_jacobi",
         "csr_lanczos",
         "csr_arnoldi",
         "csr_eigsh",

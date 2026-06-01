@@ -70,6 +70,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/diagonal/diagonal.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/exact/exact.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/gmres/gmres.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/minres/minres.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/pcg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.cpp
@@ -167,11 +168,13 @@ if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT E
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cg/cg.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/inner_product/inner_product.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/lanczos/lanczos.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/minres/minres.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/permute_vector/permute_vector.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/diagonal/diagonal.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/gmres/gmres.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/minres/minres.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/pcg.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.metal

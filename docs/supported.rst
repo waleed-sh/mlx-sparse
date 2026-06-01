@@ -269,8 +269,8 @@ For a solver-centric view of CPU, Metal GPU, and Accelerate coverage, see
    * - ``linalg.minres``
      - Done
      - CPU + GPU
-     - Lanczos tridiagonalisation dispatches the ``csr_lanczos`` Metal
-       kernel, the tridiagonal least-squares solve runs on CPU.
+     - Shifted Paige-Saunders recurrence runs in native CPU or Metal kernels.
+       Diagonal/Jacobi preconditioners are supported when SPD.
    * - ``linalg.eigsh``
      - Done
      - CPU + GPU

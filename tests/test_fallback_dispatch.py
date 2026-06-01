@@ -197,8 +197,14 @@ def test_native_index_dtype_bits_rejects_unsupported_dtype(mx):
         (
             "csr_minres",
             "solver",
-            {"rtol": 1e-5, "atol": 0.0, "maxiter": 4},
+            {"rtol": 1e-5, "atol": 0.0, "maxiter": 4, "shift": 0.0},
             "csr_minres",
+        ),
+        (
+            "csr_minres_jacobi",
+            "solver_jacobi",
+            {"rtol": 1e-5, "atol": 0.0, "maxiter": 4, "shift": 0.0},
+            "csr_minres_jacobi",
         ),
         ("csr_lanczos", "lanczos", {"k": 1, "reorthogonalize": False}, "csr_lanczos"),
         ("csr_arnoldi", "lanczos", {"k": 1}, "csr_arnoldi"),
@@ -254,6 +260,8 @@ def test_native_extension_required_error_paths(
 
     if args == "solver":
         call_args = (data, indices, indptr, vector, vector, (1, 1))
+    elif args == "solver_jacobi":
+        call_args = (data, indices, indptr, vector, vector, vector, (1, 1))
     elif args == "lanczos":
         call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "spectral":
