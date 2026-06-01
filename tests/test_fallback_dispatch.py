@@ -207,6 +207,19 @@ def test_native_index_dtype_bits_rejects_unsupported_dtype(mx):
             "csr_pcg_ic0",
         ),
         (
+            "csr_pcg_chebyshev",
+            "solver_chebyshev",
+            {
+                "degree": 2,
+                "lambda_min": 0.5,
+                "lambda_max": 2.0,
+                "rtol": 1e-5,
+                "atol": 0.0,
+                "maxiter": 4,
+            },
+            "csr_pcg_chebyshev",
+        ),
+        (
             "csr_minres",
             "solver",
             {"rtol": 1e-5, "atol": 0.0, "maxiter": 4, "shift": 0.0},
@@ -244,6 +257,18 @@ def test_native_index_dtype_bits_rejects_unsupported_dtype(mx):
             "ic0_apply",
             {},
             "csr_ic0_preconditioner_apply",
+        ),
+        (
+            "csr_chebyshev_spectral_bounds",
+            "chebyshev_bounds",
+            {"estimate": True, "estimate_steps": 4},
+            "csr_chebyshev_spectral_bounds",
+        ),
+        (
+            "csr_chebyshev_preconditioner_apply",
+            "chebyshev_apply",
+            {"degree": 2, "lambda_min": 0.5, "lambda_max": 2.0},
+            "csr_chebyshev_preconditioner_apply",
         ),
         (
             "csr_triangular_solve",
@@ -318,6 +343,18 @@ def test_native_extension_required_error_paths(
             indptr,
             (1, 1),
         )
+    elif args == "solver_chebyshev":
+        call_args = (
+            data,
+            indices,
+            indptr,
+            vector,
+            vector,
+            data,
+            indices,
+            indptr,
+            (1, 1),
+        )
     elif args == "lanczos":
         call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "spectral":
@@ -334,6 +371,10 @@ def test_native_extension_required_error_paths(
         call_args = (data, indices, indptr, (1, 1))
     elif args == "ic0_apply":
         call_args = (data, indices, indptr, data, indices, indptr, vector, (1, 1))
+    elif args == "chebyshev_bounds":
+        call_args = (data, indices, indptr, (1, 1))
+    elif args == "chebyshev_apply":
+        call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "triangular":
         call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "triangular_analysis":

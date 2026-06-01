@@ -793,6 +793,49 @@ def csr_pcg_ic0(
     )
 
 
+def csr_pcg_chebyshev(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    m_data: mx.array,
+    m_indices: mx.array,
+    m_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    degree: int,
+    lambda_min: float,
+    lambda_max: float,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_pcg_chebyshev requires the native mlx_sparse extension."
+        )
+    return ext.csr_pcg_chebyshev(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        m_data,
+        m_indices,
+        m_indptr,
+        shape[0],
+        shape[1],
+        int(degree),
+        float(lambda_min),
+        float(lambda_max),
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
 def diagonal_preconditioner_apply(inv_diag: mx.array, rhs: mx.array):
     ext = extension()
     if ext is None:
@@ -800,6 +843,61 @@ def diagonal_preconditioner_apply(inv_diag: mx.array, rhs: mx.array):
             "diagonal_preconditioner_apply requires the native mlx_sparse extension."
         )
     return ext.diagonal_preconditioner_apply(inv_diag, rhs)
+
+
+def csr_chebyshev_spectral_bounds(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+    *,
+    estimate: bool,
+    estimate_steps: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_chebyshev_spectral_bounds requires the native mlx_sparse " "extension."
+        )
+    return ext.csr_chebyshev_spectral_bounds(
+        data,
+        indices,
+        indptr,
+        shape[0],
+        shape[1],
+        bool(estimate),
+        int(estimate_steps),
+    )
+
+
+def csr_chebyshev_preconditioner_apply(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    rhs: mx.array,
+    shape: Shape2D,
+    *,
+    degree: int,
+    lambda_min: float,
+    lambda_max: float,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_chebyshev_preconditioner_apply requires the native "
+            "mlx_sparse extension."
+        )
+    return ext.csr_chebyshev_preconditioner_apply(
+        data,
+        indices,
+        indptr,
+        rhs,
+        shape[0],
+        shape[1],
+        int(degree),
+        float(lambda_min),
+        float(lambda_max),
+    )
 
 
 def csr_exact_lu_preconditioner_apply(

@@ -38,6 +38,22 @@ def _jacobi_benchmark():
     return module
 
 
+def _chebyshev_benchmark():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "benchmarks"
+        / "bench_chebyshev_preconditioner.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "bench_chebyshev_preconditioner_under_test", path
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_scaled_diagonal_family_has_requested_condition():
     bench = _jacobi_benchmark()
 
@@ -98,3 +114,25 @@ def test_summarize_records_reports_convergence_and_residual_bounds():
         "families": ["scaled_diagonal", "scaled_poisson_1d"],
         "sizes": [4, 8],
     }
+
+
+def test_chebyshev_benchmark_poisson_family_is_spd():
+    bench = _chebyshev_benchmark()
+
+    matrix = bench.poisson_2d(4)
+    dense = matrix.toarray()
+
+    assert matrix.shape == (16, 16)
+    np.testing.assert_allclose(dense, dense.T, rtol=1e-7, atol=1e-7)
+    assert np.linalg.eigvalsh(dense).min() > 0.0
+
+
+def test_chebyshev_benchmark_anisotropic_family_is_spd():
+    bench = _chebyshev_benchmark()
+
+    matrix = bench.anisotropic_diffusion_2d(3)
+    dense = matrix.toarray()
+
+    assert matrix.shape == (9, 9)
+    np.testing.assert_allclose(dense, dense.T, rtol=1e-7, atol=1e-7)
+    assert np.linalg.eigvalsh(dense).min() > 0.0

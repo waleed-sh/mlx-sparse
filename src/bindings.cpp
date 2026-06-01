@@ -28,6 +28,7 @@
 #include "linalg/accelerate/factorization/factorization.h"
 #include "linalg/accelerate/solve/solve.h"
 #include "linalg/linalg.h"
+#include "preconditioners/chebyshev/chebyshev.h"
 #include "preconditioners/diagonal/diagonal.h"
 #include "preconditioners/exact/exact.h"
 #include "preconditioners/gmres/gmres.h"
@@ -1028,6 +1029,26 @@ NB_MODULE(_ext, m) {
       "gradients.");
 
   m.def(
+      "csr_pcg_chebyshev",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &m_data,
+         const mlx_sparse::mx::array &m_indices,
+         const mlx_sparse::mx::array &m_indptr, int n_rows, int n_cols,
+         int degree, float lambda_min, float lambda_max, float rtol, float atol,
+         int maxiter) {
+        return mlx_sparse::csr_pcg_chebyshev(
+            data, indices, indptr, b, x0, m_data, m_indices, m_indptr, n_rows,
+            n_cols, degree, lambda_min, lambda_max, rtol, atol, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "m_data"_a,
+      "m_indices"_a, "m_indptr"_a, "n_rows"_a, "n_cols"_a, "degree"_a,
+      "lambda_min"_a, "lambda_max"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 SPD CSR system with Chebyshev-polynomial "
+      "preconditioned conjugate gradients.");
+
+  m.def(
       "diagonal_preconditioner_apply",
       [](const mlx_sparse::mx::array &inv_diag,
          const mlx_sparse::mx::array &rhs) {
@@ -1036,6 +1057,36 @@ NB_MODULE(_ext, m) {
       "inv_diag"_a, "rhs"_a,
       "Apply a float32 diagonal inverse preconditioner to a vector or matrix "
       "right-hand side.");
+
+  m.def(
+      "csr_chebyshev_spectral_bounds",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols,
+         bool estimate, int estimate_steps) {
+        return mlx_sparse::csr_chebyshev_spectral_bounds(
+            data, indices, indptr, n_rows, n_cols, estimate, estimate_steps);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "estimate"_a,
+      "estimate_steps"_a,
+      "Compute native Gershgorin and optional Lanczos spectral bounds for a "
+      "float32 CSR Chebyshev preconditioner.");
+
+  m.def(
+      "csr_chebyshev_preconditioner_apply",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &rhs,
+         int n_rows, int n_cols, int degree, float lambda_min,
+         float lambda_max) {
+        return mlx_sparse::csr_chebyshev_preconditioner_apply(
+            data, indices, indptr, rhs, n_rows, n_cols, degree, lambda_min,
+            lambda_max);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "rhs"_a, "n_rows"_a, "n_cols"_a,
+      "degree"_a, "lambda_min"_a, "lambda_max"_a,
+      "Apply a native Chebyshev-polynomial inverse preconditioner to a vector "
+      "or matrix RHS.");
 
   m.def(
       "csr_exact_lu_preconditioner_apply",
