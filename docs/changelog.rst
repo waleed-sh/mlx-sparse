@@ -41,6 +41,11 @@ New Features
   ``gmres(..., M=exact(...))`` routes through typed native exact-factor GMRES
   entrypoints instead of the Python host fallback.
 
+* Added native shifted MINRES support and native diagonal/Jacobi-preconditioned
+  MINRES under ``src/preconditioners/minres``. ``minres(..., shift=s)`` now
+  solves ``(A - s I) x = b``, and ``minres(..., M=jacobi(A, check=True))``
+  accepts only symmetric positive-definite diagonal preconditioners by default.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -52,6 +57,11 @@ Improvements
 * Tightened GMRES status handling so a solve that reaches the true residual
   tolerance on the final allowed restart reports success instead of returning
   the iteration budget as ``info``.
+
+* Replaced the native MINRES Lanczos-projection plus normal-equation
+  least-squares path with a Paige-Saunders-style streaming recurrence. The new
+  path keeps constant Krylov-vector storage, checks the true shifted residual
+  before reporting success, and has matching native CPU and Metal kernels.
 
 * Added true-residual convergence checks and finite inverse-diagonal handling
   to native Jacobi-preconditioned GMRES. The preconditioned basis is built for
@@ -102,6 +112,12 @@ Tests
   output rejection, and GMRES composition with assertions that exact LU/Cholesky
   do not use the Python host fallback.
 
+* Added MINRES recurrence tests for symmetric indefinite systems, singular
+  compatible systems, shifted solves against SciPy's convention,
+  Jacobi-preconditioned indefinite systems against SciPy ``LinearOperator``
+  preconditioning, near-singular diagonal preconditioning, and strict rejection
+  of non-SPD or non-native MINRES preconditioners.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -121,8 +137,9 @@ Documentation
 * Added a Preconditioners user-guide page and updated linalg solver docs to
   describe the current native CG and GMRES preconditioner support,
   exact-factor wrappers, callable GMRES host fallback behavior, native
-  exact-factor GMRES routing, CPU/Metal and Accelerate boundaries, and the
-  remaining MINRES preconditioner gap.
+  exact-factor GMRES routing, native shifted/diagonal-preconditioned MINRES,
+  CPU/Metal and Accelerate boundaries, and the remaining incomplete-factor
+  preconditioner gaps.
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------

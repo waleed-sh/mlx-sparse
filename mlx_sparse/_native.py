@@ -1049,6 +1049,7 @@ def csr_minres(
     rtol: float,
     atol: float,
     maxiter: int,
+    shift: float,
 ):
     ext = extension()
     if ext is None:
@@ -1064,6 +1065,42 @@ def csr_minres(
         float(rtol),
         float(atol),
         int(maxiter),
+        float(shift),
+    )
+
+
+def csr_minres_jacobi(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    inv_diag: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+    shift: float,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_minres_jacobi requires the native mlx_sparse extension."
+        )
+    return ext.csr_minres_jacobi(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        inv_diag,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+        float(shift),
     )
 
 

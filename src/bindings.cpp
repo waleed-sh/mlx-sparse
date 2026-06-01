@@ -31,6 +31,7 @@
 #include "preconditioners/diagonal/diagonal.h"
 #include "preconditioners/exact/exact.h"
 #include "preconditioners/gmres/gmres.h"
+#include "preconditioners/minres/minres.h"
 #include "preconditioners/pcg/pcg.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
@@ -1162,13 +1163,30 @@ NB_MODULE(_ext, m) {
          const mlx_sparse::mx::array &indices,
          const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
          const mlx_sparse::mx::array &x0, int n_rows, int n_cols, float rtol,
-         float atol, int maxiter) {
+         float atol, int maxiter, float shift) {
         return mlx_sparse::csr_minres(data, indices, indptr, b, x0, n_rows,
-                                      n_cols, rtol, atol, maxiter);
+                                      n_cols, rtol, atol, maxiter, shift);
       },
       "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a, "n_cols"_a,
-      "rtol"_a, "atol"_a, "maxiter"_a,
-      "Solve a float32 Hermitian CSR system with MINRES.");
+      "rtol"_a, "atol"_a, "maxiter"_a, "shift"_a,
+      "Solve a float32 Hermitian CSR system with shifted MINRES.");
+
+  m.def(
+      "csr_minres_jacobi",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &inv_diag,
+         int n_rows, int n_cols, float rtol, float atol, int maxiter,
+         float shift) {
+        return mlx_sparse::csr_minres_jacobi(data, indices, indptr, b, x0,
+                                             inv_diag, n_rows, n_cols, rtol,
+                                             atol, maxiter, shift);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "inv_diag"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a, "shift"_a,
+      "Solve a float32 Hermitian CSR system with shifted "
+      "Jacobi-preconditioned MINRES.");
 
   m.def(
       "csr_arnoldi",

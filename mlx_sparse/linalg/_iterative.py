@@ -17,6 +17,8 @@ from __future__ import annotations
 import mlx.core as mx
 
 import mlx_sparse._native as _native
+from mlx_sparse.linalg.utils.arrays import finite_scalar as _finite_scalar
+from mlx_sparse.linalg.utils.arrays import host_bool as _host_bool
 from mlx_sparse.linalg.utils.gmres import (
     left_preconditioned_gmres_host as _left_pgmres_host,
 )
@@ -355,7 +357,10 @@ def minres(
     x0=None,
     rtol: float = 1e-5,
     atol: float = 0.0,
+    shift: float = 0.0,
     maxiter: int | None = None,
+    M=None,
+    check_preconditioner: bool = True,
     callback=None,
 ):
     """Solve a sparse symmetric linear system with MINRES.
@@ -363,16 +368,15 @@ def minres(
     MINimum RESidual (MINRES) is an iterative Krylov solver for symmetric
     systems ``A @ x = b`` where ``A`` may be symmetric indefinite (having
     both positive and negative eigenvalues).  It minimises the 2-norm of the
-    residual at every step using a Lanczos-based recurrence and requires only
-    a constant number of vectors in memory, making it more memory-efficient
-    than GMRES for large symmetric indefinite problems.
+    residual at every step using a Paige-Saunders Lanczos recurrence and
+    requires only a constant number of vectors in memory, making it more
+    memory-efficient than GMRES for large symmetric indefinite problems.
 
     GPU note:
-        When GPU execution is selected, Lanczos basis construction uses the
-        native Lanczos kernel.  Residual setup, the small least-squares solve,
-        solution update, and final residual check run on the CPU.  The host
-        also copies the Lanczos coefficients and basis back before forming
-        the solution.
+        When GPU execution is selected, the unpreconditioned and
+        diagonal/Jacobi-preconditioned recurrences dispatch to native Metal
+        kernels.  The CPU path uses the matching native C++ recurrence.  No
+        Python callback is invoked inside the Krylov loop.
 
     Args:
         A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
@@ -383,7 +387,20 @@ def minres(
         rtol: Relative tolerance for the residual stopping criterion.
             Defaults to ``1e-5``.
         atol: Absolute tolerance floor.  Defaults to ``0.0``.
+        shift: Optional scalar shift.  The solver applies MINRES to
+            ``(A - shift * I) @ x = b``, matching SciPy's convention.
         maxiter: Maximum number of iterations.  Defaults to ``10 * n``.
+        M: Optional symmetric positive-definite inverse-apply preconditioner.
+            ``None`` and ``preconditioners.identity`` use the unpreconditioned
+            path. ``preconditioners.diagonal`` and ``preconditioners.jacobi``
+            dispatch to native diagonal-preconditioned MINRES. Other
+            preconditioner kinds are rejected until they have native SPD MINRES
+            kernels.
+        check_preconditioner: When ``True`` (default), diagonal/Jacobi
+            preconditioners must have finite strictly positive inverse diagonal
+            entries before entering native MINRES. Setting this to ``False``
+            disables the Python-side SPD validation but the native solver still
+            reports numerical breakdown for invalid preconditioners.
         callback: Not supported.  Pass ``None`` (the default).
 
     Returns:
@@ -396,11 +413,12 @@ def minres(
     Raises:
         NotImplementedError: If ``callback`` is not ``None``.
         TypeError: If ``A`` is a dense array or an unsupported type.
-        ValueError: If ``b`` is not rank-1 or its length does not match
-            ``A.shape[0]``.
+        ValueError: If ``b`` is not rank-1, its length does not match
+            ``A.shape[0]``, or a checked diagonal preconditioner is not SPD.
 
     Note:
-        MINRES requires ``A`` to be symmetric but not positive-definite.  For
+        MINRES requires ``A`` to be symmetric but not positive-definite.
+        Preconditioned MINRES additionally requires an SPD preconditioner. For
         SPD systems :func:`cg` is typically faster.  For non-symmetric systems
         use :func:`gmres`.
     """
@@ -410,6 +428,44 @@ def minres(
     csr = _float32_csr(_as_csr(A))
     rhs = _float32_array(b)
     guess = _guess(csr, rhs, x0)
+    shift_value = _finite_scalar("shift", shift)
+    maxiter_value = _maxiter(csr, maxiter)
+    if M is not None:
+        from mlx_sparse.linalg import preconditioners
+
+        pc = preconditioners.aspreconditioner(M, csr)
+        if isinstance(pc, preconditioners.IdentityPreconditioner):
+            pass
+        elif isinstance(pc, preconditioners.DiagonalPreconditioner):
+            if check_preconditioner and (
+                not pc.is_symmetric
+                or not _host_bool(mx.all(mx.isfinite(pc.inverse_diagonal)))
+                or not _host_bool(mx.all(pc.inverse_diagonal > 0.0))
+            ):
+                raise ValueError(
+                    "minres requires a symmetric positive-definite "
+                    "preconditioner; diagonal inverse entries must be finite "
+                    "and strictly positive."
+                )
+            x, info, _, _ = _native.csr_minres_jacobi(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.inverse_diagonal,
+                csr.shape,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                shift=shift_value,
+            )
+            return x, _info(info)
+        else:
+            raise TypeError(
+                "minres currently supports only identity, diagonal, and Jacobi "
+                "symmetric positive-definite native-backed preconditioners."
+            )
     x, info, _, _ = _native.csr_minres(
         csr.data,
         csr.indices,
@@ -419,6 +475,7 @@ def minres(
         csr.shape,
         rtol=float(rtol),
         atol=float(atol),
-        maxiter=_maxiter(csr, maxiter),
+        maxiter=maxiter_value,
+        shift=shift_value,
     )
     return x, _info(info)

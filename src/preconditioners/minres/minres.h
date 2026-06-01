@@ -21,9 +21,10 @@
 namespace mlx_sparse {
 
 std::tuple<mx::array, mx::array, mx::array, mx::array>
-csr_minres(const mx::array &data, const mx::array &indices,
-           const mx::array &indptr, const mx::array &b, const mx::array &x0,
-           int n_rows, int n_cols, float rtol, float atol, int maxiter,
-           float shift, mx::StreamOrDevice s = {});
+csr_minres_jacobi(const mx::array &data, const mx::array &indices,
+                  const mx::array &indptr, const mx::array &b,
+                  const mx::array &x0, const mx::array &inv_diag, int n_rows,
+                  int n_cols, float rtol, float atol, int maxiter, float shift,
+                  mx::StreamOrDevice s = {});
 
 } // namespace mlx_sparse

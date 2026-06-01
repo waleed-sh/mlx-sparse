@@ -64,15 +64,16 @@ Solver support matrix
      - No
      - Unpreconditioned, diagonal/Jacobi-preconditioned, and exact-factor
        preconditioned entries are native. Arnoldi work can run on GPU when
-       selected, restart bookkeeping, true-residual checks, and the small
+       selected; restart bookkeeping, true-residual checks, and the small
        least-squares solve run on CPU. Custom callable preconditioners use a
        documented host fallback.
    * - ``linalg.minres``
      - Iterative solve for square symmetric indefinite systems.
-     - Partial
+     - Full CPU + GPU
      - No
-     - Lanczos projection runs on GPU when selected, the projected
-       tridiagonal solve runs on CPU.
+     - Unpreconditioned and diagonal/Jacobi-preconditioned shifted MINRES use
+       native Paige-Saunders recurrence kernels. Diagonal/Jacobi
+       preconditioners must be SPD.
    * - ``linalg.spsolve``
      - One-shot direct solve for square systems.
      - Partial
@@ -228,8 +229,12 @@ preconditioners, and explicit inverse-apply callables or objects. The
 diagonal/Jacobi and exact-factor paths build Krylov vectors for ``M^{-1} A``
 through native solver entrypoints and test convergence against the true residual
 ``b - A @ x``. Explicit native LU/Cholesky factors apply through native
-permutation/triangular-solve bindings, guarded Accelerate factorized objects use
+permutation/triangular-solve bindings; guarded Accelerate factorized objects use
 Apple's CPU sparse solver when that support is built in. Custom callable/object
 preconditioners still use a slower host fallback because arbitrary Python cannot
-be called from native solver kernels. ``minres`` still rejects non-``None``
-preconditioners.
+be called from native solver kernels.
+
+``linalg.minres`` accepts ``identity`` plus finite strictly positive
+``diagonal``/``jacobi`` preconditioners. This is stricter than GMRES because
+preconditioned MINRES requires a symmetric positive-definite preconditioner.
+``minres(..., shift=s)`` solves ``(A - s I) x = b``.
