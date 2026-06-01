@@ -19,18 +19,21 @@ New Features
 * Added the public :mod:`mlx_sparse.linalg.preconditioners` namespace with
   identity, diagonal, and Jacobi preconditioner objects. Diagonal application
   uses a native CPU/Metal primitive, and ``cg(..., M=jacobi(A))`` dispatches to
-  a native Jacobi-preconditioned CG primitive rather than a Python solver loop.
+  a native Jacobi-preconditioned CG primitive rather than a Python solver loop
+  (`PR #27 <https://github.com/waleed-sh/mlx-sparse/pull/27>`_).
 
 * Added native ``csr_pcg_jacobi`` and ``diagonal_preconditioner_apply`` entry
   points under ``src/preconditioners/pcg`` and
   ``src/preconditioners/diagonal``, with Python bindings through
-  :mod:`mlx_sparse._native`.
+  :mod:`mlx_sparse._native`
+  (`PR #27 <https://github.com/waleed-sh/mlx-sparse/pull/27>`_).
 
 * Added left-preconditioned GMRES support for ``identity``,
   ``diagonal``/``jacobi``, and explicit inverse-apply callables or objects.
   Diagonal/Jacobi GMRES dispatches to native C++ with CPU/Metal
   preconditioned Arnoldi kernels under ``src/preconditioners/gmres``, custom
-  callables use a documented host fallback.
+  callables use a documented host fallback
+  (`PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_).
 
 * Added exact-factor preconditioners through ``from_factorized(solver)`` and
   ``exact(A, method="auto")``. The wrappers compose with ``FactorizedSolve``,
@@ -39,19 +42,22 @@ New Features
   inverse application where the underlying solver supports it. Explicit native
   LU/Cholesky factors now use native exact-apply bindings, and
   ``gmres(..., M=exact(...))`` routes through typed native exact-factor GMRES
-  entrypoints instead of the Python host fallback.
+  entrypoints instead of the Python host fallback
+  (`PR #31 <https://github.com/waleed-sh/mlx-sparse/pull/31>`_).
 
 * Added native shifted MINRES support and native diagonal/Jacobi-preconditioned
   MINRES under ``src/preconditioners/minres``. ``minres(..., shift=s)`` now
   solves ``(A - s I) x = b``, and ``minres(..., M=jacobi(A, check=True))``
-  accepts only symmetric positive-definite diagonal preconditioners by default.
+  accepts only symmetric positive-definite diagonal preconditioners by default
+  (`PR #32 <https://github.com/waleed-sh/mlx-sparse/pull/32>`_).
 
 * Added native ILU(0) preconditioners through
   ``preconditioners.ilu0(A, shift=0.0, check=True, reuse_analysis=False)``.
-  Setup is natural-order, no-fill, CPU-native C++ over canonical CSR input;
+  Setup is natural-order, no-fill, CPU-native C++ over canonical CSR input,
   application reuses native CSR triangular solves for rank-1/rank-2 right-hand
   sides on CPU or Metal. ``gmres(..., M=ilu0(A))`` routes through a native
-  left-preconditioned GMRES entrypoint.
+  left-preconditioned GMRES entrypoint
+  (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
 Improvements
 ~~~~~~~~~~~~
@@ -59,49 +65,58 @@ Improvements
 * Replaced GMRES' projected normal-equation solve with a native
   upper-Hessenberg QR solve using Givens rotations, avoiding the condition
   number squaring of ``H.T @ H`` during restarted GMRES updates while keeping
-  the existing CPU/Metal Arnoldi dispatch.
+  the existing CPU/Metal Arnoldi dispatch
+  (`PR #29 <https://github.com/waleed-sh/mlx-sparse/pull/29>`_).
 
 * Tightened GMRES status handling so a solve that reaches the true residual
   tolerance on the final allowed restart reports success instead of returning
-  the iteration budget as ``info``.
+  the iteration budget as ``info``
+  (`PR #29 <https://github.com/waleed-sh/mlx-sparse/pull/29>`_).
 
 * Replaced the native MINRES Lanczos-projection plus normal-equation
   least-squares path with a Paige-Saunders-style streaming recurrence. The new
   path keeps constant Krylov-vector storage, checks the true shifted residual
-  before reporting success, and has matching native CPU and Metal kernels.
+  before reporting success, and has matching native CPU and Metal kernels
+  (`PR #32 <https://github.com/waleed-sh/mlx-sparse/pull/32>`_).
 
 * Added true-residual convergence checks and finite inverse-diagonal handling
   to native Jacobi-preconditioned GMRES. The preconditioned basis is built for
-  ``M^{-1} A``, while success is still determined from ``b - A @ x``.
+  ``M^{-1} A``, while success is still determined from ``b - A @ x``
+  (`PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_).
 
 * Extended preconditioner normalization so reusable sparse direct-solve objects
   are recognized as exact inverse-apply preconditioners instead of generic
-  Python callables.
+  Python callables
+  (`PR #31 <https://github.com/waleed-sh/mlx-sparse/pull/31>`_).
 
 * Added guarded Accelerate exact-factor GMRES routing for real Accelerate
   factorized objects, preserving the optional Apple CPU sparse-solver boundary
   when the package is built with Accelerate support and falling back to native
-  explicit factors otherwise.
+  explicit factors otherwise
+  (`PR #31 <https://github.com/waleed-sh/mlx-sparse/pull/31>`_).
 
 * Hardened diagonal and Jacobi preconditioner validation with explicit finite
   setup checks, finite RHS checks for standalone inverse application,
   conservative positive-definite metadata, and an opt-in ``check=True`` path
-  for positive shifted Jacobi diagonals.
+  for positive shifted Jacobi diagonals
+  (`PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_).
 
 * Hardened ILU(0) setup with explicit failures for rectangular systems, missing
   diagonal structure, non-finite input or shift values, unsupported dtypes, and
   zero or near-zero pivots. Diagonal shifts are explicit and are applied only to
-  existing diagonal entries.
+  existing diagonal entries
+  (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
 * Kept ILU(0) triangular analysis caching opt-in through ``reuse_analysis``
   after focused CPU/GPU apply benchmarks showed mixed benefits across RHS rank
-  and device.
+  and device (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
 * Refactored shared sparse linalg helpers into the
   :mod:`mlx_sparse.linalg.utils` subpackage, separating array/dtype handling,
   sparse input normalization, iterative solver bookkeeping, direct-solver
   validation, spectral sizing, operator construction, and preconditioner
-  validation from the public algorithm modules.
+  validation from the public algorithm modules
+  (`PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_).
 
 Tests
 ~~~~~
@@ -109,64 +124,64 @@ Tests
 * Added GMRES robustness tests for final-restart true-residual success,
   nonsymmetric diagonal-dominant systems against SciPy and dense NumPy solves,
   convection-diffusion-like systems against SciPy, and the remaining
-  Hilbert-like float32 limitation with a bounded-residual assertion.
+  Hilbert-like float32 limitation with a bounded-residual assertion
+  (`PR #29 <https://github.com/waleed-sh/mlx-sparse/pull/29>`_).
 
 * Expanded preconditioner coverage for rank-1/rank-2 RHS application,
   low-precision RHS promotion, CSR/COO/CSC Jacobi setup, input immutability,
   SciPy PCG comparison, dense NumPy residual checks, and pathological
-  near-singular or singular PCG behavior.
+  near-singular or singular PCG behavior
+  (`PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_).
 
 * Added GMRES preconditioner tests covering native identity dispatch,
   native Jacobi/diagonal left-preconditioned GMRES against SciPy, direct native
   true-residual reporting, non-finite inverse-diagonal breakdown handling,
-  callable inverse-apply host fallback, and sparse-matrix ``M`` rejection.
+  callable inverse-apply host fallback, and sparse-matrix ``M`` rejection
+  (`PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_).
 
 * Added exact-factor preconditioner tests covering native LU and Cholesky
   metadata, native exact-apply bindings against dense NumPy solves, rank-1/rank-2
   application, ``FactorizedSolve`` backend metadata preservation, ``exact(A)``
   convenience construction, rectangular factorization rejection, non-finite
   output rejection, and GMRES composition with assertions that exact LU/Cholesky
-  do not use the Python host fallback.
+  do not use the Python host fallback
+  (`PR #31 <https://github.com/waleed-sh/mlx-sparse/pull/31>`_).
 
 * Added MINRES recurrence tests for symmetric indefinite systems, singular
   compatible systems, shifted solves against SciPy's convention,
   Jacobi-preconditioned indefinite systems against SciPy ``LinearOperator``
   preconditioning, near-singular diagonal preconditioning, and strict rejection
-  of non-SPD or non-native MINRES preconditioners.
+  of non-SPD or non-native MINRES preconditioners
+  (`PR #32 <https://github.com/waleed-sh/mlx-sparse/pull/32>`_).
 
 * Added ILU(0) tests against an internal natural-order ILU(0) reference,
   dense NumPy triangular-solve results, SciPy ``spilu`` quality comparisons,
   native rank-1/rank-2 apply paths on CPU and GPU-capable devices, explicit
   failure modes, input immutability, and GMRES iteration reduction on
-  nonsymmetric diagonal-dominant and convection-diffusion-like systems.
+  nonsymmetric diagonal-dominant and convection-diffusion-like systems
+  (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
 Benchmarks
 ~~~~~~~~~~
 
-* Added a focused Jacobi PCG validation benchmark entrypoint that writes setup
-  time, solve time, true residual, matrix metadata, preconditioner metadata,
-  and SciPy CG/Jacobi reference measurements to
-  ``benchmarks/reports/v0.0.5b0/jacobi_pcg``.
+* Added ``benchmarks/bench_jacobi_pcg_validation.py`` for Jacobi PCG validation
+  with setup time, solve time, true residual, matrix metadata, preconditioner
+  metadata, and SciPy CG/Jacobi reference measurements
+  (`PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_).
 
-* Recorded before/after GMRES preconditioner measurements under
-  ``benchmarks/reports/v0.0.5b0/gmres_preconditioners_*``, including the
-  unchanged unpreconditioned GMRES utility benchmark and a focused native
-  Jacobi-GMRES timing.
+* Added focused native Jacobi-GMRES benchmark coverage comparing
+  preconditioned GMRES against the existing unpreconditioned solver benchmark
+  (`PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_).
 
-* Recorded the pre-change MINRES utility benchmark under
-  ``benchmarks/reports/v0.0.5b0/minres_recurrence_before`` before replacing the
-  normal-equation projection path.
+* Added focused MINRES recurrence benchmark coverage around the shifted
+  Paige-Saunders implementation using the existing linalg solver benchmark
+  (`PR #32 <https://github.com/waleed-sh/mlx-sparse/pull/32>`_).
 
-* Recorded the post-change MINRES utility benchmark under
-  ``benchmarks/reports/v0.0.5b0/minres_recurrence_after``. On the sampled
-  ``n=256`` CPU benchmark, MINRES changed from ``25.9457 ms`` to ``0.0373 ms``
-  while preserving convergence.
-
-* Added ``benchmarks/bench_ilu0_preconditioner.py`` and recorded ILU(0)
-  before/after reports under ``benchmarks/reports/v0.0.5b0/ilu0_*``. The report
-  includes setup time, rank-1/rank-2 apply time, analyzed-apply timing, GMRES
-  iteration counts, true residuals, fill ratio, CPU/GPU device, and SciPy
-  ``spilu`` comparison context.
+* Added ``benchmarks/bench_ilu0_preconditioner.py`` for ILU(0) setup,
+  rank-1/rank-2 apply, analyzed-apply timing, GMRES iteration counts, true
+  residuals, fill ratio, CPU/GPU device metadata, and SciPy ``spilu``
+  comparison context
+  (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
 Documentation
 ~~~~~~~~~~~~~
@@ -176,7 +191,13 @@ Documentation
   exact-factor wrappers, callable GMRES host fallback behavior, native
   exact-factor GMRES routing, native shifted/diagonal-preconditioned MINRES,
   native ILU(0) GMRES routing, CPU/Metal and Accelerate boundaries, and the
-  remaining incomplete-factor preconditioner gaps.
+  remaining incomplete-factor preconditioner gaps
+  (`PR #27 <https://github.com/waleed-sh/mlx-sparse/pull/27>`_,
+  `PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_,
+  `PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_,
+  `PR #31 <https://github.com/waleed-sh/mlx-sparse/pull/31>`_,
+  `PR #32 <https://github.com/waleed-sh/mlx-sparse/pull/32>`_,
+  `PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------
@@ -194,7 +215,7 @@ New Features
   worker settings, per-family SpGEMM/solver worker overrides, and separate
   SpGEMM/solver parallel gates, including direct attribute reads/writes such as
   ``ms.runtime.N_THREADS = 8``, temporary context-manager overrides, and
-  structured ``runtime.info()`` diagnostics for benchmark reports
+  structured ``runtime.info()`` diagnostics for performance tooling
   (`PR #15 <https://github.com/waleed-sh/mlx-sparse/pull/15>`_).
 
 * Added documented runtime configuration variables for ``CPU_THREADS``,
