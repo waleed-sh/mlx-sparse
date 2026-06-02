@@ -33,6 +33,7 @@ template <typename I>
   threadgroup float shared_rr_new;
   threadgroup int shared_status;
   threadgroup int shared_iters;
+  threadgroup int shared_needs_scale;
 
   device float *r = work;
   device float *p = work + n_rows;
@@ -49,6 +50,7 @@ template <typename I>
 
   float r_acc = 0.0f;
   float b_acc = 0.0f;
+  float invalid_acc = 0.0f;
   for (int i = static_cast<int>(lane); i < n_rows;
        i += static_cast<int>(k_linalg_threads)) {
     const float ri = b[i] - ap[i];
@@ -56,19 +58,29 @@ template <typename I>
     p[i] = ri;
     r_acc += ri * ri;
     b_acc += b[i] * b[i];
+    invalid_acc +=
+        (!isfinite(ri) || !isfinite(b[i]) || !isfinite(x[i])) ? 1.0f : 0.0f;
   }
   const float rr0 = reduce_sum_256(r_acc, scratch, lane);
   const float bb = reduce_sum_256(b_acc, scratch, lane);
+  const float invalid0 = reduce_sum_256(invalid_acc, scratch, lane);
   if (lane == 0) {
     shared_rr = rr0;
     shared_tol = max(atol, rtol * sqrt(max(bb, 0.0f)));
-    shared_status = sqrt(max(rr0, 0.0f)) <= shared_tol ? 0 : maxiter;
+    const float initial_residual = sqrt(max(rr0, 0.0f));
+    shared_status = maxiter > 0 ? maxiter : 1;
+    if (invalid0 != 0.0f || !isfinite(rr0) || !isfinite(initial_residual) ||
+        !isfinite(shared_tol)) {
+      shared_status = -3;
+    } else if (initial_residual <= shared_tol) {
+      shared_status = 0;
+    }
     shared_iters = 0;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   for (int it = 1; it <= maxiter; ++it) {
-    if (shared_status == 0 || shared_status == -1) {
+    if (shared_status <= 0) {
       break;
     }
 
@@ -78,44 +90,88 @@ template <typename I>
     const float denom = vector_dot_f32(p, ap, n_rows, scratch, lane);
     if (lane == 0) {
       shared_denom = denom;
-      if (fabs(denom) <= 1.1920928955078125e-7f) {
-        shared_status = -1;
+      shared_needs_scale = 0;
+      if (!isfinite(denom)) {
+        shared_status = -3;
+      } else if (fabs(denom) <= 1.1920928955078125e-7f) {
+        shared_needs_scale = 1;
       }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (shared_status == -1) {
+    if (shared_status < 0) {
+      break;
+    }
+    if (shared_needs_scale != 0) {
+      const float p_norm2 = vector_dot_f32(p, p, n_rows, scratch, lane);
+      const float ap_norm2 = vector_dot_f32(ap, ap, n_rows, scratch, lane);
+      const float denom_scale = sqrt(max(p_norm2 * ap_norm2, 0.0f));
+      const float denom_tol =
+          min(1.1920928955078125e-7f,
+              1.4210854715202004e-14f * max(1.0f, denom_scale));
+      if (lane == 0) {
+        if (!isfinite(denom_scale)) {
+          shared_status = -3;
+        } else if (fabs(shared_denom) <= denom_tol) {
+          shared_status = -1;
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (shared_status < 0) {
       break;
     }
 
     const float alpha = shared_rr / shared_denom;
     float rr_new_local = 0.0f;
+    float update_invalid = 0.0f;
     for (int i = static_cast<int>(lane); i < n_rows;
          i += static_cast<int>(k_linalg_threads)) {
-      x[i] += alpha * p[i];
+      const float xi = x[i] + alpha * p[i];
       const float ri = r[i] - alpha * ap[i];
-      r[i] = ri;
-      rr_new_local += ri * ri;
+      const bool valid_update = isfinite(alpha) && isfinite(xi) && isfinite(ri);
+      update_invalid += valid_update ? 0.0f : 1.0f;
+      if (valid_update) {
+        x[i] = xi;
+        r[i] = ri;
+        rr_new_local += ri * ri;
+      }
     }
     const float rr_new = reduce_sum_256(rr_new_local, scratch, lane);
+    const float invalid_update = reduce_sum_256(update_invalid, scratch, lane);
     if (lane == 0) {
       shared_rr_new = rr_new;
       shared_iters = it;
-      if (sqrt(max(rr_new, 0.0f)) <= shared_tol) {
+      const float r_norm = sqrt(max(rr_new, 0.0f));
+      if (invalid_update != 0.0f || !isfinite(rr_new) || !isfinite(r_norm)) {
+        shared_status = -3;
+      } else if (r_norm <= shared_tol) {
         shared_status = 0;
       }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (shared_status == 0) {
-      shared_rr = shared_rr_new;
+    if (shared_status <= 0) {
+      if (shared_status == 0) {
+        shared_rr = shared_rr_new;
+      }
       break;
     }
 
     const float beta = shared_rr_new / shared_rr;
+    float beta_invalid = 0.0f;
     for (int i = static_cast<int>(lane); i < n_rows;
          i += static_cast<int>(k_linalg_threads)) {
-      p[i] = r[i] + beta * p[i];
+      const float pi = r[i] + beta * p[i];
+      const bool valid_beta = isfinite(beta) && isfinite(pi);
+      beta_invalid += valid_beta ? 0.0f : 1.0f;
+      if (valid_beta) {
+        p[i] = pi;
+      }
     }
+    const float invalid_beta = reduce_sum_256(beta_invalid, scratch, lane);
     if (lane == 0) {
+      if (invalid_beta != 0.0f) {
+        shared_status = -3;
+      }
       shared_rr = shared_rr_new;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);

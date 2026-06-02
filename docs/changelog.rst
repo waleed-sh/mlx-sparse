@@ -73,8 +73,28 @@ New Features
   ``cg(..., M=chebyshev(A))`` use native CPU/Metal kernels with only sparse
   matrix-vector products and vector updates.
 
+* Added optional ``return_info=True`` diagnostics for ``cg``, ``gmres``, and
+  ``minres``. The default return remains ``(x, int)``, while the opt-in path
+  returns a structured ``SolverInfo`` with status, final true residual norm,
+  iteration count, convergence reason, breakdown reason, and preconditioner
+  metadata where applicable.
+
 Improvements
 ~~~~~~~~~~~~
+
+* Normalized iterative-solver status handling for zero-iteration budgets and
+  numerical breakdowns. Native CG, PCG, GMRES, and preconditioned GMRES paths
+  now avoid reporting ``info == 0`` for an unconverged solve when
+  ``maxiter=0``.
+
+* Added opt-in final callbacks for native ``cg``, ``gmres``, and ``minres``
+  without adding Python calls inside CPU/Metal Krylov loops. GMRES
+  ``callback_type="x"`` receives the final solution, while ``"pr_norm"`` and
+  ``"legacy"`` receive the final reported residual norm.
+
+* Added scale-aware denominator and finite-value checks to the native
+  unpreconditioned CG CPU/Metal paths, matching the robustness policy already
+  used by the preconditioned CG implementations.
 
 * Replaced GMRES' projected normal-equation solve with a native
   upper-Hessenberg QR solve using Givens rotations, avoiding the condition

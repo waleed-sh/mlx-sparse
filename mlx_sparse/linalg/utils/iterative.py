@@ -12,15 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Iterative-solver argument and return-value helpers."""
+"""Iterative-solver argument helpers."""
 
 from __future__ import annotations
 
 import mlx.core as mx
-import numpy as np
 
 from mlx_sparse._csr import CSRArray
-from mlx_sparse._host import to_numpy
 from mlx_sparse.linalg.utils.arrays import ensure_float32_array, ensure_float32_csr
 from mlx_sparse.linalg.utils.sparse import canonical_csr
 
@@ -46,13 +44,6 @@ def float32_csr(A: CSRArray) -> CSRArray:
     """Return iterative-solver CSR input with float32 values."""
 
     return ensure_float32_csr(A, context="sparse iterative solvers")
-
-
-def solver_info_to_int(info) -> int:
-    """Synchronize a scalar native ``info`` array and return it as ``int``."""
-
-    mx.eval(info)
-    return int(np.asarray(to_numpy(info)).item())
 
 
 def initial_guess(csr: CSRArray, b: mx.array, x0) -> mx.array:

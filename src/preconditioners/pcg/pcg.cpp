@@ -160,7 +160,7 @@ void csr_pcg_jacobi_cpu_impl(const mx::array &data, const mx::array &indices,
     }
 
     const float eps = std::numeric_limits<float>::epsilon();
-    int status = maxiter;
+    int status = maxiter > 0 ? maxiter : 1;
     int completed = 0;
     for (int it = 1; it <= maxiter; ++it) {
       csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, p.data(), ap.data(),

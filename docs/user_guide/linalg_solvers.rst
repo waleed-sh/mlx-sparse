@@ -40,6 +40,29 @@ solver kernels normalize sparse inputs to canonical CSR at solver entry.
 Accelerate-backed direct solves normalize supported real inputs to canonical
 CSC because Apple's sparse solver API is CSC-oriented.
 
+Diagnostics and callbacks
+-------------------------
+
+``cg``, ``gmres``, and ``minres`` still return ``(x, info)`` by default.
+``info`` follows the sparse linalg convention used throughout this release:
+``0`` means converged, positive values mean the iteration budget was exhausted,
+and negative values mean numerical breakdown or an invalid iterative path.
+
+Pass ``return_info=True`` to replace the integer with a structured
+``SolverInfo`` object. It records the integer status, final true residual norm,
+iteration count, convergence reason, breakdown reason when applicable, solver
+name, tolerance settings, restart size for GMRES, and the preconditioner kind
+when one is used. Preconditioned residual norms are reported only by native
+paths that expose them; otherwise the field is ``None``.
+
+Python callbacks are opt-in exit callbacks for the native sparse solvers. They
+are called once after the native CPU/Metal loop finishes, so the default solve
+path does not synchronize with Python inside each Krylov iteration. ``cg`` and
+``minres`` callbacks receive the final solution. ``gmres(callback_type="x")``
+receives the final solution, while ``"pr_norm"`` and ``"legacy"`` receive the
+final reported residual norm. Use ``return_info=True`` for solver diagnostics
+that do not need a callback.
+
 Solver support matrix
 ---------------------
 

@@ -111,6 +111,173 @@ def _relative_residual(dense, x, b):
     return np.linalg.norm(dense @ x - b) / max(np.linalg.norm(b), 1.0)
 
 
+def test_iterative_solvers_zero_rhs_return_structured_success(mx, to_numpy):
+    _require_native()
+    dense = np.array(
+        [[4.0, -1.0, 0.0], [-1.0, 3.0, -0.5], [0.0, -0.5, 2.0]],
+        dtype=np.float32,
+    )
+    csr = _csr_from_dense(mx, dense)
+    b = mx.zeros((3,), dtype=mx.float32)
+
+    for solver in (linalg.cg, linalg.gmres, linalg.minres):
+        x, info = solver(csr, b, rtol=1e-6, atol=0.0, maxiter=8, return_info=True)
+        assert info.status == 0, solver.__name__
+        assert info.converged
+        assert info.iterations == 0
+        assert info.residual_norm == pytest.approx(0.0)
+        np.testing.assert_allclose(to_numpy(x), np.zeros(3, dtype=np.float32))
+
+
+def test_iterative_solvers_already_converged_x0_return_zero_iterations(mx, to_numpy):
+    _require_native()
+    dense = np.array(
+        [[5.0, 1.0, 0.0], [1.0, 4.0, -0.25], [0.0, -0.25, 3.0]],
+        dtype=np.float32,
+    )
+    csr = _csr_from_dense(mx, dense)
+    x_true = np.array([0.5, -1.0, 2.0], dtype=np.float32)
+    b_np = dense @ x_true
+    b = mx.array(b_np)
+    x0 = mx.array(x_true)
+
+    for solver in (linalg.cg, linalg.gmres, linalg.minres):
+        x, info = solver(
+            csr, b, x0=x0, rtol=1e-6, atol=1e-7, maxiter=8, return_info=True
+        )
+        assert info.status == 0, solver.__name__
+        assert info.iterations == 0
+        assert info.residual_norm <= 1e-6
+        np.testing.assert_allclose(to_numpy(x), x_true, rtol=0.0, atol=0.0)
+
+
+def test_iterative_solvers_zero_iteration_budget_reports_nonconvergence(mx, to_numpy):
+    _require_native()
+    dense = np.array(
+        [[4.0, -1.0, 0.0], [-1.0, 3.0, -0.5], [0.0, -0.5, 2.0]],
+        dtype=np.float32,
+    )
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([1.0, -2.0, 0.5], dtype=np.float32)
+    b = mx.array(b_np)
+
+    for solver in (linalg.cg, linalg.gmres, linalg.minres):
+        x, info = solver(csr, b, rtol=1e-8, atol=0.0, maxiter=0, return_info=True)
+        assert info.status > 0, solver.__name__
+        assert info.convergence_reason == "iteration_limit"
+        assert info.iterations == 0
+        assert np.isfinite(info.residual_norm), solver.__name__
+        assert info.residual_norm > 1e-6, solver.__name__
+        np.testing.assert_allclose(to_numpy(x), np.zeros_like(b_np))
+
+
+def test_callable_gmres_zero_iteration_budget_checks_true_residual(mx, to_numpy):
+    _require_native()
+    dense = np.array([[3.0, 0.5], [0.0, 2.0]], dtype=np.float32)
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([1.0, -2.0], dtype=np.float32)
+
+    x, info = linalg.gmres(
+        csr,
+        mx.array(b_np),
+        M=lambda r: r,
+        rtol=1e-8,
+        atol=0.0,
+        restart=2,
+        maxiter=0,
+        return_info=True,
+    )
+
+    assert info.status > 0
+    assert info.convergence_reason == "iteration_limit"
+    assert info.iterations == 0
+    assert info.residual_norm == pytest.approx(np.linalg.norm(b_np), rel=1e-6)
+    np.testing.assert_allclose(to_numpy(x), np.zeros_like(b_np))
+
+
+def test_singular_compatible_diagonal_system_converges_finitely(mx, to_numpy):
+    _require_native()
+    dense = np.diag(np.array([0.0, 2.0, 5.0], dtype=np.float32))
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([0.0, 4.0, -5.0], dtype=np.float32)
+    b = mx.array(b_np)
+
+    for solver in (linalg.cg, linalg.gmres, linalg.minres):
+        x, info = solver(csr, b, rtol=1e-6, atol=1e-7, maxiter=16, return_info=True)
+        assert info.status == 0, solver.__name__
+        assert np.isfinite(info.residual_norm), solver.__name__
+        _assert_solution_residual(dense, to_numpy(x), b_np, rtol=1e-5, atol=1e-5)
+
+
+def test_gmres_callable_preconditioner_nonfinite_output_reports_breakdown(mx, to_numpy):
+    _require_native()
+    dense = np.array([[3.0, 0.5], [0.0, 2.0]], dtype=np.float32)
+    csr = _csr_from_dense(mx, dense)
+    b = mx.array([1.0, 2.0], dtype=mx.float32)
+
+    def nonfinite_preconditioner(x):
+        return mx.full(x.shape, np.nan, dtype=mx.float32)
+
+    solution, info = linalg.gmres(
+        csr,
+        b,
+        M=nonfinite_preconditioner,
+        rtol=1e-6,
+        atol=1e-7,
+        restart=2,
+        maxiter=4,
+        return_info=True,
+    )
+
+    assert info.status < 0
+    assert info.breakdown_reason == "non_finite"
+    assert np.all(np.isfinite(to_numpy(solution)))
+
+
+def test_cg_rejects_non_spd_preconditioner_with_negative_status(mx, to_numpy):
+    _require_native()
+    dense = np.diag(np.array([2.0, 3.0], dtype=np.float32))
+    csr = _csr_from_dense(mx, dense)
+    b = mx.array([1.0, 1.0], dtype=mx.float32)
+    M = preconditioners.diagonal(mx.array([-1.0, 1.0], dtype=mx.float32), inverse=True)
+
+    x, info = linalg.cg(
+        csr,
+        b,
+        M=M,
+        rtol=1e-6,
+        atol=1e-7,
+        maxiter=8,
+        return_info=True,
+    )
+
+    assert info.status < 0
+    assert info.breakdown_reason == "non_positive_preconditioned_inner_product"
+    assert np.all(np.isfinite(to_numpy(x)))
+
+
+def test_jacobi_pcg_badly_scaled_diagonal_reports_solver_info(mx, to_numpy):
+    _require_native()
+    dense = np.diag(np.array([1e-8, 1.0, 2.0, 3.0], dtype=np.float32))
+    csr = _csr_from_dense(mx, dense)
+    b_np = np.array([1.0, -1.0, 0.5, 2.0], dtype=np.float32)
+
+    x, info = linalg.cg(
+        csr,
+        mx.array(b_np),
+        M=preconditioners.jacobi(csr, check=True),
+        rtol=1e-6,
+        atol=1e-7,
+        maxiter=8,
+        return_info=True,
+    )
+
+    assert info.status == 0
+    assert info.preconditioner == "jacobi"
+    assert info.residual_norm <= 1e-5
+    _assert_solution_residual(dense, to_numpy(x), b_np, rtol=1e-5, atol=1e-5)
+
+
 def test_iterative_solvers_canonicalize_duplicate_unsorted_csr(mx, to_numpy):
     _require_native()
     csr, dense = _noncanonical_spd(mx)

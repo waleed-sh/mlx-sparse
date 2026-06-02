@@ -19,6 +19,7 @@ import mlx.core as mx
 import mlx_sparse._native as _native
 from mlx_sparse.linalg.utils.arrays import finite_scalar as _finite_scalar
 from mlx_sparse.linalg.utils.arrays import host_bool as _host_bool
+from mlx_sparse.linalg.utils.diagnostics import finish_solver_result as _finish
 from mlx_sparse.linalg.utils.gmres import (
     left_preconditioned_gmres_host as _left_pgmres_host,
 )
@@ -27,7 +28,6 @@ from mlx_sparse.linalg.utils.iterative import float32_array as _float32_array
 from mlx_sparse.linalg.utils.iterative import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.iterative import initial_guess as _guess
 from mlx_sparse.linalg.utils.iterative import max_iterations as _maxiter
-from mlx_sparse.linalg.utils.iterative import solver_info_to_int as _info
 
 
 def cg(
@@ -40,6 +40,7 @@ def cg(
     maxiter: int | None = None,
     M=None,
     callback=None,
+    return_info: bool = False,
 ):
     """Solve a sparse SPD linear system with the conjugate gradient method.
 
@@ -81,11 +82,18 @@ def cg(
             dispatches to a native Chebyshev-polynomial PCG loop whose
             preconditioner application uses only sparse matrix-vector products
             and vector updates.
-        callback: Not supported.  Pass ``None`` (the default).
+        callback: Optional callable invoked once after the native solve
+            completes.  Native CPU/Metal Krylov loops do not call Python inside
+            each iteration; using a callback synchronizes only the final
+            solution.
+        return_info: If ``True``, return a structured diagnostic object instead
+            of the integer ``info`` flag.  The default remains ``False``.
 
     Returns:
         A tuple ``(x, info)`` where ``x`` is the approximate solution array
-        of shape ``(n,)`` and ``info`` is an integer convergence flag.
+        of shape ``(n,)`` and ``info`` is an integer convergence flag by
+        default.  With ``return_info=True``, ``info`` is a ``SolverInfo``
+        diagnostic object.
         ``info == 0`` means the solver converged to the requested tolerance.
         ``info > 0`` is the iteration count at which the solver stopped without
         converging. ``info < 0`` indicates numerical breakdown, such as a
@@ -93,7 +101,6 @@ def cg(
         scale-aware near-zero denominator.
 
     Raises:
-        NotImplementedError: If ``callback`` is not ``None``.
         TypeError: If ``A`` is a dense ``mlx.core.array`` or an unsupported
             type, or if ``M`` is not a native-backed identity, diagonal, or
             Jacobi preconditioner.
@@ -121,19 +128,20 @@ def cg(
             print(info)  # 0 means converged
     """
 
-    if callback is not None:
-        raise NotImplementedError("native sparse cg does not use Python callbacks.")
     csr = _float32_csr(_as_csr(A))
     rhs = _float32_array(b)
     guess = _guess(csr, rhs, x0)
+    maxiter_value = _maxiter(csr, maxiter)
+    preconditioner_kind = None
     if M is not None:
         from mlx_sparse.linalg import preconditioners
 
         pc = preconditioners.aspreconditioner(M, csr)
+        preconditioner_kind = pc.kind
         if isinstance(pc, preconditioners.IdentityPreconditioner):
             pass
         elif isinstance(pc, preconditioners.DiagonalPreconditioner):
-            x, info, _, _ = _native.csr_pcg_jacobi(
+            x, info, residual, iterations = _native.csr_pcg_jacobi(
                 csr.data,
                 csr.indices,
                 csr.indptr,
@@ -143,12 +151,24 @@ def cg(
                 csr.shape,
                 rtol=float(rtol),
                 atol=float(atol),
-                maxiter=_maxiter(csr, maxiter),
+                maxiter=maxiter_value,
             )
-            return x, _info(info)
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="cg",
+                return_info=bool(return_info),
+                callback=callback,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                preconditioner=preconditioner_kind,
+            )
         elif isinstance(pc, preconditioners.IC0Preconditioner):
             upper = pc._upper()
-            x, info, _, _ = _native.csr_pcg_ic0(
+            x, info, residual, iterations = _native.csr_pcg_ic0(
                 csr.data,
                 csr.indices,
                 csr.indptr,
@@ -163,11 +183,23 @@ def cg(
                 csr.shape,
                 rtol=float(rtol),
                 atol=float(atol),
-                maxiter=_maxiter(csr, maxiter),
+                maxiter=maxiter_value,
             )
-            return x, _info(info)
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="cg",
+                return_info=bool(return_info),
+                callback=callback,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                preconditioner=preconditioner_kind,
+            )
         elif isinstance(pc, preconditioners.ChebyshevPreconditioner):
-            x, info, _, _ = _native.csr_pcg_chebyshev(
+            x, info, residual, iterations = _native.csr_pcg_chebyshev(
                 csr.data,
                 csr.indices,
                 csr.indptr,
@@ -182,15 +214,27 @@ def cg(
                 lambda_max=pc.lambda_max,
                 rtol=float(rtol),
                 atol=float(atol),
-                maxiter=_maxiter(csr, maxiter),
+                maxiter=maxiter_value,
             )
-            return x, _info(info)
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="cg",
+                return_info=bool(return_info),
+                callback=callback,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                preconditioner=preconditioner_kind,
+            )
         else:
             raise TypeError(
                 "cg currently supports only identity, diagonal, Jacobi, IC(0), "
                 "and Chebyshev native-backed preconditioners."
             )
-    x, info, _, _ = _native.csr_cg(
+    x, info, residual, iterations = _native.csr_cg(
         csr.data,
         csr.indices,
         csr.indptr,
@@ -199,9 +243,21 @@ def cg(
         csr.shape,
         rtol=float(rtol),
         atol=float(atol),
-        maxiter=_maxiter(csr, maxiter),
+        maxiter=maxiter_value,
     )
-    return x, _info(info)
+    return _finish(
+        x,
+        info,
+        residual,
+        iterations,
+        solver="cg",
+        return_info=bool(return_info),
+        callback=callback,
+        rtol=float(rtol),
+        atol=float(atol),
+        maxiter=maxiter_value,
+        preconditioner=preconditioner_kind,
+    )
 
 
 def gmres(
@@ -216,6 +272,7 @@ def gmres(
     M=None,
     callback=None,
     callback_type: str = "x",
+    return_info: bool = False,
 ):
     """Solve a sparse linear system with restarted GMRES.
 
@@ -258,24 +315,29 @@ def gmres(
             inverse-apply objects use a host fallback loop. All preconditioned
             paths build Krylov vectors for ``M^{-1} A`` while convergence is
             tested against the true residual ``b - A @ x``.
-        callback: Not supported.  Pass ``None`` (the default).
-        callback_type: Accepted for API compatibility but ignored.
+        callback: Optional callable invoked once after the native solve
+            completes.  Native CPU/Metal solver loops do not call Python inside
+            each iteration. ``callback_type="x"`` receives the final solution;
+            ``"pr_norm"`` and ``"legacy"`` receive the final reported residual
+            norm.
+        callback_type: One of ``"x"``, ``"pr_norm"``, or ``"legacy"``.
+        return_info: If ``True``, return a structured diagnostic object instead
+            of the integer ``info`` flag.  The default remains ``False``.
 
     Returns:
         A tuple ``(x, info)`` where ``x`` is the approximate solution of
-        shape ``(n,)`` and ``info`` is an integer convergence flag.
+        shape ``(n,)`` and ``info`` is an integer convergence flag by default.
+        With ``return_info=True``, ``info`` is a ``SolverInfo`` diagnostic
+        object.
         ``info == 0`` means the solver converged.  ``info > 0`` is the
         iteration count at termination without convergence.
 
     Raises:
-        NotImplementedError: If ``callback`` is not ``None``.
         TypeError: If ``A`` is a dense array or an unsupported type.
         ValueError: If ``b`` is not rank-1, its length does not match
             ``A.shape[0]``, or ``restart`` is not positive.
     """
 
-    if callback is not None:
-        raise NotImplementedError("native sparse gmres does not use Python callbacks.")
     if callback_type not in {"x", "pr_norm", "legacy"}:
         raise ValueError("callback_type must be 'x', 'pr_norm', or 'legacy'.")
     csr = _float32_csr(_as_csr(A))
@@ -285,12 +347,14 @@ def gmres(
     if restart_value <= 0:
         raise ValueError("restart must be positive.")
     maxiter_value = _maxiter(csr, maxiter)
+    preconditioner_kind = None
     if M is not None:
         from mlx_sparse.linalg import preconditioners
 
         pc = preconditioners.aspreconditioner(M, csr)
+        preconditioner_kind = pc.kind
         if isinstance(pc, preconditioners.DiagonalPreconditioner):
-            x, info, _, _ = _native.csr_gmres_jacobi(
+            x, info, residual, iterations = _native.csr_gmres_jacobi(
                 csr.data,
                 csr.indices,
                 csr.indptr,
@@ -303,11 +367,25 @@ def gmres(
                 restart=restart_value,
                 maxiter=maxiter_value,
             )
-            return x, _info(info)
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="gmres",
+                return_info=bool(return_info),
+                callback=callback,
+                callback_type=callback_type,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                restart=restart_value,
+                preconditioner=preconditioner_kind,
+            )
         if isinstance(pc, preconditioners.ExactFactorPreconditioner):
             factor = pc.native_factorization
             if pc.native_apply_kind == "lu" and factor is not None:
-                x, info, _, _ = _native.csr_gmres_exact_lu(
+                x, info, residual, iterations = _native.csr_gmres_exact_lu(
                     csr.data,
                     csr.indices,
                     csr.indptr,
@@ -326,10 +404,24 @@ def gmres(
                     restart=restart_value,
                     maxiter=maxiter_value,
                 )
-                return x, _info(info)
+                return _finish(
+                    x,
+                    info,
+                    residual,
+                    iterations,
+                    solver="gmres",
+                    return_info=bool(return_info),
+                    callback=callback,
+                    callback_type=callback_type,
+                    rtol=float(rtol),
+                    atol=float(atol),
+                    maxiter=maxiter_value,
+                    restart=restart_value,
+                    preconditioner=preconditioner_kind,
+                )
             if pc.native_apply_kind == "cholesky" and factor is not None:
                 upper = factor._upper()
-                x, info, _, _ = _native.csr_gmres_exact_cholesky(
+                x, info, residual, iterations = _native.csr_gmres_exact_cholesky(
                     csr.data,
                     csr.indices,
                     csr.indptr,
@@ -347,9 +439,23 @@ def gmres(
                     restart=restart_value,
                     maxiter=maxiter_value,
                 )
-                return x, _info(info)
+                return _finish(
+                    x,
+                    info,
+                    residual,
+                    iterations,
+                    solver="gmres",
+                    return_info=bool(return_info),
+                    callback=callback,
+                    callback_type=callback_type,
+                    rtol=float(rtol),
+                    atol=float(atol),
+                    maxiter=maxiter_value,
+                    restart=restart_value,
+                    preconditioner=preconditioner_kind,
+                )
             if pc.native_apply_kind == "accelerate" and factor is not None:
-                x, info, _, _ = _native.csr_gmres_exact_accelerate(
+                x, info, residual, iterations = _native.csr_gmres_exact_accelerate(
                     csr.data,
                     csr.indices,
                     csr.indptr,
@@ -362,13 +468,27 @@ def gmres(
                     restart=restart_value,
                     maxiter=maxiter_value,
                 )
-                return x, _info(info)
+                return _finish(
+                    x,
+                    info,
+                    residual,
+                    iterations,
+                    solver="gmres",
+                    return_info=bool(return_info),
+                    callback=callback,
+                    callback_type=callback_type,
+                    rtol=float(rtol),
+                    atol=float(atol),
+                    maxiter=maxiter_value,
+                    restart=restart_value,
+                    preconditioner=preconditioner_kind,
+                )
             raise TypeError(
                 "gmres exact-factor preconditioners require a native LU, "
                 "native Cholesky, or guarded Accelerate factorization."
             )
         if isinstance(pc, preconditioners.ILU0Preconditioner):
-            x, info, _, _ = _native.csr_gmres_ilu0(
+            x, info, residual, iterations = _native.csr_gmres_ilu0(
                 csr.data,
                 csr.indices,
                 csr.indptr,
@@ -386,9 +506,23 @@ def gmres(
                 restart=restart_value,
                 maxiter=maxiter_value,
             )
-            return x, _info(info)
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="gmres",
+                return_info=bool(return_info),
+                callback=callback,
+                callback_type=callback_type,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                restart=restart_value,
+                preconditioner=preconditioner_kind,
+            )
         if not isinstance(pc, preconditioners.IdentityPreconditioner):
-            x, info, _, _ = _left_pgmres_host(
+            x, info, residual, iterations = _left_pgmres_host(
                 csr,
                 rhs,
                 guess,
@@ -398,8 +532,22 @@ def gmres(
                 restart=restart_value,
                 maxiter=maxiter_value,
             )
-            return x, int(info)
-    x, info, _, _ = _native.csr_gmres(
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="gmres",
+                return_info=bool(return_info),
+                callback=callback,
+                callback_type=callback_type,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                restart=restart_value,
+                preconditioner=preconditioner_kind,
+            )
+    x, info, residual, iterations = _native.csr_gmres(
         csr.data,
         csr.indices,
         csr.indptr,
@@ -411,7 +559,21 @@ def gmres(
         restart=restart_value,
         maxiter=maxiter_value,
     )
-    return x, _info(info)
+    return _finish(
+        x,
+        info,
+        residual,
+        iterations,
+        solver="gmres",
+        return_info=bool(return_info),
+        callback=callback,
+        callback_type=callback_type,
+        rtol=float(rtol),
+        atol=float(atol),
+        maxiter=maxiter_value,
+        restart=restart_value,
+        preconditioner=preconditioner_kind,
+    )
 
 
 def minres(
@@ -426,6 +588,7 @@ def minres(
     M=None,
     check_preconditioner: bool = True,
     callback=None,
+    return_info: bool = False,
 ):
     """Solve a sparse symmetric linear system with MINRES.
 
@@ -465,17 +628,23 @@ def minres(
             entries before entering native MINRES. Setting this to ``False``
             disables the Python-side SPD validation but the native solver still
             reports numerical breakdown for invalid preconditioners.
-        callback: Not supported.  Pass ``None`` (the default).
+        callback: Optional callable invoked once after the native solve
+            completes.  Native CPU/Metal Krylov loops do not call Python inside
+            each iteration; using a callback synchronizes only the final
+            solution.
+        return_info: If ``True``, return a structured diagnostic object instead
+            of the integer ``info`` flag.  The default remains ``False``.
 
     Returns:
         A tuple ``(x, info)`` where ``x`` is the approximate solution of
-        shape ``(n,)`` and ``info`` is an integer convergence flag.
+        shape ``(n,)`` and ``info`` is an integer convergence flag by default.
+        With ``return_info=True``, ``info`` is a ``SolverInfo`` diagnostic
+        object.
         ``info == 0`` means the solver converged to the requested tolerance.
         ``info > 0`` is the iteration count at which the solver stopped
         without converging.
 
     Raises:
-        NotImplementedError: If ``callback`` is not ``None``.
         TypeError: If ``A`` is a dense array or an unsupported type.
         ValueError: If ``b`` is not rank-1, its length does not match
             ``A.shape[0]``, or a checked diagonal preconditioner is not SPD.
@@ -487,17 +656,17 @@ def minres(
         use :func:`gmres`.
     """
 
-    if callback is not None:
-        raise NotImplementedError("native sparse minres does not use Python callbacks.")
     csr = _float32_csr(_as_csr(A))
     rhs = _float32_array(b)
     guess = _guess(csr, rhs, x0)
     shift_value = _finite_scalar("shift", shift)
     maxiter_value = _maxiter(csr, maxiter)
+    preconditioner_kind = None
     if M is not None:
         from mlx_sparse.linalg import preconditioners
 
         pc = preconditioners.aspreconditioner(M, csr)
+        preconditioner_kind = pc.kind
         if isinstance(pc, preconditioners.IdentityPreconditioner):
             pass
         elif isinstance(pc, preconditioners.DiagonalPreconditioner):
@@ -511,7 +680,7 @@ def minres(
                     "preconditioner; diagonal inverse entries must be finite "
                     "and strictly positive."
                 )
-            x, info, _, _ = _native.csr_minres_jacobi(
+            x, info, residual, iterations = _native.csr_minres_jacobi(
                 csr.data,
                 csr.indices,
                 csr.indptr,
@@ -524,13 +693,25 @@ def minres(
                 maxiter=maxiter_value,
                 shift=shift_value,
             )
-            return x, _info(info)
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="minres",
+                return_info=bool(return_info),
+                callback=callback,
+                rtol=float(rtol),
+                atol=float(atol),
+                maxiter=maxiter_value,
+                preconditioner=preconditioner_kind,
+            )
         else:
             raise TypeError(
                 "minres currently supports only identity, diagonal, and Jacobi "
                 "symmetric positive-definite native-backed preconditioners."
             )
-    x, info, _, _ = _native.csr_minres(
+    x, info, residual, iterations = _native.csr_minres(
         csr.data,
         csr.indices,
         csr.indptr,
@@ -542,4 +723,16 @@ def minres(
         maxiter=maxiter_value,
         shift=shift_value,
     )
-    return x, _info(info)
+    return _finish(
+        x,
+        info,
+        residual,
+        iterations,
+        solver="minres",
+        return_info=bool(return_info),
+        callback=callback,
+        rtol=float(rtol),
+        atol=float(atol),
+        maxiter=maxiter_value,
+        preconditioner=preconditioner_kind,
+    )

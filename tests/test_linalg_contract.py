@@ -44,6 +44,21 @@ def test_linalg_python_layer_does_not_use_dense_numerical_shortcuts():
     assert offenders == []
 
 
+def test_gmres_paths_do_not_use_projected_normal_equations():
+    root = Path(__file__).resolve().parents[1]
+    paths = [
+        root / "src" / "linalg" / "gmres" / "gmres.cpp",
+        root / "src" / "preconditioners" / "gmres" / "gmres.cpp",
+    ]
+
+    offenders = [
+        str(path.relative_to(root))
+        for path in paths
+        if "least_squares_normal_equations" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
+
+
 def test_native_linalg_symbols_are_exported_when_extension_loads():
     ext = extension()
     if ext is None:
