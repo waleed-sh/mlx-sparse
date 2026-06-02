@@ -210,6 +210,8 @@ Improvements
   native CPU backend, leave Apple-only Metal and Accelerate paths unavailable,
   and continue to report CUDA and ROCm as reserved future capabilities. The
   native extension now builds as C++20 to match current MLX Linux headers.
+  Linux wheels are repaired as ``manylinux_2_35_x86_64`` to match the current
+  upstream MLX Linux wheel policy.
   Source distributions now prune generated benchmark artifacts and local
   matplotlib cache files while retaining benchmark source files.
 
