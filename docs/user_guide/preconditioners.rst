@@ -29,6 +29,21 @@ full per-restart or per-inner-iteration Python callback stream is intentionally
 not enabled for native preconditioned paths because it would change the
 CPU/Metal synchronization model.
 
+Notebook examples
+-----------------
+
+The notebook gallery has a separate *Sparse preconditioners* section with
+self-contained examples for each supported strategy:
+
+* :doc:`../notebooks/21_preconditioner_identity`
+* :doc:`../notebooks/22_preconditioner_diagonal`
+* :doc:`../notebooks/23_preconditioner_jacobi`
+* :doc:`../notebooks/24_preconditioner_ilu0`
+* :doc:`../notebooks/25_preconditioner_ichol0`
+* :doc:`../notebooks/26_preconditioner_chebyshev`
+* :doc:`../notebooks/27_preconditioner_exact`
+* :doc:`../notebooks/28_preconditioner_callable`
+
 Current support
 ---------------
 
