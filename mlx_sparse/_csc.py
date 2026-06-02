@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from numbers import Number
 
 import mlx.core as mx
 
@@ -26,6 +25,7 @@ from mlx_sparse._validation import (
     ensure_mx_array,
     normalize_shape,
     normalize_validation_mode,
+    sanitize_scalar,
     validate_csc_metadata,
     validate_csc_values,
 )
@@ -312,8 +312,7 @@ class CSCArray:
         Raises:
             TypeError: If ``other`` is not an actual number.
         """
-        if not isinstance(other, Number):
-            raise TypeError(f"Expected a number, got {type(other)!r}")
+        other = sanitize_scalar(other)
 
         return CSCArray(
             data=other * self.data,
@@ -323,6 +322,23 @@ class CSCArray:
             sorted_indices=self.sorted_indices,
             has_canonical_format=self.has_canonical_format,
         )
+
+    def __mul__(self, other):
+        """Multiply the current CSCArray by a number using the ``*`` operator.
+
+        This returns a new CSCArray with the data multiplied by the number, and
+        therefore does not in-place mutate the current CSCArray.
+
+        Args:
+            other: A valid number (complex or not).
+
+        Returns:
+            A new CSCArray with the data multiplied by the number.
+
+        Raises:
+            TypeError: If ``other`` is not an actual number.
+        """
+        return self.__rmul__(other)
 
 
 def csc_array(

@@ -1,6 +1,15 @@
 Changelog
 =========
 
+Unreleased
+---------------------------------
+
+Improvements
+~~~~~~~~~~~~
+
+* Allow for right multiply, in addition to the existing left multiply, of sparse matrices by numbers.
+
+
 mlx-sparse v0.0.5b0 (02.06.2026)
 ---------------------------------
 

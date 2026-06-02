@@ -15,11 +15,29 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from numbers import Number
 
 import mlx.core as mx
 
 from mlx_sparse._host import to_numpy
 from mlx_sparse._typing import INDEX_DTYPES, VALUE_DTYPES, Shape2D, ValidationMode
+
+
+def sanitize_scalar(other) -> mx.array:
+    if isinstance(other, bool):
+        raise TypeError(f"Expected a number, got {type(other)!r}")
+
+    if not isinstance(other, Number):
+        raise TypeError(f"Expected a number, got {type(other)!r}")
+
+    scalar = mx.asarray(other)
+
+    if scalar.ndim != 0:
+        raise TypeError(
+            f"Expected a scalar number, got array with shape {scalar.shape}."
+        )
+
+    return scalar
 
 
 def normalize_shape(shape: Sequence[int]) -> Shape2D:

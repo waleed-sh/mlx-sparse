@@ -20,6 +20,19 @@ import pytest
 import mlx_sparse as ms
 from mlx_sparse._host import to_numpy
 
+SCALAR_MULTIPLY_SIDES = [
+    pytest.param("left", id="scalar-left"),
+    pytest.param("right", id="scalar-right"),
+]
+
+
+def _scalar_multiply(scalar, sparse, side: str):
+    if side == "left":
+        return scalar * sparse
+    if side == "right":
+        return sparse * scalar
+    raise AssertionError(f"Unknown multiply side {side!r}")
+
 
 def _values(dtype_name: str) -> np.ndarray:
     data = np.array([2.0, -1.5, 0.25, 3.0, -4.0], dtype=np.float32)
@@ -92,14 +105,15 @@ def _assert_structure_preserved(lhs, out):
 @pytest.mark.parametrize("format_name", ["csr", "csc", "coo"])
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
 @pytest.mark.parametrize("scalar", [2, -0.5, np.float32(1.25)])
-def test_number_left_multiply_sparse_matches_dense_and_preserves_structure(
-    mx, format_name, index_dtype, scalar
+@pytest.mark.parametrize("side", SCALAR_MULTIPLY_SIDES)
+def test_number_multiply_sparse_matches_dense_and_preserves_structure(
+    mx, format_name, index_dtype, scalar, side
 ):
     sparse = _sample_sparse(mx, format_name, "float32", index_dtype)
     before_dense = to_numpy(sparse.todense())
     before_data = to_numpy(sparse.data)
 
-    out = scalar * sparse
+    out = _scalar_multiply(scalar, sparse, side)
 
     _assert_structure_preserved(sparse, out)
     np.testing.assert_allclose(to_numpy(out.data), scalar * before_data)
@@ -110,15 +124,16 @@ def test_number_left_multiply_sparse_matches_dense_and_preserves_structure(
 
 @pytest.mark.parametrize("format_name", ["csr", "csc", "coo"])
 @pytest.mark.parametrize("index_dtype", [np.int32, np.int64])
-def test_complex_number_left_multiply_sparse_matches_dense(
-    mx, format_name, index_dtype
+@pytest.mark.parametrize("side", SCALAR_MULTIPLY_SIDES)
+def test_complex_number_multiply_sparse_matches_dense(
+    mx, format_name, index_dtype, side
 ):
     sparse = _sample_sparse(mx, format_name, "complex64", index_dtype)
     scalar = np.complex64(-1.25 + 0.5j)
     before_dense = to_numpy(sparse.todense())
     before_data = to_numpy(sparse.data)
 
-    out = scalar * sparse
+    out = _scalar_multiply(scalar, sparse, side)
 
     _assert_structure_preserved(sparse, out)
     np.testing.assert_allclose(to_numpy(out.data), scalar * before_data)
@@ -128,8 +143,32 @@ def test_complex_number_left_multiply_sparse_matches_dense(
 
 
 @pytest.mark.parametrize("format_name", ["csr", "csc", "coo"])
-def test_left_multiply_rejects_non_numeric_scalars(mx, format_name):
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        pytest.param("__rmul__", id="scalar-left-rmul"),
+        pytest.param("__mul__", id="scalar-right-mul"),
+    ],
+)
+def test_multiply_rejects_non_numeric_scalars(mx, format_name, method_name):
     sparse = _sample_sparse(mx, format_name, "float32", np.int32)
 
     with pytest.raises(TypeError, match="Expected a number"):
-        sparse.__rmul__("not-a-number")
+        getattr(sparse, method_name)("not-a-number")
+
+
+@pytest.mark.parametrize(
+    "bad_scalar",
+    [
+        "not-a-number",
+        [1, 2, 3],
+        object(),
+        True,
+    ],
+)
+@pytest.mark.parametrize("method_name", ["__mul__", "__rmul__"])
+def test_multiply_rejects_non_numeric_or_non_scalar_values(mx, method_name, bad_scalar):
+    sparse = _sample_sparse(mx, "csr", "float32", np.int32)
+
+    with pytest.raises(TypeError, match="Expected"):
+        getattr(sparse, method_name)(bad_scalar)
