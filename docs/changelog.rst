@@ -64,37 +64,43 @@ New Features
   natural-order, no-fill, CPU-native C++ over canonical CSR input, application
   reuses native CSR triangular solves for rank-1/rank-2 right-hand sides on
   CPU or Metal. ``cg(..., M=ichol0(A))`` routes through a native
-  IC(0)-preconditioned CG entrypoint.
+  IC(0)-preconditioned CG entrypoint
+  (`PR #34 <https://github.com/waleed-sh/mlx-sparse/pull/34>`_).
 
 * Added native Chebyshev polynomial preconditioners through
   ``preconditioners.chebyshev(A, degree=2, lambda_min=None,
   lambda_max=None, estimate=True)``. Setup computes native Gershgorin bounds
   and optional Lanczos Ritz estimates over canonical CSR input, application and
   ``cg(..., M=chebyshev(A))`` use native CPU/Metal kernels with only sparse
-  matrix-vector products and vector updates.
+  matrix-vector products and vector updates
+  (`PR #35 <https://github.com/waleed-sh/mlx-sparse/pull/35>`_).
 
 * Added optional ``return_info=True`` diagnostics for ``cg``, ``gmres``, and
   ``minres``. The default return remains ``(x, int)``, while the opt-in path
   returns a structured ``SolverInfo`` with status, final true residual norm,
   iteration count, convergence reason, breakdown reason, and preconditioner
-  metadata where applicable.
+  metadata where applicable
+  (`PR #36 <https://github.com/waleed-sh/mlx-sparse/pull/36>`_).
 
 * Added public ``linalg.spsolve_triangular(A, b, lower=True,
   unit_diagonal=False, analyzed=None)`` around the native CSR triangular-solve
   primitive for rank-1 and rank-2 right-hand sides. Public triangular analysis
   remains deferred because repeated-apply benchmarks do not yet show a
-  consistent advantage over the default native solve path.
+  consistent advantage over the default native solve path
+  (`PR #37 <https://github.com/waleed-sh/mlx-sparse/pull/37>`_).
 
 * Added user start-vector support for ``lanczos``, ``eigsh``, ``eigs``, and
   ``svds``. ``eigsh`` and ``eigs`` now thread ``v0`` through the native
   Lanczos/Arnoldi projection calls, and ``svds`` threads ``v0`` through the
-  native CPU/Metal normal-operator Lanczos primitive.
+  native CPU/Metal normal-operator Lanczos primitive
+  (`PR #37 <https://github.com/waleed-sh/mlx-sparse/pull/37>`_).
 
 * Added bounded matrix-free host fallback loops for ``cg`` and ``gmres`` when
   ``A`` is a fully matrix-free ``LinearOperator``. Sparse-backed
   ``LinearOperator`` inputs continue to use the native CSR CPU/Metal paths,
   while matrix-free fallbacks accept arbitrary inverse-apply ``M`` objects or
-  callables and check convergence against the true residual.
+  callables and check convergence against the true residual
+  (`PR #37 <https://github.com/waleed-sh/mlx-sparse/pull/37>`_).
 
 Improvements
 ~~~~~~~~~~~~
@@ -102,16 +108,19 @@ Improvements
 * Normalized iterative-solver status handling for zero-iteration budgets and
   numerical breakdowns. Native CG, PCG, GMRES, and preconditioned GMRES paths
   now avoid reporting ``info == 0`` for an unconverged solve when
-  ``maxiter=0``.
+  ``maxiter=0``
+  (`PR #36 <https://github.com/waleed-sh/mlx-sparse/pull/36>`_).
 
 * Added opt-in final callbacks for native ``cg``, ``gmres``, and ``minres``
   without adding Python calls inside CPU/Metal Krylov loops. GMRES
   ``callback_type="x"`` receives the final solution, while ``"pr_norm"`` and
-  ``"legacy"`` receive the final reported residual norm.
+  ``"legacy"`` receive the final reported residual norm
+  (`PR #38 <https://github.com/waleed-sh/mlx-sparse/pull/38>`_).
 
 * Added scale-aware denominator and finite-value checks to the native
   unpreconditioned CG CPU/Metal paths, matching the robustness policy already
-  used by the preconditioned CG implementations.
+  used by the preconditioned CG implementations
+  (`PR #36 <https://github.com/waleed-sh/mlx-sparse/pull/36>`_).
 
 * Replaced GMRES' projected normal-equation solve with a native
   upper-Hessenberg QR solve using Givens rotations, avoiding the condition
@@ -166,14 +175,16 @@ Improvements
   diagonal structure, non-symmetric mirrored values when ``check=True``,
   non-finite input or shift values, unsupported dtypes, negative shifts, and
   non-positive or near-zero pivots. Diagonal shifts are explicit and are
-  applied only to existing diagonal entries.
+  applied only to existing diagonal entries
+  (`PR #34 <https://github.com/waleed-sh/mlx-sparse/pull/34>`_).
 
 * Added Chebyshev spectral-interval validation with clear failures for missing
   positive lower/upper bounds, invalid explicit intervals, non-positive
   degrees, non-finite CSR values, and unsupported dtypes. Gershgorin lower
   bounds are used when positive, otherwise the default setup uses native
   Lanczos estimates to obtain a conservative positive lower bound for
-  Poisson-like SPD systems.
+  Poisson-like SPD systems
+  (`PR #35 <https://github.com/waleed-sh/mlx-sparse/pull/35>`_).
 
 * Refactored shared sparse linalg helpers into the
   :mod:`mlx_sparse.linalg.utils` subpackage, separating array/dtype handling,
@@ -185,13 +196,21 @@ Improvements
 * Centralized spectral iteration-control validation so non-default ``tol`` and
   ``maxiter`` for ``eigsh``, ``eigs``, and ``svds`` now fail with an explicit
   explanation that the current native routines perform one ``ncv``-bounded
-  Ritz extraction rather than an implicitly restarted convergence loop.
+  Ritz extraction rather than an implicitly restarted convergence loop
+  (`PR #37 <https://github.com/waleed-sh/mlx-sparse/pull/37>`_).
 
 * Clarified native iterative-solver callback semantics for preconditioned paths:
   callbacks remain opt-in final callbacks, GMRES ``callback_type`` payload names
   mirror SciPy's ``"x"``, ``"pr_norm"``, and ``"legacy"`` vocabulary where the
   payload is available without per-iteration Python synchronization, and
-  ``"legacy"`` keeps mlx-sparse's normal ``maxiter`` accounting.
+  ``"legacy"`` keeps mlx-sparse's normal ``maxiter`` accounting
+  (`PR #38 <https://github.com/waleed-sh/mlx-sparse/pull/38>`_).
+
+* Added Linux CPU-only build, CI, and publishing support. Linux builds use the
+  native CPU backend, leave Apple-only Metal and Accelerate paths unavailable,
+  and continue to report CUDA and ROCm as reserved future capabilities. Source
+  distributions now prune generated benchmark artifacts and local matplotlib
+  cache files while retaining benchmark source files.
 
 Tests
 ~~~~~
@@ -218,7 +237,8 @@ Tests
   existing preconditioner objects, ``SparseLU``, ``SparseCholesky``,
   ``FactorizedSolve``, callable inverse-apply functions, objects with
   ``solve(x)``, native Jacobi-PCG exit callbacks, preconditioned GMRES callback
-  payloads, and CSR/COO/CSC Jacobi-GMRES correctness on CPU/GPU-capable paths.
+  payloads, and CSR/COO/CSC Jacobi-GMRES correctness on CPU/GPU-capable paths
+  (`PR #38 <https://github.com/waleed-sh/mlx-sparse/pull/38>`_).
 
 * Added exact-factor preconditioner tests covering native LU and Cholesky
   metadata, native exact-apply bindings against dense NumPy solves, rank-1/rank-2
@@ -246,23 +266,27 @@ Tests
   dense NumPy triangular-solve results, native rank-1/rank-2 apply paths on CPU
   and GPU-capable devices, explicit failure modes, input immutability, and PCG
   coverage for 2-D Poisson, anisotropic diffusion, scaled diagonal, and
-  shifted near-singular SPD systems.
+  shifted near-singular SPD systems
+  (`PR #34 <https://github.com/waleed-sh/mlx-sparse/pull/34>`_).
 
 * Added Chebyshev tests against dense NumPy polynomial-apply references,
   native CPU and Metal rank-1/rank-2 apply paths, spectral-estimate metadata,
   explicit invalid-interval failures, public ``cg(..., M=chebyshev(A))``
   routing, and native Chebyshev-PCG iteration reduction against Jacobi on
-  Poisson-like SPD systems.
+  Poisson-like SPD systems
+  (`PR #35 <https://github.com/waleed-sh/mlx-sparse/pull/35>`_).
 
 * Added linalg completeness tests for public sparse triangular solves against
   dense NumPy references, matrix-free ``LinearOperator`` CG/GMRES with
   callable inverse-apply preconditioners, and spectral ``v0`` threading through
-  Lanczos, Arnoldi, and normal-operator Lanczos paths.
+  Lanczos, Arnoldi, and normal-operator Lanczos paths
+  (`PR #37 <https://github.com/waleed-sh/mlx-sparse/pull/37>`_).
 
 * Added validation-matrix benchmark tests covering the v0.0.5b0
   preconditioner matrix-family builders, SciPy Jacobi ``LinearOperator``
   contract, report schema, runtime metadata, residual thresholds, and summary
-  aggregation.
+  aggregation
+  (`PR #39 <https://github.com/waleed-sh/mlx-sparse/pull/39>`_).
 
 Benchmarks
 ~~~~~~~~~~
@@ -290,16 +314,19 @@ Benchmarks
   non-regression coverage on the SuiteSparse ``well1033`` and ``illc1033``
   normal-equation fixtures, reporting setup metadata, solve timing, iteration
   count, status, final reported residual, true relative residual, and SciPy
-  GMRES comparison context.
+  GMRES comparison context
+  (`PR #29 <https://github.com/waleed-sh/mlx-sparse/pull/29>`_).
 
 * Added ``benchmarks/bench_ic0_preconditioner.py`` for IC(0) setup,
   rank-1/rank-2 apply, PCG iteration counts, true residuals, fill ratio, and
-  CPU/GPU device metadata against Jacobi and unpreconditioned CG baselines.
+  CPU/GPU device metadata against Jacobi and unpreconditioned CG baselines
+  (`PR #34 <https://github.com/waleed-sh/mlx-sparse/pull/34>`_).
 
 * Added ``benchmarks/bench_chebyshev_preconditioner.py`` for Chebyshev setup,
   rank-1/rank-2 apply, PCG iteration counts, true residuals, spectral interval
   metadata, CPU/GPU device metadata, and comparison against Jacobi and
-  unpreconditioned CG baselines on Poisson-like SPD systems.
+  unpreconditioned CG baselines on Poisson-like SPD systems
+  (`PR #35 <https://github.com/waleed-sh/mlx-sparse/pull/35>`_).
 
 * Added ``benchmarks/bench_preconditioner_validation_matrix.py`` as the
   release validation matrix for 1-D/2-D/3-D Poisson SPD, anisotropic diffusion
@@ -309,7 +336,8 @@ Benchmarks
   fixtures. Each record names matrix metadata, solver, preconditioner, setup
   time, apply time, solve time, iteration count, final true residual,
   preconditioned residual when available, fill metrics, runtime device/thread
-  settings, SciPy comparison context, and residual/iteration threshold status.
+  settings, SciPy comparison context, and residual/iteration threshold status
+  (`PR #39 <https://github.com/waleed-sh/mlx-sparse/pull/39>`_).
 
 Documentation
 ~~~~~~~~~~~~~
@@ -326,18 +354,22 @@ Documentation
   `PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_,
   `PR #31 <https://github.com/waleed-sh/mlx-sparse/pull/31>`_,
   `PR #32 <https://github.com/waleed-sh/mlx-sparse/pull/32>`_,
-  `PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
+  `PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_,
+  `PR #34 <https://github.com/waleed-sh/mlx-sparse/pull/34>`_,
+  `PR #35 <https://github.com/waleed-sh/mlx-sparse/pull/35>`_).
 
 * Updated linalg docs and API references for ``spsolve_triangular``,
   matrix-free ``LinearOperator`` CG/GMRES fallbacks, spectral ``v0`` support,
   and the current ``tol``/``maxiter`` limitation for one-shot
-  ``ncv``-bounded Ritz extraction.
+  ``ncv``-bounded Ritz extraction
+  (`PR #37 <https://github.com/waleed-sh/mlx-sparse/pull/37>`_).
 
 * Added a separate *Sparse preconditioners* notebook track with dense,
   self-contained notebooks for identity, diagonal, Jacobi, ILU(0), IC(0),
   Chebyshev, exact-factor, and custom callable preconditioners. The notebooks
   show setup/apply boundaries, solver diagnostics, expected benefits, and
-  tradeoffs separately from the general linalg solver notebook.
+  tradeoffs separately from the general linalg solver notebook
+  (`PR #39 <https://github.com/waleed-sh/mlx-sparse/pull/39>`_).
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------

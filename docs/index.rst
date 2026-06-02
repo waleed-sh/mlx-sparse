@@ -1,15 +1,17 @@
 mlx-sparse
 ==========
 
-**mlx-sparse** is a sparse matrix library for Apple Silicon, built as a native
-MLX extension. It provides COO, CSR, and CSC sparse containers backed by
-``mlx.core.array``, with C++ MLX primitives for sparse-dense products on both
-CPU and Metal GPU.
+**mlx-sparse** is a sparse matrix library for MLX, built as a native MLX
+extension. It provides COO, CSR, and CSC sparse containers backed by
+``mlx.core.array``, with C++ MLX primitives for sparse-dense products on CPU,
+and Metal GPU kernels on supported Apple Silicon systems.
 
 .. warning::
 
-   As of now, ``mlx-sparse`` only supports macOS. Future support for Linux systems is being considered.
-   See a list of available functionality in :ref:`currently-supported`.
+   ``mlx-sparse`` supports macOS and Linux. Linux support is CPU-only in this
+   release: CUDA and ROCm are not implemented, Metal is Apple-only, and Linux
+   builds do not use Accelerate, BLAS, or Sparse BLAS backends. See
+   :ref:`currently-supported` for the full capability map.
 
 .. note::
 

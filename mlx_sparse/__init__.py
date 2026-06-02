@@ -15,8 +15,9 @@
 """Sparse array containers and primitives for MLX.
 
 mlx-sparse provides COO, CSR, and CSC sparse matrix containers backed by MLX
-arrays, with native C++ primitives for sparse-dense products on Apple Silicon
-CPU and Metal GPU. The public API is intentionally small: construct sparse matrices
+arrays, with native C++ primitives for sparse operations on CPU and, on
+supported Apple Silicon systems, Metal GPU. The public API is intentionally small:
+construct sparse matrices
 from MLX, NumPy, SciPy, or explicit sparse buffers, run sparse-dense products,
 differentiate through sparse values and dense operands, and convert back to
 dense when needed.
@@ -27,7 +28,7 @@ Typical usage::
     import numpy as np
     import mlx_sparse as ms
 
-    ms.use_gpu()
+    ms.use_cpu()
 
     data = mx.array(np.array([2.0, -1.0, 4.0], dtype=np.float32))
     row = mx.array(np.array([0, 0, 1], dtype=np.int32))

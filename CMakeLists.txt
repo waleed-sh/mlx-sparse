@@ -157,13 +157,16 @@ if(MLX_SPARSE_ENABLE_ACCELERATE)
       "Apple Accelerate framework enabled: ${MLX_SPARSE_ACCELERATE_FRAMEWORK}")
 endif()
 
-execute_process(
-  COMMAND xcrun -sdk macosx -find metal
-  RESULT_VARIABLE MLX_SPARSE_METAL_FIND_RESULT
-  OUTPUT_QUIET
-  ERROR_QUIET)
+set(MLX_SPARSE_METAL_FIND_RESULT 1)
+if(APPLE AND MLX_SPARSE_BUILD_METAL)
+  execute_process(
+    COMMAND xcrun -sdk macosx -find metal
+    RESULT_VARIABLE MLX_SPARSE_METAL_FIND_RESULT
+    OUTPUT_QUIET
+    ERROR_QUIET)
+endif()
 
-if(MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT EQUAL 0)
+if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIND_RESULT EQUAL 0)
   set(MLX_SPARSE_HAS_METAL 1)
   mlx_build_metallib(
     TARGET mlx_sparse_metallib
@@ -266,5 +269,9 @@ nanobind_add_module(
 target_link_libraries(_ext PRIVATE mlx_sparse_native)
 
 if(BUILD_SHARED_LIBS)
-  target_link_options(_ext PRIVATE -Wl,-rpath,@loader_path)
+  if(APPLE)
+    target_link_options(_ext PRIVATE -Wl,-rpath,@loader_path)
+  elseif(UNIX)
+    target_link_options(_ext PRIVATE "-Wl,-rpath,$ORIGIN")
+  endif()
 endif()

@@ -8,7 +8,9 @@ planned, and what is out of scope. Status is updated with each release.
 
 .. warning::
 
-   As of now, ``mlx-sparse`` only supports macOS. Future support for Linux systems is being considered.
+   ``mlx-sparse`` supports macOS and Linux. Linux support is CPU-only in this
+   release: CUDA and ROCm are not implemented, Metal is Apple-only, and Linux
+   builds do not use Accelerate, BLAS, or Sparse BLAS backends.
 
 Current version: **development branch**
 

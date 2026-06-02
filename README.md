@@ -6,15 +6,17 @@
 [![codecov](https://codecov.io/gh/waleed-sh/mlx-sparse/graph/badge.svg?token=EV2KVPZTP0)](https://codecov.io/gh/waleed-sh/mlx-sparse)
 
 > [!WARNING]
-> This is an early beta. **It currently supports only Apple systems.** APIs may change, bugs are expected, and some features
-> are still incomplete, especially GPU kernels for various operations. Feedback and issue reports are very welcome!
+> This is an early beta. macOS and Linux are supported, but Linux is CPU-only
+> in this release. APIs may change, bugs are expected, and some features are
+> still incomplete, especially GPU kernels for various operations. Feedback and issue reports are very welcome!
 > 
 > A lot of the functionality is new and is currently being tested.
 > We welcome any and all feedback! Not all solvers are GPU supported ([see the solver support matrix](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg_solvers.html)).
 
 > [!NOTE]
 > GPU support in this version is Apple Silicon Metal only. CUDA is not
-> currently supported.
+> currently supported. Linux wheels use native CPU kernels only, there is no
+> CUDA, ROCm, Accelerate, BLAS, or Sparse BLAS backend on Linux yet.
 
 `mlx-sparse` is an attempt at an MLX-native sparse array package. The public API is Python,
 while performance-critical operations are implemented as MLX primitives in C++
@@ -42,7 +44,8 @@ python -m pip install mlx-sparse
 ```
 
 Published macOS wheels are built with optional Apple Accelerate sparse direct
-solver support enabled. For editable/source builds, enable the same path with:
+solver support enabled. Published Linux wheels are CPU-only. For editable/source
+macOS builds, enable the same Accelerate path with:
 
 ```bash
 CMAKE_ARGS="-DMLX_SPARSE_ENABLE_ACCELERATE=ON" python -m pip install -e .
@@ -57,7 +60,7 @@ import numpy as np
 
 import mlx_sparse as ms
 
-ms.use_gpu()
+ms.use_cpu()
 
 data = [2.0, -1.0, 4.0]
 row = [0, 0, 1]
@@ -86,7 +89,8 @@ factor = ms.linalg.sparse_cholesky(spd)
 
 The package build compiles `src/sparse/*.metal` into
 `mlx_sparse/mlx_sparse.metallib` when the macOS Metal toolchain is available,
-and the wheel ships that metallib beside the Python package.
+and macOS wheels ship that metallib beside the Python package. Linux wheels do
+not build or ship Metal assets.
 
 ## Development
 

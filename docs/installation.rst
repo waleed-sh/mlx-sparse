@@ -4,7 +4,9 @@ Installation
 
 .. warning::
 
-   As of now, ``mlx-sparse`` only supports macOS. Future support for Linux systems is being considered.
+   ``mlx-sparse`` supports macOS and Linux. Linux support is CPU-only in this
+   release: CUDA and ROCm are not implemented, Metal is Apple-only, and Linux
+   builds do not use Accelerate, BLAS, or Sparse BLAS backends.
 
 Installing from PyPI
 ---------------------
@@ -15,9 +17,10 @@ For users, the normal installation path is PyPI:
 
    python -m pip install mlx-sparse
 
-This installs ``mlx-sparse`` and its runtime dependencies on MLX and NumPy. On
-supported macOS/Apple Silicon machines, the wheel includes the native extension
-and Metal library needed for CPU and GPU sparse kernels.
+This installs ``mlx-sparse`` and its runtime dependencies on MLX and NumPy.
+macOS wheels include the native extension and the Metal library needed for CPU
+and Apple Silicon GPU sparse kernels. Linux wheels include the native extension
+and CPU kernels only.
 
 .. note::
 
@@ -45,8 +48,12 @@ Requirements
        device that supports Metal 3. CPU-only usage works on any supported
        macOS.
    * - Apple Silicon
-     - M1 or newer. Intel Macs are not tested and the Metal backend will not
-       activate.
+     - M1 or newer for the Metal GPU backend. Intel Macs are not tested and
+       the Metal backend will not activate.
+   * - Linux x86_64
+     - CPU-only wheels are built and tested in CI. CUDA and ROCm are reserved
+       for future releases, and Linux builds do not use Accelerate, BLAS, or
+       Sparse BLAS backends.
    * - Python ≥ 3.10
      - Tested under Python 3.12 in CI.
    * - MLX ≥ 0.31
@@ -100,7 +107,8 @@ direct-solver integration:
 
 This gate is Darwin-only. Passing ``MLX_SPARSE_ENABLE_ACCELERATE=ON`` on
 non-Apple platforms fails at configure time instead of silently pretending that
-Accelerate is available. Accelerate-enabled builds validate and normalize
+Accelerate is available. Linux CPU builds should leave it disabled.
+Accelerate-enabled builds validate and normalize
 ``float32`` CSR, CSC, and COO inputs into owned canonical CSC storage, use
 opaque Accelerate factorization objects for supported direct solves, and report
 ``ms.capabilities.ACCELERATE`` as ``True`` when the runtime can use them.
@@ -137,10 +145,11 @@ For finer-grained native dispatch checks, use the enum-backed capability API:
    ms.capabilities.status("metal")
    ms.capabilities.status("accelerate")
 
-Current portable wheels report native CPU kernels and, on supported Apple
-Silicon runtimes with an accessible GPU, Metal kernels. Accelerate-enabled
-builds are opt-in unless a platform-specific release explicitly states
-otherwise. CUDA and ROCm remain reserved capabilities for future builds.
+Current wheels report native CPU kernels on macOS and Linux. On supported Apple
+Silicon runtimes with an accessible GPU, macOS wheels also report Metal kernels.
+Accelerate-enabled builds are macOS-only and opt-in unless a platform-specific
+release explicitly states otherwise. CUDA and ROCm remain reserved capabilities
+for future builds.
 
 Running the test suite
 -----------------------

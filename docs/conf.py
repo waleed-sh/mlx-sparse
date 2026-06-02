@@ -38,7 +38,6 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
-    "sphinx_copybutton",
     "myst_nb",
 ]
 
@@ -74,9 +73,9 @@ autodoc_default_options = {
     "special-members": "__matmul__",
 }
 
-# Read the Docs builds on Linux, while MLX/Metal support is macOS-centric.
-# Notebooks are not executed during documentation builds, so mocking MLX when it
-# is absent keeps API docs importable without pretending RTD can run kernels.
+# Read the Docs builds on Linux. Linux support is CPU-only today, and notebooks
+# are not executed during documentation builds, so mocking MLX when it is absent
+# keeps API docs importable without pretending RTD can run kernels.
 autodoc_mock_imports = []
 if find_spec("mlx") is None:
     autodoc_mock_imports.extend(["mlx", "mlx.core"])

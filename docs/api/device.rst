@@ -47,10 +47,11 @@ attributes on :data:`capabilities` return booleans, for example
 ``"available"``, ``"unavailable"``, and ``"not_built"``.
 
 ``ms.capabilities.ACCELERATE`` reports Accelerate-backed sparse solver
-availability, not just framework presence. Current published macOS wheels (v0.0.4b0 onwards) are
-built with Accelerate sparse direct-solver support enabled. Editable and source
-builds can opt into the same path with
-``MLX_SPARSE_ENABLE_ACCELERATE=ON``.
+availability, not just framework presence. Current published macOS wheels
+(v0.0.4b0 onwards) are built with Accelerate sparse direct-solver support
+enabled. Linux wheels are CPU-only and report ``"not_built"`` for Metal,
+Accelerate, CUDA, and ROCm. Editable and source macOS builds can opt into the
+same Accelerate path with ``MLX_SPARSE_ENABLE_ACCELERATE=ON``.
 
 .. autodata:: capabilities
 
@@ -66,6 +67,8 @@ Usage notes
 * The Metal GPU path (``use_gpu``) requires macOS with Apple Silicon and
   MLX ≥ 0.31. On unsupported hardware ``use_gpu`` raises ``RuntimeError``
   when ``require_available=True`` (the default).
+* Linux builds currently support native CPU execution only. CUDA and ROCm are
+  reserved capability names for future releases.
 * To check sparse native backend availability without setting the default
   device, prefer ``ms.capabilities``.
 

@@ -2,9 +2,9 @@ Quick start
 ===========
 
 This page covers the most common usage patterns in order. By the end you will
-have assembled a sparse matrix, run sparse-dense products on GPU, computed a
-gradient through sparse values and dense operands, and seen the structured and
-interchange constructors.
+have assembled a sparse matrix, run sparse-dense products on the selected MLX
+device, computed a gradient through sparse values and dense operands, and seen
+the structured and interchange constructors.
 
 Selecting a device
 ------------------
@@ -16,12 +16,13 @@ any computation. This sets MLX's default device for all subsequent operations.
 
    import mlx_sparse as ms
 
-   ms.use_gpu()  # use Apple Silicon GPU (Metal)
-   ms.use_cpu()  # pin to CPU when you want CPU-specific behavior
+   ms.use_cpu()  # portable default, including Linux CPU-only wheels
+   ms.use_gpu()  # Apple Silicon GPU (Metal), when available
 
 If no device is selected, MLX uses its own default (usually GPU on Apple
 Silicon). Fixed-shape sparse primitives support all value and index dtype
-combinations on both CPU and GPU.
+combinations on CPU and on the Apple Silicon Metal backend. Linux wheels are
+CPU-only in this release.
 
 Constructing a COO matrix
 --------------------------

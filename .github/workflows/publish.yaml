@@ -6,8 +6,8 @@ on:
       - "v*"
 
 jobs:
-  build-wheels:
-    name: Wheel / Python ${{ matrix.python-version }}
+  build-macos-wheels:
+    name: macOS wheel / Python ${{ matrix.python-version }}
     runs-on: macos-15
     env:
       # Build on the current macOS 15 arm64 runner, but tag the wheel for the
@@ -106,11 +106,44 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  build-linux-wheels:
+    name: Linux CPU wheels
+    runs-on: ubuntu-latest
+    env:
+      CIBW_BUILD: "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"
+      CIBW_SKIP: "*-musllinux_*"
+      CIBW_ARCHS_LINUX: "x86_64"
+      CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
+      CIBW_ENVIRONMENT_LINUX: "MLX_SPARSE_TEST_DEVICE=cpu"
+      CIBW_TEST_COMMAND: >-
+        python -c "import mlx_sparse as ms;
+        assert ms.is_available();
+        assert ms.capabilities.CPU;
+        assert ms.capabilities.status('metal') == 'not_built';
+        assert ms.capabilities.status('accelerate') == 'not_built';
+        assert ms.capabilities.status('cuda') == 'not_built';
+        assert ms.capabilities.status('rocm') == 'not_built'"
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build manylinux CPU wheels
+        uses: pypa/cibuildwheel@v3.4.1
+        with:
+          output-dir: wheelhouse
+
+      - name: Upload Linux wheel artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: linux-wheels
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
   build-sdist:
     name: Source distribution
-    # The sdist is platform-independent, but setup.py imports MLX during the
-    # PEP 517 build hooks, so this job also needs a macOS runner.
-    runs-on: macos-15
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
@@ -136,7 +169,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: [build-wheels, build-sdist]
+    needs: [build-macos-wheels, build-linux-wheels, build-sdist]
     runs-on: ubuntu-latest
 
     environment:
