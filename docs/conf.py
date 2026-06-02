@@ -39,6 +39,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
     "myst_nb",
+    "sphinx_copybutton",
 ]
 
 # Never re-execute notebooks at build time, use pre-computed outputs.
