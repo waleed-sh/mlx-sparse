@@ -22,7 +22,12 @@ Solver diagnostics are available with ``return_info=True`` on ``cg``,
 ``gmres``, and ``minres``. The returned ``SolverInfo`` records the final true
 residual norm, iteration count, status reason, and preconditioner kind. Native
 callbacks are exit callbacks only: they run once after the native loop has
-finished, avoiding per-iteration CPU/GPU synchronization by default.
+finished, avoiding per-iteration CPU/GPU synchronization by default. For
+``gmres``, ``callback_type="x"`` receives the final solution, and
+``"pr_norm"`` or ``"legacy"`` receives the final reported residual norm. A
+full per-restart or per-inner-iteration Python callback stream is intentionally
+not enabled for native preconditioned paths because it would change the
+CPU/Metal synchronization model.
 
 Current support
 ---------------
@@ -108,7 +113,7 @@ Jacobi and diagonal preconditioner application do not use Accelerate because
 the current mlx-sparse Accelerate integration is for direct sparse
 factorization/solve objects. The native diagonal/Jacobi Krylov paths use the
 selected MLX CPU or Metal device, including PCG and preconditioned MINRES solver
-kernels. ILU(0) and IC(0) setup are native CPU incomplete-factorization passes;
+kernels. ILU(0) and IC(0) setup are native CPU incomplete-factorization passes,
 application uses the existing native CSR triangular-solve kernels, so the apply
 phase can run on CPU or Metal depending on the selected MLX device. The native
 ``cg(..., M=ichol0(A))`` loop is CPU-hosted because IC(0) application is a
@@ -116,7 +121,7 @@ triangular dependency chain rather than an elementwise preconditioner. ILU(0)
 and IC(0) do not use Accelerate because Apple's sparse solver APIs do not
 expose incomplete-factor setup or explicit factors compatible with
 ``CSRArray``. Chebyshev setup does not use Accelerate because it is spectral
-interval estimation over CSR data; Chebyshev application is SpMV plus vector
+interval estimation over CSR data, Chebyshev application is SpMV plus vector
 updates and follows the native CPU or Metal sparse kernels. Exact-factor
 preconditioners preserve the existing Accelerate guards from
 ``linalg.factorized`` and use Accelerate only on Apple builds where it is
@@ -377,7 +382,7 @@ raises and asks for explicit ``lambda_min``/``lambda_max`` values.
 Chebyshev is not an incomplete factorization and does not require triangular
 solves, so it is attractive on Metal for Poisson-like SPD problems. The
 tradeoff is that quality depends on the spectral interval and polynomial
-degree; each preconditioner application costs ``degree`` sparse matrix-vector
+degree, each preconditioner application costs ``degree`` sparse matrix-vector
 products.
 
 Example: GMRES with an Exact Factor
@@ -419,7 +424,7 @@ Preconditioner metadata
 Preconditioner objects expose ``shape``, ``dtype``, ``kind``,
 ``is_symmetric``, ``is_positive_definite``, ``setup_device``,
 ``apply_device``, ``nnz``, and ``setup_info``. ILU(0) exposes ``nnz_L`` and
-``nnz_U``; IC(0) exposes ``nnz_L``. For unchecked Jacobi,
+``nnz_U``, IC(0) exposes ``nnz_L``. For unchecked Jacobi,
 ``is_positive_definite`` is conservative and remains ``False`` even when the
 diagonal is positive. Use ``check=True`` to request the cheap positive-diagonal
 validation described above.

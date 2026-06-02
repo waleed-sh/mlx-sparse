@@ -187,6 +187,12 @@ Improvements
   explanation that the current native routines perform one ``ncv``-bounded
   Ritz extraction rather than an implicitly restarted convergence loop.
 
+* Clarified native iterative-solver callback semantics for preconditioned paths:
+  callbacks remain opt-in final callbacks, GMRES ``callback_type`` payload names
+  mirror SciPy's ``"x"``, ``"pr_norm"``, and ``"legacy"`` vocabulary where the
+  payload is available without per-iteration Python synchronization, and
+  ``"legacy"`` keeps mlx-sparse's normal ``maxiter`` accounting.
+
 Tests
 ~~~~~
 
@@ -207,6 +213,12 @@ Tests
   true-residual reporting, non-finite inverse-diagonal breakdown handling,
   callable inverse-apply host fallback, and sparse-matrix ``M`` rejection
   (`PR #30 <https://github.com/waleed-sh/mlx-sparse/pull/30>`_).
+
+* Expanded preconditioner normalization and callback coverage for ``None``,
+  existing preconditioner objects, ``SparseLU``, ``SparseCholesky``,
+  ``FactorizedSolve``, callable inverse-apply functions, objects with
+  ``solve(x)``, native Jacobi-PCG exit callbacks, preconditioned GMRES callback
+  payloads, and CSR/COO/CSC Jacobi-GMRES correctness on CPU/GPU-capable paths.
 
 * Added exact-factor preconditioner tests covering native LU and Cholesky
   metadata, native exact-apply bindings against dense NumPy solves, rank-1/rank-2
@@ -268,6 +280,12 @@ Benchmarks
   residuals, fill ratio, CPU/GPU device metadata, and SciPy ``spilu``
   comparison context
   (`PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
+
+* Added ``benchmarks/bench_gmres_suitesparse_normal_equations.py`` for GMRES
+  non-regression coverage on the SuiteSparse ``well1033`` and ``illc1033``
+  normal-equation fixtures, reporting setup metadata, solve timing, iteration
+  count, status, final reported residual, true relative residual, and SciPy
+  GMRES comparison context.
 
 * Added ``benchmarks/bench_ic0_preconditioner.py`` for IC(0) setup,
   rank-1/rank-2 apply, PCG iteration counts, true residuals, fill ratio, and

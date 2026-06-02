@@ -358,8 +358,11 @@ def gmres(
             completes.  Native CPU/Metal solver loops do not call Python inside
             each iteration. ``callback_type="x"`` receives the final solution;
             ``"pr_norm"`` and ``"legacy"`` receive the final reported residual
-            norm.
+            norm. The payload names mirror SciPy's callback vocabulary, but
+            native mlx-sparse paths intentionally do not call Python at every
+            restart or inner iteration.
         callback_type: One of ``"x"``, ``"pr_norm"``, or ``"legacy"``.
+            ``"legacy"`` does not change ``maxiter`` accounting.
         return_info: If ``True``, return a structured diagnostic object instead
             of the integer ``info`` flag.  The default remains ``False``.
 
