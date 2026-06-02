@@ -208,9 +208,10 @@ Improvements
 
 * Added Linux CPU-only build, CI, and publishing support. Linux builds use the
   native CPU backend, leave Apple-only Metal and Accelerate paths unavailable,
-  and continue to report CUDA and ROCm as reserved future capabilities. Source
-  distributions now prune generated benchmark artifacts and local matplotlib
-  cache files while retaining benchmark source files.
+  and continue to report CUDA and ROCm as reserved future capabilities. The
+  native extension now builds as C++20 to match current MLX Linux headers.
+  Source distributions now prune generated benchmark artifacts and local
+  matplotlib cache files while retaining benchmark source files.
 
 Tests
 ~~~~~
