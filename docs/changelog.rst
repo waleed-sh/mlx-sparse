@@ -259,6 +259,11 @@ Tests
   callable inverse-apply preconditioners, and spectral ``v0`` threading through
   Lanczos, Arnoldi, and normal-operator Lanczos paths.
 
+* Added validation-matrix benchmark tests covering the v0.0.5b0
+  preconditioner matrix-family builders, SciPy Jacobi ``LinearOperator``
+  contract, report schema, runtime metadata, residual thresholds, and summary
+  aggregation.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -296,6 +301,16 @@ Benchmarks
   metadata, CPU/GPU device metadata, and comparison against Jacobi and
   unpreconditioned CG baselines on Poisson-like SPD systems.
 
+* Added ``benchmarks/bench_preconditioner_validation_matrix.py`` as the
+  release validation matrix for 1-D/2-D/3-D Poisson SPD, anisotropic diffusion
+  SPD, badly scaled diagonal and block-diagonal SPD, nonsymmetric
+  convection-diffusion-like systems, random sparse diagonal-dominant systems,
+  Hilbert-like dense-ish CSR systems, and bundled SuiteSparse normal-equation
+  fixtures. Each record names matrix metadata, solver, preconditioner, setup
+  time, apply time, solve time, iteration count, final true residual,
+  preconditioned residual when available, fill metrics, runtime device/thread
+  settings, SciPy comparison context, and residual/iteration threshold status.
+
 Documentation
 ~~~~~~~~~~~~~
 
@@ -317,6 +332,12 @@ Documentation
   matrix-free ``LinearOperator`` CG/GMRES fallbacks, spectral ``v0`` support,
   and the current ``tol``/``maxiter`` limitation for one-shot
   ``ncv``-bounded Ritz extraction.
+
+* Added a separate *Sparse preconditioners* notebook track with dense,
+  self-contained notebooks for identity, diagonal, Jacobi, ILU(0), IC(0),
+  Chebyshev, exact-factor, and custom callable preconditioners. The notebooks
+  show setup/apply boundaries, solver diagnostics, expected benefits, and
+  tradeoffs separately from the general linalg solver notebook.
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------

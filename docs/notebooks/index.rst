@@ -2,7 +2,8 @@ Jupyter notebooks
 =================
 
 The notebooks below can be downloaded and executed locally. Pre-computed
-outputs are shown inline so you can read the results without running anything.
+outputs are shown inline where available so you can read the results without
+running anything.
 
 All timing results are collected on an **Apple M5, 10-core GPU**,
 macOS 26.0, MLX 0.31, mlx-sparse 0.0.1b0.
@@ -44,6 +45,26 @@ factorizations, spectral routines, and matrix-free linear operators.
    14_linalg_factorizations
    15_linalg_spectral
    16_linalg_operators
+
+Sparse preconditioners
+----------------------
+
+These notebooks focus on ``mlx_sparse.linalg.preconditioners``. They keep the
+preconditioner material separate from the general solver notebook so each
+inverse-apply strategy can show its setup cost, apply path, solver effect, and
+failure policy in context.
+
+.. toctree::
+   :maxdepth: 1
+
+   21_preconditioner_identity
+   22_preconditioner_diagonal
+   23_preconditioner_jacobi
+   24_preconditioner_ilu0
+   25_preconditioner_ichol0
+   26_preconditioner_chebyshev
+   27_preconditioner_exact
+   28_preconditioner_callable
 
 Accelerate direct solvers
 --------------------------
