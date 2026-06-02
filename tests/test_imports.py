@@ -248,7 +248,7 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert native.csc_sort_indices("data", "indices", "indptr") == "sort_csc"
     assert native.csc_sum_duplicates("data", "indices", "indptr") == "sum_csc"
     assert (
-        native.csr_normal_lanczos("data", "indices", "indptr", (2, 3), k=2)
+        native.csr_normal_lanczos("data", "indices", "indptr", "v0", (2, 3), k=2)
         == "normal_lanczos"
     )
     assert all("stream" not in kwargs for _, kwargs in seen)

@@ -28,6 +28,13 @@ from mlx_sparse.linalg.utils.iterative import float32_array as _float32_array
 from mlx_sparse.linalg.utils.iterative import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.iterative import initial_guess as _guess
 from mlx_sparse.linalg.utils.iterative import max_iterations as _maxiter
+from mlx_sparse.linalg.utils.matrix_free import cg_matrix_free_host as _mf_cg
+from mlx_sparse.linalg.utils.matrix_free import gmres_matrix_free_host as _mf_gmres
+from mlx_sparse.linalg.utils.matrix_free import is_fully_matrix_free as _is_mf
+from mlx_sparse.linalg.utils.matrix_free import (
+    normalize_matrix_free_inputs as _mf_inputs,
+)
+from mlx_sparse.linalg.utils.matrix_free import normalize_preconditioner as _mf_pc
 
 
 def cg(
@@ -61,7 +68,8 @@ def cg(
         A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
             :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray` that
             is symmetric positive-definite.  A sparse-backed
-            :class:`LinearOperator` is also accepted.
+            :class:`LinearOperator` is also accepted.  A fully matrix-free
+            :class:`LinearOperator` uses a documented host fallback loop.
         b: Right-hand side vector of shape ``(n,)``.  Must be a rank-1
             ``mlx.core.array`` or anything convertible to one.
         x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector
@@ -81,7 +89,9 @@ def cg(
             the stored incomplete Cholesky factors. ``preconditioners.chebyshev``
             dispatches to a native Chebyshev-polynomial PCG loop whose
             preconditioner application uses only sparse matrix-vector products
-            and vector updates.
+            and vector updates.  Fully matrix-free ``LinearOperator`` inputs
+            accept arbitrary inverse-apply objects and callables through a
+            slower host fallback.
         callback: Optional callable invoked once after the native solve
             completes.  Native CPU/Metal Krylov loops do not call Python inside
             each iteration; using a callback synchronizes only the final
@@ -127,6 +137,32 @@ def cg(
             x, info = linalg.cg(A, b, rtol=1e-6)
             print(info)  # 0 means converged
     """
+
+    if _is_mf(A):
+        rhs, guess, maxiter_value = _mf_inputs(A, b, x0, maxiter)
+        pc, preconditioner_kind = _mf_pc(M, shape=A.shape)
+        x, info, residual, iterations = _mf_cg(
+            A,
+            rhs,
+            guess,
+            pc,
+            rtol=float(rtol),
+            atol=float(atol),
+            maxiter=maxiter_value,
+        )
+        return _finish(
+            x,
+            info,
+            residual,
+            iterations,
+            solver="cg",
+            return_info=bool(return_info),
+            callback=callback,
+            rtol=float(rtol),
+            atol=float(atol),
+            maxiter=maxiter_value,
+            preconditioner=preconditioner_kind,
+        )
 
     csr = _float32_csr(_as_csr(A))
     rhs = _float32_array(b)
@@ -295,8 +331,9 @@ def gmres(
     Args:
         A: Coefficient matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
             :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.  A
-            sparse-backed :class:`LinearOperator` is also accepted.  Need not be
-            symmetric.
+            sparse-backed :class:`LinearOperator` is also accepted.  A fully
+            matrix-free :class:`LinearOperator` uses a documented host fallback
+            loop.  Need not be symmetric.
         b: Right-hand side vector of shape ``(n,)``.
         x0: Initial guess of shape ``(n,)``.  Defaults to the zero vector.
         rtol: Relative tolerance for the residual stopping criterion.
@@ -312,9 +349,11 @@ def gmres(
             is treated equivalently. ``preconditioners.diagonal`` and
             ``preconditioners.jacobi`` and ``preconditioners.ilu0`` dispatch to
             native left-preconditioned GMRES. Custom callables and
-            inverse-apply objects use a host fallback loop. All preconditioned
-            paths build Krylov vectors for ``M^{-1} A`` while convergence is
-            tested against the true residual ``b - A @ x``.
+            inverse-apply objects use a host fallback loop. Fully matrix-free
+            ``LinearOperator`` inputs also accept arbitrary inverse-apply
+            objects and callables through the same slower host loop. All
+            preconditioned paths build Krylov vectors for ``M^{-1} A`` while
+            convergence is tested against the true residual ``b - A @ x``.
         callback: Optional callable invoked once after the native solve
             completes.  Native CPU/Metal solver loops do not call Python inside
             each iteration. ``callback_type="x"`` receives the final solution;
@@ -340,6 +379,37 @@ def gmres(
 
     if callback_type not in {"x", "pr_norm", "legacy"}:
         raise ValueError("callback_type must be 'x', 'pr_norm', or 'legacy'.")
+    if _is_mf(A):
+        rhs, guess, maxiter_value = _mf_inputs(A, b, x0, maxiter)
+        restart_value = min(20, A.shape[0]) if restart is None else int(restart)
+        if restart_value <= 0:
+            raise ValueError("restart must be positive.")
+        pc, preconditioner_kind = _mf_pc(M, shape=A.shape)
+        x, info, residual, iterations = _mf_gmres(
+            A,
+            rhs,
+            guess,
+            pc,
+            rtol=float(rtol),
+            atol=float(atol),
+            restart=restart_value,
+            maxiter=maxiter_value,
+        )
+        return _finish(
+            x,
+            info,
+            residual,
+            iterations,
+            solver="gmres",
+            return_info=bool(return_info),
+            callback=callback,
+            callback_type=callback_type,
+            rtol=float(rtol),
+            atol=float(atol),
+            maxiter=maxiter_value,
+            restart=restart_value,
+            preconditioner=preconditioner_kind,
+        )
     csr = _float32_csr(_as_csr(A))
     rhs = _float32_array(b)
     guess = _guess(csr, rhs, x0)

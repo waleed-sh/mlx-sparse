@@ -265,7 +265,7 @@ For a solver-centric view of CPU, Metal GPU, and Accelerate coverage, see
      - CPU + GPU
      - Each restart's Arnoldi step dispatches the ``csr_arnoldi`` Metal
        kernel. Diagonal/Jacobi and ILU(0) preconditioned native paths are
-       available; convergence bookkeeping and the small least-squares solve
+       available, convergence bookkeeping and the small least-squares solve
        run on CPU.
    * - ``linalg.minres``
      - Done
@@ -518,7 +518,8 @@ compact buffers.
    * - ``csr_triangular_solve``
      - ``float32`` values, int32/int64 indices
      - Forward/back-substitution for ``SparseCholesky.solve``,
-       ``SparseLU.solve``, and native ``linalg.spsolve`` fallback
+       ``SparseLU.solve``, public ``linalg.spsolve_triangular``, and native
+       ``linalg.spsolve`` fallback
    * - ``csr_permute_vector``
      - ``float32``, int32 permutation
      - Row permutation step in ``SparseLU.solve`` / native ``linalg.spsolve``

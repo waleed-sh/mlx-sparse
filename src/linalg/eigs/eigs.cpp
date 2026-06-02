@@ -100,16 +100,14 @@ std::vector<float> qr_eigenvalues_real(std::vector<float> h, int n) {
 template <typename I>
 std::tuple<mx::array, mx::array>
 csr_eigs_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
-              int k, int ncv, const std::string &which) {
+              const mx::array &v0, int k, int ncv, const std::string &which) {
   const int steps = std::min(n_rows, std::max(ncv, k + 1));
-  std::vector<float> v0_data(static_cast<size_t>(n_rows),
-                             1.0f / std::sqrt(static_cast<float>(n_rows)));
-  auto v0 = mx::array(v0_data.begin(), mx::Shape{n_rows}, mx::float32);
   auto stream = mx::default_stream(mx::default_device());
+  auto v0_contig = mx::contiguous(v0, false, stream);
 
   // Arnoldi factorisation via GPU kernel (falls back to CPU if no GPU device)
-  auto [h_mx, basis_mx, actual_k_mx] =
-      csr_arnoldi(data, indices, indptr, v0, n_rows, n_rows, steps, stream);
+  auto [h_mx, basis_mx, actual_k_mx] = csr_arnoldi(
+      data, indices, indptr, v0_contig, n_rows, n_rows, steps, stream);
   mx::eval(h_mx, basis_mx, actual_k_mx);
 
   const int used = static_cast<int>(actual_k_mx.item<int32_t>());
@@ -145,11 +143,10 @@ csr_eigs_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
 
 } // namespace
 
-std::tuple<mx::array, mx::array> csr_eigs(const mx::array &data,
-                                          const mx::array &indices,
-                                          const mx::array &indptr, int n_rows,
-                                          int n_cols, int k, int ncv,
-                                          const std::string &which) {
+std::tuple<mx::array, mx::array>
+csr_eigs(const mx::array &data, const mx::array &indices,
+         const mx::array &indptr, const mx::array &v0, int n_rows, int n_cols,
+         int k, int ncv, const std::string &which) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_eigs requires a non-empty square matrix.");
   }
@@ -159,20 +156,25 @@ std::tuple<mx::array, mx::array> csr_eigs(const mx::array &data,
   require_rank(data, 1, "csr_eigs data");
   require_rank(indices, 1, "csr_eigs indices");
   require_rank(indptr, 1, "csr_eigs indptr");
+  require_rank(v0, 1, "csr_eigs v0");
   require_linalg_float32(data, "csr_eigs data");
+  require_linalg_float32(v0, "csr_eigs v0");
   require_same_index_dtype(indices, indptr, "csr_eigs indices",
                            "csr_eigs indptr");
   require_size(indptr, n_rows + 1, "csr_eigs indptr");
+  require_size(v0, n_rows, "csr_eigs v0");
   if (indices.size() != data.size()) {
     throw std::invalid_argument(
         "csr_eigs data and indices must have equal length.");
   }
   ncv = std::min(n_rows, std::max(ncv, k + 1));
   if (indices.dtype() == mx::int32) {
-    return csr_eigs_impl<int32_t>(data, indices, indptr, n_rows, k, ncv, which);
+    return csr_eigs_impl<int32_t>(data, indices, indptr, n_rows, v0, k, ncv,
+                                  which);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_eigs_impl<int64_t>(data, indices, indptr, n_rows, k, ncv, which);
+    return csr_eigs_impl<int64_t>(data, indices, indptr, n_rows, v0, k, ncv,
+                                  which);
   }
   throw std::runtime_error("csr_eigs requires int32 or int64 indices.");
 }

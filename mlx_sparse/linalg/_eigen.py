@@ -20,6 +20,10 @@ import mlx_sparse._native as _native
 from mlx_sparse.linalg.utils.spectral import as_csr as _as_csr
 from mlx_sparse.linalg.utils.spectral import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.spectral import normalize_ncv as _ncv
+from mlx_sparse.linalg.utils.spectral import (
+    reject_iteration_controls as _reject_controls,
+)
+from mlx_sparse.linalg.utils.spectral import start_vector as _start_vector
 
 
 def lanczos(
@@ -52,7 +56,8 @@ def lanczos(
             :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
             Float16 and bfloat16 inputs are promoted to float32.
         k: Number of Lanczos steps.  Must satisfy ``0 < k <= A.shape[0]``.
-        v0: Not yet supported.  Pass ``None`` (the default).
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
+            deterministic all-ones start vector.
         reorthogonalize: Whether to apply full reorthogonalisation at each
             step to suppress numerical loss of orthogonality.  Defaults to
             ``True``.
@@ -67,16 +72,13 @@ def lanczos(
         returns ``(alphas, betas)`` without the basis.
 
     Raises:
-        NotImplementedError: If ``v0`` is not ``None``.
         ValueError: If ``k`` is out of range.
     """
 
-    if v0 is not None:
-        raise NotImplementedError("native lanczos currently owns its start vector.")
     csr = _float32_csr(_as_csr(A))
     if k <= 0 or k > csr.shape[0]:
         raise ValueError("k must satisfy 0 < k <= A.shape[0].")
-    start = mx.ones((csr.shape[0],), dtype=mx.float32)
+    start = _start_vector(v0, n=csr.shape[0])
     alphas, betas, basis, _ = _native.csr_lanczos(
         csr.data,
         csr.indices,
@@ -129,12 +131,16 @@ def eigsh(
             * ``"LA"``: Largest Algebraic (largest values)
             * ``"SA"``: Smallest Algebraic (smallest values)
 
-        v0: Not yet supported.  Pass ``None`` (the default).
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
+            deterministic all-ones start vector.
         ncv: Number of Lanczos basis vectors to build before extracting
             Ritz pairs.  A larger value improves accuracy at the cost of
             more memory.  Defaults to ``max(2*k+1, k+1)``.
-        maxiter: Not yet supported.  Pass ``None`` (the default).
-        tol: Not yet supported.  Pass ``0.0`` (the default).
+        maxiter: Not yet supported because the current implementation performs
+            one ``ncv``-bounded Ritz extraction, not an implicitly restarted
+            convergence loop.  Pass ``None`` (the default).
+        tol: Not yet supported for the same reason.  Pass ``0.0`` (the
+            default).
         return_eigenvectors: When ``True`` (the default), return both
             eigenvalues and eigenvectors.  When ``False``, return only the
             eigenvalues.
@@ -146,15 +152,12 @@ def eigsh(
         alone.
 
     Raises:
-        NotImplementedError: If ``v0``, ``maxiter``, or ``tol`` are not at
-            their default values.
+        NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
+            values.
         ValueError: If ``k`` is out of range or ``A`` is not square.
     """
 
-    if v0 is not None or maxiter is not None or tol != 0.0:
-        raise NotImplementedError(
-            "native eigsh currently controls start vector, iteration count, and tolerance."
-        )
+    _reject_controls(routine="eigsh", tol=float(tol), maxiter=maxiter)
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
@@ -165,6 +168,7 @@ def eigsh(
         csr.data,
         csr.indices,
         csr.indptr,
+        _start_vector(v0, n=n),
         csr.shape,
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
@@ -215,11 +219,15 @@ def eigs(
             * ``"LR"``: Largest Real part
             * ``"SR"``: Smallest Real part
 
-        v0: Not yet supported.  Pass ``None`` (the default).
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
+            deterministic all-ones start vector.
         ncv: Dimension of the Arnoldi factorization before restart.
             Defaults to ``max(2*k+1, k+1)``.
-        maxiter: Not yet supported.  Pass ``None`` (the default).
-        tol: Not yet supported.  Pass ``0.0`` (the default).
+        maxiter: Not yet supported because the current implementation performs
+            one ``ncv``-bounded Ritz extraction, not an implicitly restarted
+            convergence loop.  Pass ``None`` (the default).
+        tol: Not yet supported for the same reason.  Pass ``0.0`` (the
+            default).
         return_eigenvectors: When ``True`` (the default), return both
             eigenvalues and eigenvectors.  When ``False``, return only the
             eigenvalues.
@@ -231,15 +239,12 @@ def eigs(
         alone.
 
     Raises:
-        NotImplementedError: If ``v0``, ``maxiter``, or ``tol`` are not at
-            their default values.
+        NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
+            values.
         ValueError: If ``k`` is out of range or ``A`` is not square.
     """
 
-    if v0 is not None or maxiter is not None or tol != 0.0:
-        raise NotImplementedError(
-            "native eigs currently controls start vector, iteration count, and tolerance."
-        )
+    _reject_controls(routine="eigs", tol=float(tol), maxiter=maxiter)
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
@@ -250,6 +255,7 @@ def eigs(
         csr.data,
         csr.indices,
         csr.indptr,
+        _start_vector(v0, n=n),
         csr.shape,
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
@@ -263,7 +269,9 @@ def svds(
     k: int = 6,
     *,
     which: str = "LM",
+    v0=None,
     ncv: int | None = None,
+    maxiter: int | None = None,
     tol: float = 0.0,
     return_singular_vectors: bool | str = True,
 ):
@@ -295,9 +303,16 @@ def svds(
             * ``"LM"``: Largest in Magnitude (default)
             * ``"SM"``: Smallest in Magnitude
 
+        v0: Optional starting vector for the right singular-vector Krylov
+            basis, with shape ``(A.shape[1],)``.  ``None`` uses the
+            deterministic all-ones vector.
         ncv: Number of Lanczos basis vectors to build.  Defaults to
             ``max(2*k+1, k+1)``.
-        tol: Not yet supported.  Pass ``0.0`` (the default).
+        maxiter: Not yet supported because the current implementation performs
+            one ``ncv``-bounded normal-operator Ritz extraction.  Pass ``None``
+            (the default).
+        tol: Not yet supported for the same reason.  Pass ``0.0`` (the
+            default).
         return_singular_vectors: Controls which vectors are returned.
 
             * ``True``: return ``(u, s, vh)`` (default)
@@ -311,13 +326,13 @@ def svds(
         shape ``(k, n)``.  See ``return_singular_vectors`` for other forms.
 
     Raises:
-        NotImplementedError: If ``tol`` is not ``0.0``.
+        NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
+            values.
         ValueError: If ``k`` is out of range or ``return_singular_vectors``
             is not a recognised value.
     """
 
-    if tol != 0.0:
-        raise NotImplementedError("native svds currently controls tolerance.")
+    _reject_controls(routine="svds", tol=float(tol), maxiter=maxiter)
     if return_singular_vectors not in {True, False, "u", "vh"}:
         raise ValueError("return_singular_vectors must be True, False, 'u', or 'vh'.")
     csr = _float32_csr(_as_csr(A))
@@ -328,6 +343,7 @@ def svds(
         csr.data,
         csr.indices,
         csr.indptr,
+        _start_vector(v0, n=csr.shape[1]),
         csr.shape,
         k=int(k),
         ncv=_ncv(csr.shape[1], int(k), ncv),

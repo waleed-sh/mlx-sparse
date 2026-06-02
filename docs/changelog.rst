@@ -79,6 +79,23 @@ New Features
   iteration count, convergence reason, breakdown reason, and preconditioner
   metadata where applicable.
 
+* Added public ``linalg.spsolve_triangular(A, b, lower=True,
+  unit_diagonal=False, analyzed=None)`` around the native CSR triangular-solve
+  primitive for rank-1 and rank-2 right-hand sides. Public triangular analysis
+  remains deferred because repeated-apply benchmarks do not yet show a
+  consistent advantage over the default native solve path.
+
+* Added user start-vector support for ``lanczos``, ``eigsh``, ``eigs``, and
+  ``svds``. ``eigsh`` and ``eigs`` now thread ``v0`` through the native
+  Lanczos/Arnoldi projection calls, and ``svds`` threads ``v0`` through the
+  native CPU/Metal normal-operator Lanczos primitive.
+
+* Added bounded matrix-free host fallback loops for ``cg`` and ``gmres`` when
+  ``A`` is a fully matrix-free ``LinearOperator``. Sparse-backed
+  ``LinearOperator`` inputs continue to use the native CSR CPU/Metal paths,
+  while matrix-free fallbacks accept arbitrary inverse-apply ``M`` objects or
+  callables and check convergence against the true residual.
+
 Improvements
 ~~~~~~~~~~~~
 
@@ -165,6 +182,11 @@ Improvements
   validation from the public algorithm modules
   (`PR #28 <https://github.com/waleed-sh/mlx-sparse/pull/28>`_).
 
+* Centralized spectral iteration-control validation so non-default ``tol`` and
+  ``maxiter`` for ``eigsh``, ``eigs``, and ``svds`` now fail with an explicit
+  explanation that the current native routines perform one ``ncv``-bounded
+  Ritz extraction rather than an implicitly restarted convergence loop.
+
 Tests
 ~~~~~
 
@@ -220,6 +242,11 @@ Tests
   routing, and native Chebyshev-PCG iteration reduction against Jacobi on
   Poisson-like SPD systems.
 
+* Added linalg completeness tests for public sparse triangular solves against
+  dense NumPy references, matrix-free ``LinearOperator`` CG/GMRES with
+  callable inverse-apply preconditioners, and spectral ``v0`` threading through
+  Lanczos, Arnoldi, and normal-operator Lanczos paths.
+
 Benchmarks
 ~~~~~~~~~~
 
@@ -267,6 +294,11 @@ Documentation
   `PR #31 <https://github.com/waleed-sh/mlx-sparse/pull/31>`_,
   `PR #32 <https://github.com/waleed-sh/mlx-sparse/pull/32>`_,
   `PR #33 <https://github.com/waleed-sh/mlx-sparse/pull/33>`_).
+
+* Updated linalg docs and API references for ``spsolve_triangular``,
+  matrix-free ``LinearOperator`` CG/GMRES fallbacks, spectral ``v0`` support,
+  and the current ``tol``/``maxiter`` limitation for one-shot
+  ``ncv``-bounded Ritz extraction.
 
 mlx-sparse v0.0.4b1 (31.05.2026)
 ----------------------------------

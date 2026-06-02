@@ -38,13 +38,13 @@ def _dense_to_csr_buffers(mx, dense: np.ndarray, index_dtype):
     )
 
 
-def _reference_normal_lanczos(dense: np.ndarray, steps: int):
+def _reference_normal_lanczos(dense: np.ndarray, steps: int, v0: np.ndarray):
     normal = dense.T @ dense
     n_cols = normal.shape[0]
     basis = np.zeros((n_cols, steps), dtype=np.float32)
     alphas = np.zeros((steps,), dtype=np.float32)
     betas = np.zeros((steps,), dtype=np.float32)
-    basis[:, 0] = np.float32(1.0 / np.sqrt(n_cols))
+    basis[:, 0] = (v0 / np.linalg.norm(v0)).astype(np.float32, copy=False)
 
     beta_prev = np.float32(0.0)
     used = 0
@@ -89,14 +89,16 @@ def test_native_csr_normal_lanczos_matches_dense_reference(mx, to_numpy, index_d
     shape = dense.shape
     steps = shape[1]
     data, indices, indptr = _dense_to_csr_buffers(mx, dense, index_dtype)
+    v0_np = np.array([1.0, 0.0, 2.0, -1.0], dtype=np.float32)
+    v0 = mx.array(v0_np)
 
     alphas, betas, basis, actual = native.csr_normal_lanczos(
-        data, indices, indptr, shape, k=steps
+        data, indices, indptr, v0, shape, k=steps
     )
     mx.eval(alphas, betas, basis, actual)
 
     expected_alphas, expected_betas, expected_basis, expected_used = (
-        _reference_normal_lanczos(dense, steps)
+        _reference_normal_lanczos(dense, steps, v0_np)
     )
     used = int(to_numpy(actual).item())
 

@@ -428,10 +428,19 @@ class TestNcv:
 
 
 class TestLanczos:
-    def test_v0_not_none_raises(self):
+    def test_v0_sets_first_basis_vector(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError, match="start vector"):
-            linalg.lanczos(csr, k=1, v0=mx.array([1.0, 0.0]))
+        v0 = mx.array([1.0, 0.0], dtype=mx.float32)
+        _, _, basis = linalg.lanczos(csr, k=1, v0=v0)
+        mx.eval(basis)
+        np.testing.assert_allclose(np.array(basis)[:, 0], [1.0, 0.0], atol=1e-6)
+
+    def test_zero_v0_raises(self):
+        csr = _spd_2x2(mx)
+        with pytest.raises(ValueError, match="zero vector"):
+            linalg.lanczos(csr, k=1, v0=mx.array([0.0, 0.0]))
 
     def test_k_zero_raises(self):
         csr = _spd_2x2(mx)
@@ -484,19 +493,32 @@ class TestEigshErrors:
         with pytest.raises(ValueError, match="k must satisfy"):
             linalg.eigsh(csr, k=2)  # k must be < n=2
 
-    def test_v0_raises(self):
+    def test_v0_is_supported(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError):
-            linalg.eigsh(csr, k=1, v0=mx.array([1.0, 0.0]))
+        vals = linalg.eigsh(
+            csr,
+            k=1,
+            v0=mx.array([1.0, 0.0], dtype=mx.float32),
+            return_eigenvectors=False,
+        )
+        mx.eval(vals)
+        assert np.array(vals).shape == (1,)
+
+    def test_bad_v0_shape_raises(self):
+        csr = _spd_2x2(mx)
+        with pytest.raises(ValueError, match="length"):
+            linalg.eigsh(csr, k=1, v0=mx.array([1.0, 0.0, 0.0]))
 
     def test_maxiter_raises(self):
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(NotImplementedError, match="implicitly restarted"):
             linalg.eigsh(csr, k=1, maxiter=100)
 
     def test_tol_raises(self):
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(NotImplementedError, match="implicitly restarted"):
             linalg.eigsh(csr, k=1, tol=1e-3)
 
     def test_return_eigenvectors_false(self):
@@ -532,19 +554,32 @@ class TestEigsErrors:
         with pytest.raises(ValueError, match="k must satisfy"):
             linalg.eigs(csr, k=2)
 
-    def test_v0_raises(self):
+    def test_v0_is_supported(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError):
-            linalg.eigs(csr, k=1, v0=mx.array([1.0, 0.0]))
+        vals = linalg.eigs(
+            csr,
+            k=1,
+            v0=mx.array([1.0, 0.0], dtype=mx.float32),
+            return_eigenvectors=False,
+        )
+        mx.eval(vals)
+        assert np.array(vals).shape == (1,)
+
+    def test_bad_v0_shape_raises(self):
+        csr = _spd_2x2(mx)
+        with pytest.raises(ValueError, match="length"):
+            linalg.eigs(csr, k=1, v0=mx.array([1.0, 0.0, 0.0]))
 
     def test_maxiter_raises(self):
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(NotImplementedError, match="implicitly restarted"):
             linalg.eigs(csr, k=1, maxiter=100)
 
     def test_tol_raises(self):
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(NotImplementedError, match="implicitly restarted"):
             linalg.eigs(csr, k=1, tol=1e-3)
 
     def test_return_eigenvectors_false(self):
@@ -569,8 +604,31 @@ class TestSvdsErrors:
 
     def test_tol_raises(self):
         csr = _spd_2x2(mx)
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(NotImplementedError, match="implicitly restarted"):
             linalg.svds(csr, k=1, tol=1e-3)
+
+    def test_maxiter_raises(self):
+        csr = _spd_2x2(mx)
+        with pytest.raises(NotImplementedError, match="implicitly restarted"):
+            linalg.svds(csr, k=1, maxiter=100)
+
+    def test_v0_is_supported(self):
+        if not extension_available():
+            pytest.skip("native extension unavailable")
+        csr = _spd_2x2(mx)
+        singular = linalg.svds(
+            csr,
+            k=1,
+            v0=mx.array([1.0, 0.0], dtype=mx.float32),
+            return_singular_vectors=False,
+        )
+        mx.eval(singular)
+        assert np.array(singular).shape == (1,)
+
+    def test_bad_v0_shape_raises(self):
+        csr = _spd_2x2(mx)
+        with pytest.raises(ValueError, match="length"):
+            linalg.svds(csr, k=1, v0=mx.array([1.0, 0.0, 0.0]))
 
     def test_bad_return_singular_vectors_raises(self):
         csr = _spd_2x2(mx)

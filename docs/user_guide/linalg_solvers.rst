@@ -53,7 +53,7 @@ Pass ``return_info=True`` to replace the integer with a structured
 iteration count, convergence reason, breakdown reason when applicable, solver
 name, tolerance settings, restart size for GMRES, and the preconditioner kind
 when one is used. Preconditioned residual norms are reported only by native
-paths that expose them; otherwise the field is ``None``.
+paths that expose them, otherwise the field is ``None``.
 
 Python callbacks are opt-in exit callbacks for the native sparse solvers. They
 are called once after the native CPU/Metal loop finishes, so the default solve
@@ -82,16 +82,18 @@ Solver support matrix
      - The unpreconditioned, Jacobi-preconditioned, and
        Chebyshev-preconditioned CG iterations run in native CPU/Metal kernels.
        IC(0)-preconditioned CG is a native CPU-hosted loop because the
-       preconditioner apply is a pair of triangular solves.
+       preconditioner apply is a pair of triangular solves. Fully matrix-free
+       ``LinearOperator`` inputs use a slower host fallback.
    * - ``linalg.gmres``
      - Iterative solve for square general systems.
      - Partial
      - No
      - Unpreconditioned, diagonal/Jacobi-preconditioned,
        ILU(0)-preconditioned, and exact-factor preconditioned entries are
-       native. Arnoldi work can run on GPU when selected; restart bookkeeping,
+       native. Arnoldi work can run on GPU when selected, restart bookkeeping,
        true-residual checks, and the small least-squares solve run on CPU.
-       Custom callable preconditioners use a documented host fallback.
+       Custom callable preconditioners and fully matrix-free ``LinearOperator``
+       inputs use a documented host fallback.
    * - ``linalg.minres``
      - Iterative solve for square symmetric indefinite systems.
      - Full CPU + GPU
@@ -106,6 +108,13 @@ Solver support matrix
      - Native fallback uses CPU LU factorization and can use GPU triangular
        solves. Accelerate-enabled Apple builds may use opaque Accelerate LU
        for supported real systems.
+   * - ``linalg.spsolve_triangular``
+     - Direct solve for explicit sparse triangular systems.
+     - Full CPU + GPU
+     - No
+     - Dispatches to the native CSR triangular-solve primitive for rank-1 or
+       rank-2 RHS arrays. Public triangular analysis remains deferred until
+       repeated-apply benchmarks show a consistent advantage.
    * - ``linalg.factorized(..., method="auto" | "lu")``
      - Reusable direct solve object for square general systems.
      - Partial
@@ -164,25 +173,29 @@ Solver support matrix
      - Partial
      - No
      - Lanczos projection can run on GPU, the small projected eigensolve runs
-       on CPU.
+       on CPU. ``v0`` is supported, non-default ``tol`` and ``maxiter`` require
+       an implicitly restarted loop and are rejected for now.
    * - ``linalg.eigs``
      - A few eigenpairs of a square general sparse matrix.
      - Partial
      - No
      - Arnoldi projection can run on GPU, the small Hessenberg eigensolve runs
-       on CPU.
+       on CPU. ``v0`` is supported, non-default ``tol`` and ``maxiter`` require
+       an implicitly restarted loop and are rejected for now.
    * - ``linalg.svds``
      - A few singular values/vectors of a sparse matrix.
      - Partial
      - No
      - The native normal-operator Lanczos step can run on GPU, the small
-       eigensolve and singular-vector assembly run on CPU.
+       eigensolve and singular-vector assembly run on CPU. ``v0`` is supported
+       for the right-vector Krylov basis, non-default ``tol`` and ``maxiter``
+       require an implicitly restarted loop and are rejected for now.
    * - ``linalg.lanczos``
      - Low-level Lanczos projection helper.
      - Partial
      - No
-     - The projection can run on GPU, small projected post-processing is CPU
-       work in the higher-level solvers that consume it.
+     - The projection can run on GPU and accepts ``v0``. Small projected
+       post-processing is CPU work in the higher-level solvers that consume it.
 
 Accelerate direct solves
 ------------------------
@@ -236,6 +249,8 @@ Choosing a solver
   supported methods.
 * Use ``sparse_cholesky`` or ``sparse_lu`` only when you need explicit
   mlx-sparse factor objects.
+* Use ``spsolve_triangular`` when you already have an explicit sparse
+  triangular factor and want the native rank-1/rank-2 triangular-solve path.
 * Use ``eigsh``, ``eigs``, or ``svds`` when you need only a few spectral
   values/vectors rather than a dense decomposition.
 
@@ -251,7 +266,7 @@ Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX device.
 preconditioner application uses only sparse matrix-vector products and vector
 updates. These paths still test convergence against the true residual
 ``||b - A @ x||``. ``ichol0`` dispatches to a native C++ IC(0)-preconditioned
-CG loop; setup runs on CPU and standalone preconditioner application uses
+CG loop, setup runs on CPU and standalone preconditioner application uses
 native CSR triangular solves on CPU or Metal.
 
 ``linalg.gmres`` accepts ``identity``, ``diagonal``/``jacobi``, ``ilu0``,
@@ -260,7 +275,7 @@ The diagonal/Jacobi, ILU(0), and exact-factor paths build Krylov vectors for
 ``M^{-1} A`` through native solver entrypoints and test convergence against the
 true residual ``b - A @ x``. ILU(0) setup runs on CPU and applies through native
 CSR triangular solves on CPU or Metal. Explicit native LU/Cholesky factors apply
-through native permutation/triangular-solve bindings; guarded Accelerate
+through native permutation/triangular-solve bindings, guarded Accelerate
 factorized objects use Apple's CPU sparse solver when that support is built in.
 Custom callable/object preconditioners still use a slower host fallback because
 arbitrary Python cannot be called from native solver kernels.
