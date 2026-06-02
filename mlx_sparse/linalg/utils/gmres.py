@@ -136,7 +136,14 @@ def left_preconditioned_gmres_host(
     b_norm = float(np.linalg.norm(rhs))
     tolerance = max(float(atol), float(rtol) * b_norm)
     iterations = 0
-    residual_norm = float("inf")
+    true_residual = rhs - _csr_matvec(data, indices, indptr, x)
+    residual_norm = float(np.linalg.norm(true_residual))
+    if not np.isfinite(residual_norm):
+        return mx.array(x.astype(np.float32)), -3, residual_norm, iterations
+    if residual_norm <= tolerance:
+        return mx.array(x.astype(np.float32)), 0, residual_norm, iterations
+    if maxiter == 0:
+        return mx.array(x.astype(np.float32)), 1, residual_norm, iterations
 
     while iterations < maxiter:
         true_residual = rhs - _csr_matvec(data, indices, indptr, x)
@@ -146,7 +153,10 @@ def left_preconditioned_gmres_host(
         if residual_norm <= tolerance:
             return mx.array(x.astype(np.float32)), 0, residual_norm, iterations
 
-        z0 = apply_preconditioner(true_residual)
+        try:
+            z0 = apply_preconditioner(true_residual)
+        except Exception:
+            return mx.array(x.astype(np.float32)), -3, residual_norm, iterations
         if z0.shape != true_residual.shape or not np.all(np.isfinite(z0)):
             return mx.array(x.astype(np.float32)), -3, residual_norm, iterations
         beta = float(np.linalg.norm(z0))
@@ -161,7 +171,10 @@ def left_preconditioned_gmres_host(
 
         for col in range(steps):
             Av = _csr_matvec(data, indices, indptr, basis[:, col])
-            w = apply_preconditioner(Av)
+            try:
+                w = apply_preconditioner(Av)
+            except Exception:
+                return mx.array(x.astype(np.float32)), -3, residual_norm, iterations
             if w.shape != Av.shape or not np.all(np.isfinite(w)):
                 return mx.array(x.astype(np.float32)), -3, residual_norm, iterations
 
@@ -204,4 +217,9 @@ def left_preconditioned_gmres_host(
                 return mx.array(x.astype(np.float32)), 0, residual_norm, iterations
             break
 
-    return mx.array(x.astype(np.float32)), maxiter, residual_norm, iterations
+    return (
+        mx.array(x.astype(np.float32)),
+        maxiter if maxiter > 0 else 1,
+        residual_norm,
+        iterations,
+    )

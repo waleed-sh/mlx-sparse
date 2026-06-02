@@ -42,6 +42,8 @@ namespace {
 
 using namespace linalg_detail;
 
+inline bool finite_float(float value) { return std::isfinite(value); }
+
 class CSRCG : public mx::Primitive {
 public:
   CSRCG(mx::Stream stream, int n_rows, int n_cols, float rtol, float atol,
@@ -118,61 +120,137 @@ void csr_cg_cpu_impl(const mx::array &data, const mx::array &indices,
     std::copy(x0_ptr, x0_ptr + n_rows, x_ptr);
 
     csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, x_ptr, ap.data(), n_rows);
+    double b_norm2 = 0.0;
+    double rr = 0.0;
+    bool finite = true;
     for (int i = 0; i < n_rows; ++i) {
       r[i] = b_ptr[i] - ap[i];
       p[i] = r[i];
+      b_norm2 += static_cast<double>(b_ptr[i]) * static_cast<double>(b_ptr[i]);
+      rr += static_cast<double>(r[i]) * static_cast<double>(r[i]);
+      finite = finite && finite_float(r[i]) && finite_float(p[i]) &&
+               finite_float(ap[i]) && finite_float(b_ptr[i]) &&
+               finite_float(x_ptr[i]);
     }
 
-    const float norm_b = std::sqrt(std::max(dot_float(r, r), 0.0f));
-    double b_norm2 = 0.0;
-    for (int i = 0; i < n_rows; ++i) {
-      b_norm2 += static_cast<double>(b_ptr[i]) * static_cast<double>(b_ptr[i]);
-    }
+    const float residual_norm =
+        static_cast<float>(std::sqrt(std::max(rr, 0.0)));
     const float b_norm = std::sqrt(std::max(b_norm2, 0.0));
     const float tol = std::max(atol, rtol * b_norm);
-    float rr = norm_b * norm_b;
     const float eps = std::numeric_limits<float>::epsilon();
 
-    if (norm_b <= tol) {
+    if (!finite || !std::isfinite(rr) || !finite_float(residual_norm) ||
+        !finite_float(b_norm)) {
+      *info_ptr = -3;
+      *residual_ptr = residual_norm;
+      *iterations_ptr = 0;
+      return;
+    }
+    if (residual_norm <= tol) {
       *info_ptr = 0;
-      *residual_ptr = norm_b;
+      *residual_ptr = residual_norm;
       *iterations_ptr = 0;
       return;
     }
 
-    int status = maxiter;
+    int status = maxiter > 0 ? maxiter : 1;
     int completed = 0;
     for (int it = 1; it <= maxiter; ++it) {
       csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, p.data(), ap.data(),
                      n_rows);
-      const float denom = dot_float(p, ap);
-      if (std::abs(denom) <= eps) {
-        status = -1;
+      double denom = 0.0;
+      finite = true;
+      for (int i = 0; i < n_rows; ++i) {
+        denom += static_cast<double>(p[i]) * static_cast<double>(ap[i]);
+        finite = finite && finite_float(p[i]) && finite_float(ap[i]);
+      }
+      if (!finite || !std::isfinite(denom)) {
+        status = -3;
         completed = it - 1;
         break;
       }
-      const float alpha = rr / denom;
-      for (int i = 0; i < n_rows; ++i) {
-        x_ptr[i] += alpha * p[i];
-        r[i] -= alpha * ap[i];
+      if (std::abs(denom) <= eps) {
+        double p_norm2 = 0.0;
+        double ap_norm2 = 0.0;
+        for (int i = 0; i < n_rows; ++i) {
+          p_norm2 += static_cast<double>(p[i]) * static_cast<double>(p[i]);
+          ap_norm2 += static_cast<double>(ap[i]) * static_cast<double>(ap[i]);
+        }
+        const double denom_scale = std::sqrt(std::max(p_norm2 * ap_norm2, 0.0));
+        const double denom_tol =
+            std::min(static_cast<double>(eps), static_cast<double>(eps) *
+                                                   static_cast<double>(eps) *
+                                                   std::max(1.0, denom_scale));
+        if (!std::isfinite(denom_scale)) {
+          status = -3;
+          completed = it - 1;
+          break;
+        }
+        if (std::abs(denom) <= denom_tol) {
+          status = -1;
+          completed = it - 1;
+          break;
+        }
       }
-      const float rr_new = dot_float(r, r);
-      const float r_norm = std::sqrt(std::max(rr_new, 0.0f));
+      const double alpha = rr / denom;
+      if (!std::isfinite(alpha)) {
+        status = -3;
+        completed = it - 1;
+        break;
+      }
+      finite = true;
+      double rr_new = 0.0;
+      for (int i = 0; i < n_rows; ++i) {
+        const double x_candidate =
+            static_cast<double>(x_ptr[i]) + alpha * static_cast<double>(p[i]);
+        const double r_candidate =
+            static_cast<double>(r[i]) - alpha * static_cast<double>(ap[i]);
+        const float x_candidate_f = static_cast<float>(x_candidate);
+        const float r_candidate_f = static_cast<float>(r_candidate);
+        if (!std::isfinite(x_candidate) || !std::isfinite(r_candidate) ||
+            !finite_float(x_candidate_f) || !finite_float(r_candidate_f)) {
+          finite = false;
+          continue;
+        }
+        x_ptr[i] = x_candidate_f;
+        r[i] = r_candidate_f;
+        finite = finite && finite_float(x_ptr[i]) && finite_float(r[i]);
+        rr_new += static_cast<double>(r[i]) * static_cast<double>(r[i]);
+      }
+      const float r_norm = static_cast<float>(std::sqrt(std::max(rr_new, 0.0)));
       completed = it;
+      if (!finite || !std::isfinite(rr_new) || !finite_float(r_norm)) {
+        status = -3;
+        break;
+      }
       if (r_norm <= tol) {
         status = 0;
         rr = rr_new;
         break;
       }
-      const float beta = rr_new / rr;
+      const double beta = rr_new / rr;
+      if (!std::isfinite(beta)) {
+        status = -3;
+        break;
+      }
       for (int i = 0; i < n_rows; ++i) {
-        p[i] = r[i] + beta * p[i];
+        const double p_candidate =
+            static_cast<double>(r[i]) + beta * static_cast<double>(p[i]);
+        const float p_candidate_f = static_cast<float>(p_candidate);
+        if (!std::isfinite(p_candidate) || !finite_float(p_candidate_f)) {
+          status = -3;
+          break;
+        }
+        p[i] = p_candidate_f;
+      }
+      if (status < 0) {
+        break;
       }
       rr = rr_new;
     }
 
     *info_ptr = status;
-    *residual_ptr = std::sqrt(std::max(rr, 0.0f));
+    *residual_ptr = static_cast<float>(std::sqrt(std::max(rr, 0.0)));
     *iterations_ptr = completed;
   });
 }

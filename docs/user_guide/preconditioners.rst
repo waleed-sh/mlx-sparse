@@ -18,6 +18,12 @@ native Krylov iterations.
 Exact-factor preconditioners wrap existing direct solve objects and reuse typed
 native or guarded Accelerate apply paths.
 
+Solver diagnostics are available with ``return_info=True`` on ``cg``,
+``gmres``, and ``minres``. The returned ``SolverInfo`` records the final true
+residual norm, iteration count, status reason, and preconditioner kind. Native
+callbacks are exit callbacks only: they run once after the native loop has
+finished, avoiding per-iteration CPU/GPU synchronization by default.
+
 Current support
 ---------------
 

@@ -43,6 +43,17 @@ namespace {
 
 using namespace linalg_detail;
 
+inline bool finite_float(float value) { return std::isfinite(value); }
+
+bool finite_vector(const std::vector<float> &values) {
+  for (float value : values) {
+    if (!finite_float(value)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 template <typename I>
 std::tuple<mx::array, mx::array, mx::array, mx::array>
 csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
@@ -64,8 +75,15 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
   const float b_norm = norm_float(rhs);
   const float tolerance = std::max(atol, rtol * b_norm);
   int iterations = 0;
-  int status = maxiter;
+  int status = maxiter > 0 ? maxiter : 1;
   float residual_norm = std::numeric_limits<float>::infinity();
+
+  if (!finite_vector(x) || !finite_vector(rhs) || !finite_float(b_norm) ||
+      !finite_float(tolerance)) {
+    return {mx::array(x.begin(), mx::Shape{n_rows}, mx::float32),
+            mx::array(-3, mx::int32), mx::array(residual_norm, mx::float32),
+            mx::array(0, mx::int32)};
+  }
 
   auto stream = mx::default_stream(mx::default_device());
 
@@ -78,6 +96,10 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
     }
     const float beta = norm_float(r);
     residual_norm = beta;
+    if (!finite_vector(r) || !finite_float(beta)) {
+      status = -3;
+      break;
+    }
     if (beta <= tolerance) {
       status = 0;
       break;
@@ -108,7 +130,17 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
       for (int col = 0; col < used; ++col) {
         h_used[static_cast<size_t>(row) * used + col] =
             h_ptr[static_cast<size_t>(row) * steps + col];
+        if (!std::isfinite(h_used[static_cast<size_t>(row) * used + col])) {
+          status = -3;
+          break;
+        }
       }
+      if (status < 0) {
+        break;
+      }
+    }
+    if (status < 0) {
+      break;
     }
     std::vector<double> e1(static_cast<size_t>(used + 1), 0.0);
     e1[0] = beta;
@@ -119,6 +151,14 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
       status = -1;
       break;
     }
+    bool finite_y = true;
+    for (double value : y) {
+      finite_y = finite_y && std::isfinite(value);
+    }
+    if (!finite_y) {
+      status = -3;
+      break;
+    }
 
     // x += V[:,0:used] * y  (basis has shape (n_rows, steps+1))
     for (int row = 0; row < n_rows; ++row) {
@@ -127,7 +167,18 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
         update += basis_ptr[static_cast<size_t>(row) * (steps + 1) + col] *
                   y[static_cast<size_t>(col)];
       }
+      if (!std::isfinite(update)) {
+        status = -3;
+        break;
+      }
       x[static_cast<size_t>(row)] += static_cast<float>(update);
+      if (!finite_float(x[static_cast<size_t>(row)])) {
+        status = -3;
+        break;
+      }
+    }
+    if (status < 0) {
+      break;
     }
     iterations += used;
     if (iterations >= maxiter) {
@@ -138,10 +189,27 @@ csr_gmres_impl(mx::array data, mx::array indices, mx::array indptr, mx::array b,
             rhs[static_cast<size_t>(i)] - ax[static_cast<size_t>(i)];
       }
       residual_norm = norm_float(r);
-      if (residual_norm <= tolerance) {
+      if (!finite_vector(r) || !finite_float(residual_norm)) {
+        status = -3;
+      } else if (residual_norm <= tolerance) {
         status = 0;
       }
       break;
+    }
+  }
+
+  if (maxiter == 0 && status > 0) {
+    auto ax = host_csr_spmv(data_ptr, indices_ptr, indptr_ptr, x, n_rows);
+    std::vector<float> r(static_cast<size_t>(n_rows));
+    for (int i = 0; i < n_rows; ++i) {
+      r[static_cast<size_t>(i)] =
+          rhs[static_cast<size_t>(i)] - ax[static_cast<size_t>(i)];
+    }
+    residual_norm = norm_float(r);
+    if (!finite_vector(r) || !finite_float(residual_norm)) {
+      status = -3;
+    } else if (residual_norm <= tolerance) {
+      status = 0;
     }
   }
 

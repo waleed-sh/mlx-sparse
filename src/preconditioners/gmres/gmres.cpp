@@ -312,6 +312,28 @@ csr_gmres_native_left_preconditioned_impl(
     }
   }
 
+  if (maxiter == 0 && status > 0) {
+    try {
+      auto x_mx = vector_to_mx_array(x);
+      auto ax_mx =
+          csr_matvec(data, indices, indptr, x_mx, n_rows, n_rows, stream);
+      auto ax = host_vector(ax_mx, n_rows, "exact GMRES initial SpMV");
+      std::vector<float> r(static_cast<size_t>(n_rows));
+      for (int i = 0; i < n_rows; ++i) {
+        r[static_cast<size_t>(i)] =
+            rhs[static_cast<size_t>(i)] - ax[static_cast<size_t>(i)];
+      }
+      residual_norm = norm_float(r);
+      if (!finite_vector(r) || !finite_float(residual_norm)) {
+        status = -3;
+      } else if (residual_norm <= tolerance) {
+        status = 0;
+      }
+    } catch (const std::exception &) {
+      status = -1;
+    }
+  }
+
   return {vector_to_mx_array(x), mx::array(status, mx::int32),
           mx::array(residual_norm, mx::float32),
           mx::array(iterations, mx::int32)};
@@ -696,6 +718,23 @@ csr_gmres_jacobi_impl(mx::array data, mx::array indices, mx::array indptr,
         status = 0;
       }
       break;
+    }
+  }
+
+  if (maxiter == 0 && status > 0) {
+    auto ax = host_csr_spmv(data_ptr, indices_ptr, indptr_ptr, x, n_rows);
+    std::vector<float> r(static_cast<size_t>(n_rows));
+    bool finite = true;
+    for (int i = 0; i < n_rows; ++i) {
+      r[static_cast<size_t>(i)] =
+          rhs[static_cast<size_t>(i)] - ax[static_cast<size_t>(i)];
+      finite = finite && finite_float(r[static_cast<size_t>(i)]);
+    }
+    residual_norm = norm_float(r);
+    if (!finite || !finite_float(residual_norm)) {
+      status = -3;
+    } else if (residual_norm <= tolerance) {
+      status = 0;
     }
   }
 

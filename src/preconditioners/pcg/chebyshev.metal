@@ -143,7 +143,7 @@ template <typename I>
     shared_true_rr = rr0;
     shared_rho = rho0;
     shared_tol = max(atol, rtol * sqrt(max(bb, 0.0f)));
-    shared_status = maxiter;
+    shared_status = maxiter > 0 ? maxiter : 1;
     shared_iters = 0;
     const float true_res = sqrt(max(rr0, 0.0f));
     if (invalid0 != 0.0f || z_invalid0 != 0.0f || !isfinite(rr0) ||

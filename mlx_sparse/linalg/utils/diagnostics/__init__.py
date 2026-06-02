@@ -12,23 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Internal linalg helper utilities.
+"""Internal iterative-solver diagnostics.
 
-The public linalg modules should describe algorithms and public objects. Shared
-normalization, dtype promotion, residual checking, and solver bookkeeping live
-in this subpackage so the algorithm modules do not accumulate unrelated private
-helper functions.
+This subpackage owns solver status normalization, structured diagnostics, and
+exit-callback plumbing. Input normalization for iterative solvers stays in
+``mlx_sparse.linalg.utils.iterative``.
 """
 
 from __future__ import annotations
 
+from mlx_sparse.linalg.utils.diagnostics.callbacks import (
+    finish_solver_result,
+    invoke_callback,
+)
+from mlx_sparse.linalg.utils.diagnostics.info import SolverInfo
+from mlx_sparse.linalg.utils.diagnostics.status import (
+    make_solver_info,
+    solver_info_to_int,
+)
+
 __all__ = [
-    "arrays",
-    "diagnostics",
-    "factorization",
-    "iterative",
-    "operators",
-    "preconditioners",
-    "sparse",
-    "spectral",
+    "SolverInfo",
+    "finish_solver_result",
+    "invoke_callback",
+    "make_solver_info",
+    "solver_info_to_int",
 ]

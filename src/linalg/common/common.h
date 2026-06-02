@@ -44,13 +44,18 @@ void csr_spmv_float(const float *data, const I *indices, const I *indptr,
   }
 }
 
-inline float dot_float(const std::vector<float> &lhs,
-                       const std::vector<float> &rhs) {
+inline double dot_double(const std::vector<float> &lhs,
+                         const std::vector<float> &rhs) {
   double acc = 0.0;
   for (size_t i = 0; i < lhs.size(); ++i) {
     acc += static_cast<double>(lhs[i]) * static_cast<double>(rhs[i]);
   }
-  return static_cast<float>(acc);
+  return acc;
+}
+
+inline float dot_float(const std::vector<float> &lhs,
+                       const std::vector<float> &rhs) {
+  return static_cast<float>(dot_double(lhs, rhs));
 }
 
 inline float dot_column_float(const float *basis, const float *w, int n,

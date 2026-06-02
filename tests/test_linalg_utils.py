@@ -24,7 +24,9 @@ from mlx_sparse._ext_loader import extension_available
 from mlx_sparse.linalg import preconditioners
 from mlx_sparse.linalg._interface import LinearOperator, aslinearoperator
 from mlx_sparse.linalg.utils import arrays as array_utils
+from mlx_sparse.linalg.utils import diagnostics as diagnostics_utils
 from mlx_sparse.linalg.utils import factorization as factor_utils
+from mlx_sparse.linalg.utils import gmres as gmres_utils
 from mlx_sparse.linalg.utils import sparse as sparse_utils
 
 
@@ -187,6 +189,209 @@ def test_canonical_csr_linear_operator_branches(mx):
             dense_guidance="dense hint",
             allow_sparse_linear_operator=True,
         )
+
+
+def test_solver_info_status_mapping_and_int_compatibility(mx):
+    diagnostic = diagnostics_utils.make_solver_info(
+        solver="cg",
+        status=mx.array(-3, dtype=mx.int32),
+        residual_norm=mx.array(np.inf, dtype=mx.float32),
+        iterations=mx.array(4, dtype=mx.int32),
+        rtol=1e-5,
+        atol=0.0,
+        maxiter=8,
+        preconditioner="jacobi",
+    )
+
+    assert diagnostic.status == -3
+    assert int(diagnostic) == -3
+    assert diagnostic.info == -3
+    assert not diagnostic.converged
+    assert diagnostic.convergence_reason == "non_finite"
+    assert diagnostic.breakdown_reason == "non_finite"
+    assert diagnostic.iterations == 4
+    assert diagnostic.preconditioner == "jacobi"
+
+
+def test_solver_finish_keeps_integer_fast_path_and_callback_payloads(mx):
+    x = mx.array([1.0, 2.0], dtype=mx.float32)
+    result_x, info = diagnostics_utils.finish_solver_result(
+        x,
+        mx.array(0, dtype=mx.int32),
+        mx.array(0.0, dtype=mx.float32),
+        mx.array(2, dtype=mx.int32),
+        solver="gmres",
+        return_info=False,
+    )
+    assert result_x is x
+    assert info == 0
+
+    seen = []
+    _, diagnostic = diagnostics_utils.finish_solver_result(
+        x,
+        mx.array(1, dtype=mx.int32),
+        mx.array(0.25, dtype=mx.float32),
+        mx.array(8, dtype=mx.int32),
+        solver="gmres",
+        return_info=True,
+        callback=seen.append,
+        callback_type="pr_norm",
+        restart=4,
+    )
+
+    assert diagnostic.status == 1
+    assert diagnostic.convergence_reason == "iteration_limit"
+    assert diagnostic.residual_norm == pytest.approx(0.25)
+    assert diagnostic.iterations == 8
+    assert diagnostic.restart == 4
+    assert len(seen) == 1
+    assert seen[0] == pytest.approx(0.25)
+
+
+def test_host_gmres_identity_and_diagonal_preconditioners_are_meaningful(mx, to_numpy):
+    dense = np.array([[4.0, 1.0], [0.0, 2.0]], dtype=np.float32)
+    csr = ms.csr_array(
+        (
+            mx.array([4.0, 1.0, 2.0], dtype=mx.float32),
+            mx.array([0, 1, 1], dtype=mx.int32),
+            mx.array([0, 2, 3], dtype=mx.int32),
+        ),
+        shape=dense.shape,
+        canonical=True,
+    )
+    rhs = mx.array([1.0, -2.0], dtype=mx.float32)
+    x0 = mx.zeros((2,), dtype=mx.float32)
+    expected = np.linalg.solve(dense, to_numpy(rhs))
+
+    for M in (
+        preconditioners.identity(csr),
+        preconditioners.diagonal(
+            mx.array([0.25, 0.5], dtype=mx.float32),
+            inverse=True,
+            shape=csr.shape,
+        ),
+    ):
+        x, info, residual, iterations = gmres_utils.left_preconditioned_gmres_host(
+            csr,
+            rhs,
+            x0,
+            M,
+            rtol=1e-7,
+            atol=1e-8,
+            restart=2,
+            maxiter=8,
+        )
+
+        assert info == 0
+        assert residual <= 1e-6
+        assert 0 < iterations <= 2
+        np.testing.assert_allclose(to_numpy(x), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_host_gmres_initial_success_and_iteration_budget_paths(mx, to_numpy):
+    dense = np.array([[4.0, 1.0], [0.5, 2.0]], dtype=np.float32)
+    csr = ms.csr_array(
+        (
+            mx.array([4.0, 1.0, 0.5, 2.0], dtype=mx.float32),
+            mx.array([0, 1, 0, 1], dtype=mx.int32),
+            mx.array([0, 2, 4], dtype=mx.int32),
+        ),
+        shape=dense.shape,
+        canonical=True,
+    )
+    x0 = mx.zeros((2,), dtype=mx.float32)
+    M = preconditioners.identity(csr)
+
+    x, info, residual, iterations = gmres_utils.left_preconditioned_gmres_host(
+        csr,
+        mx.zeros((2,), dtype=mx.float32),
+        x0,
+        M,
+        rtol=1e-7,
+        atol=0.0,
+        restart=1,
+        maxiter=1,
+    )
+    assert info == 0
+    assert residual == pytest.approx(0.0)
+    assert iterations == 0
+    np.testing.assert_allclose(to_numpy(x), np.zeros(2, dtype=np.float32))
+
+    x, info, residual, iterations = gmres_utils.left_preconditioned_gmres_host(
+        csr,
+        mx.array([1.0, -2.0], dtype=mx.float32),
+        x0,
+        M,
+        rtol=1e-12,
+        atol=0.0,
+        restart=1,
+        maxiter=1,
+    )
+    assert info == 1
+    assert residual > 1e-6
+    assert iterations == 1
+    assert np.all(np.isfinite(to_numpy(x)))
+
+
+def test_gmres_callable_preconditioner_shape_mismatch_reports_breakdown(mx):
+    csr = ms.csr_array(
+        (
+            mx.array([3.0, 2.0], dtype=mx.float32),
+            mx.array([0, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+
+    def wrong_length(_):
+        return mx.ones((3,), dtype=mx.float32)
+
+    _, info = ms.linalg.gmres(
+        csr,
+        mx.array([1.0, -2.0], dtype=mx.float32),
+        M=wrong_length,
+        restart=2,
+        maxiter=4,
+        return_info=True,
+    )
+
+    assert info.status == -3
+    assert not info.converged
+
+
+def test_gmres_callable_preconditioner_rank_and_zero_output_failures(mx):
+    csr = ms.csr_array(
+        (
+            mx.array([3.0, 2.0], dtype=mx.float32),
+            mx.array([0, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+    rhs = mx.array([1.0, -2.0], dtype=mx.float32)
+
+    _, rank_info = ms.linalg.gmres(
+        csr,
+        rhs,
+        M=lambda r: mx.ones((r.shape[0], 1), dtype=mx.float32),
+        restart=2,
+        maxiter=4,
+        return_info=True,
+    )
+    assert rank_info.status == -3
+
+    _, zero_info = ms.linalg.gmres(
+        csr,
+        rhs,
+        M=lambda r: mx.zeros(r.shape, dtype=mx.float32),
+        restart=2,
+        maxiter=4,
+        return_info=True,
+    )
+    assert zero_info.status == -1
+    assert zero_info.breakdown_reason == "breakdown"
 
 
 def test_preconditioner_object_validation_branches(mx, to_numpy):

@@ -251,11 +251,14 @@ class TestSolverAPIErrors:
         with pytest.raises(TypeError, match="native-backed"):
             linalg.cg(csr, b, M=lambda x: x)
 
-    def test_cg_with_callback_raises(self):
+    def test_cg_callback_receives_final_solution(self):
         csr = _spd_2x2(mx)
         b = mx.array([1.0, 2.0], dtype=mx.float32)
-        with pytest.raises(NotImplementedError, match="callbacks"):
-            linalg.cg(csr, b, callback=lambda x: None)
+        seen = []
+        x, info = linalg.cg(csr, b, callback=seen.append, maxiter=8)
+        assert info == 0
+        assert len(seen) == 1
+        assert seen[0].shape == x.shape
 
     def test_gmres_rejects_sparse_matrix_as_M(self, mx):
         csr = _spd_2x2(mx)
@@ -263,11 +266,32 @@ class TestSolverAPIErrors:
         with pytest.raises(TypeError, match="sparse matrices"):
             linalg.gmres(csr, b, M=csr)
 
-    def test_gmres_with_callback_raises(self):
+    def test_gmres_callback_receives_final_solution(self):
         csr = _spd_2x2(mx)
         b = mx.array([1.0, 2.0], dtype=mx.float32)
-        with pytest.raises(NotImplementedError, match="callbacks"):
-            linalg.gmres(csr, b, callback=lambda x: None)
+        seen = []
+        x, info = linalg.gmres(csr, b, callback=seen.append, maxiter=8)
+        assert info == 0
+        assert len(seen) == 1
+        assert seen[0].shape == x.shape
+
+    def test_gmres_residual_callback_types_receive_final_residual(self):
+        csr = _spd_2x2(mx)
+        b = mx.array([1.0, 2.0], dtype=mx.float32)
+        for callback_type in ("pr_norm", "legacy"):
+            seen = []
+            x, info = linalg.gmres(
+                csr,
+                b,
+                callback=seen.append,
+                callback_type=callback_type,
+                return_info=True,
+                maxiter=8,
+            )
+            assert info.status == 0
+            assert x.shape == b.shape
+            assert len(seen) == 1
+            assert seen[0] == pytest.approx(info.residual_norm)
 
     def test_gmres_bad_callback_type_raises(self):
         csr = _spd_2x2(mx)
@@ -281,11 +305,14 @@ class TestSolverAPIErrors:
         with pytest.raises(ValueError, match="restart"):
             linalg.gmres(csr, b, restart=0)
 
-    def test_minres_with_callback_raises(self):
+    def test_minres_callback_receives_final_solution(self):
         csr = _spd_2x2(mx)
         b = mx.array([1.0, 2.0], dtype=mx.float32)
-        with pytest.raises(NotImplementedError, match="callbacks"):
-            linalg.minres(csr, b, callback=lambda x: None)
+        seen = []
+        x, info = linalg.minres(csr, b, callback=seen.append, maxiter=8)
+        assert info == 0
+        assert len(seen) == 1
+        assert seen[0].shape == x.shape
 
     def test_cg_accepts_coo_input(self):
         if not extension_available():
