@@ -18,14 +18,15 @@ template <typename I>
 [[kernel]] void csr_normal_lanczos_kernel(
     device const float *data [[buffer(0)]],
     device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
-    device float *alphas [[buffer(3)]], device float *betas [[buffer(4)]],
-    device float *basis [[buffer(5)]], device int *actual [[buffer(6)]],
-    device float *work [[buffer(7)]], constant int &n_rows [[buffer(8)]],
-    constant int &n_cols [[buffer(9)]], constant int &k [[buffer(10)]],
-    uint lane [[thread_index_in_threadgroup]]) {
+    device const float *v0 [[buffer(3)]], device float *alphas [[buffer(4)]],
+    device float *betas [[buffer(5)]], device float *basis [[buffer(6)]],
+    device int *actual [[buffer(7)]], device float *work [[buffer(8)]],
+    constant int &n_rows [[buffer(9)]], constant int &n_cols [[buffer(10)]],
+    constant int &k [[buffer(11)]], uint lane [[thread_index_in_threadgroup]]) {
   threadgroup float scratch[256];
   threadgroup float shared_alpha;
   threadgroup float shared_beta;
+  threadgroup float shared_v0_norm;
   threadgroup float beta_prev;
   threadgroup int shared_done;
   threadgroup int shared_used;
@@ -39,10 +40,23 @@ template <typename I>
        i += static_cast<int>(k_linalg_threads)) {
     basis[i] = 0.0f;
   }
-  const float inv_norm = rsqrt(static_cast<float>(n_cols));
+  float v0_norm_local = 0.0f;
   for (int col = static_cast<int>(lane); col < n_cols;
        col += static_cast<int>(k_linalg_threads)) {
-    basis[col * k] = inv_norm;
+    v0_norm_local += v0[col] * v0[col];
+  }
+  const float v0_norm =
+      sqrt(max(reduce_sum_256(v0_norm_local, scratch, lane), 0.0f));
+  if (lane == 0) {
+    shared_v0_norm = v0_norm;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  for (int col = static_cast<int>(lane); col < n_cols;
+       col += static_cast<int>(k_linalg_threads)) {
+    basis[col * k] = shared_v0_norm <= 1.1920928955078125e-7f
+                         ? (col == 0 ? 1.0f : 0.0f)
+                         : v0[col] / shared_v0_norm;
     work[col] = 0.0f;
   }
   if (lane == 0) {
@@ -167,14 +181,14 @@ template <typename I>
 
 template [[host_name("csr_normal_lanczos_float32_int32")]] [[kernel]] void
 csr_normal_lanczos_kernel<int>(device const float *, device const int *,
-                               device const int *, device float *,
-                               device float *, device float *, device int *,
-                               device float *, constant int &, constant int &,
-                               constant int &, uint);
+                               device const int *, device const float *,
+                               device float *, device float *, device float *,
+                               device int *, device float *, constant int &,
+                               constant int &, constant int &, uint);
 
 template [[host_name("csr_normal_lanczos_float32_int64")]] [[kernel]] void
 csr_normal_lanczos_kernel<long>(device const float *, device const long *,
-                                device const long *, device float *,
-                                device float *, device float *, device int *,
-                                device float *, constant int &, constant int &,
-                                constant int &, uint);
+                                device const long *, device const float *,
+                                device float *, device float *, device float *,
+                                device int *, device float *, constant int &,
+                                constant int &, constant int &, uint);

@@ -39,6 +39,12 @@ only identity and symmetric positive-definite diagonal/Jacobi preconditioners.
 See :doc:`preconditioners` for the current support matrix and
 CPU/Metal/Accelerate boundaries.
 
+Fully matrix-free :class:`~mlx_sparse.linalg.LinearOperator` inputs are
+accepted by ``cg`` and ``gmres`` through a bounded host fallback loop. This path
+is for compatibility with user-provided matvecs and arbitrary inverse-apply
+``M`` objects, sparse-backed operators still use the native CSR CPU/Metal
+solver paths.
+
 Sparse direct factorizations
 ----------------------------
 
@@ -63,12 +69,25 @@ The explicit-factor APIs are intentionally not Accelerate-backed: Accelerate
 does not return mlx-sparse ``CSRArray`` factors, so using it there would change
 the public contract.
 
+``spsolve_triangular(A, b, lower=True, unit_diagonal=False)`` exposes the
+native CSR triangular-solve path directly for vector or matrix right-hand
+sides. It is useful for checking explicit factors and factor-like
+preconditioners. A public triangular-analysis object is intentionally not
+exposed in v0.0.5b0 because repeated-apply benchmarks do not yet show a
+consistent win over the default native solve path.
+
 Spectral routines
 -----------------
 
 ``eigsh`` uses native Lanczos projection for Hermitian sparse matrices. ``eigs``
 uses native Arnoldi projection. ``svds`` applies Lanczos to the sparse normal
 operator without materializing ``A.T @ A``.
+
+All four spectral entrypoints that build Krylov bases accept a user start
+vector ``v0``. The current ``eigsh``, ``eigs``, and ``svds`` routines still
+perform a single ``ncv``-bounded Ritz extraction, non-default ``tol`` or
+``maxiter`` values are rejected until an implicitly restarted convergence loop
+is implemented.
 
 ``svds`` execution model
 ~~~~~~~~~~~~~~~~~~~~~~~~

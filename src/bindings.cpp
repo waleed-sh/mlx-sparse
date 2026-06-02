@@ -1361,47 +1361,51 @@ NB_MODULE(_ext, m) {
       "csr_eigsh",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
-         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols, int k,
-         int ncv, const std::string &which) {
-        return mlx_sparse::csr_eigsh(data, indices, indptr, n_rows, n_cols, k,
-                                     ncv, which);
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &v0,
+         int n_rows, int n_cols, int k, int ncv, const std::string &which) {
+        return mlx_sparse::csr_eigsh(data, indices, indptr, v0, n_rows, n_cols,
+                                     k, ncv, which);
       },
-      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a, "ncv"_a,
-      "which"_a, "Compute selected Hermitian Ritz pairs from a CSR matrix.");
+      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "ncv"_a, "which"_a,
+      "Compute selected Hermitian Ritz pairs from a CSR matrix.");
 
   m.def(
       "csr_eigs",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
-         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols, int k,
-         int ncv, const std::string &which) {
-        return mlx_sparse::csr_eigs(data, indices, indptr, n_rows, n_cols, k,
-                                    ncv, which);
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &v0,
+         int n_rows, int n_cols, int k, int ncv, const std::string &which) {
+        return mlx_sparse::csr_eigs(data, indices, indptr, v0, n_rows, n_cols,
+                                    k, ncv, which);
       },
-      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a, "ncv"_a,
-      "which"_a, "Compute selected Arnoldi Ritz pairs from a CSR matrix.");
+      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "ncv"_a, "which"_a,
+      "Compute selected Arnoldi Ritz pairs from a CSR matrix.");
 
   m.def(
       "csr_svds",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
-         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols, int k,
-         int ncv, const std::string &which) {
-        return mlx_sparse::csr_svds(data, indices, indptr, n_rows, n_cols, k,
-                                    ncv, which);
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &v0,
+         int n_rows, int n_cols, int k, int ncv, const std::string &which) {
+        return mlx_sparse::csr_svds(data, indices, indptr, v0, n_rows, n_cols,
+                                    k, ncv, which);
       },
-      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a, "ncv"_a,
-      "which"_a, "Compute selected singular triplets from a CSR matrix.");
+      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "ncv"_a, "which"_a,
+      "Compute selected singular triplets from a CSR matrix.");
 
   m.def(
       "csr_normal_lanczos",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
-         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols, int k) {
-        return mlx_sparse::csr_normal_lanczos(data, indices, indptr, n_rows,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &v0,
+         int n_rows, int n_cols, int k) {
+        return mlx_sparse::csr_normal_lanczos(data, indices, indptr, v0, n_rows,
                                               n_cols, k);
       },
-      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
       "Run Lanczos on the CSR normal operator A.T @ A.");
 
   m.def(

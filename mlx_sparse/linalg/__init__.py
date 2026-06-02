@@ -34,6 +34,7 @@ from mlx_sparse.linalg._factorizations import (
 from mlx_sparse.linalg._interface import LinearOperator, aslinearoperator
 from mlx_sparse.linalg._iterative import cg, gmres, minres
 from mlx_sparse.linalg._sparse_ops import dot, vdot
+from mlx_sparse.linalg._triangular import spsolve_triangular
 
 __all__ = [
     "LinearOperator",
@@ -55,6 +56,7 @@ __all__ = [
     "sparse_lu",
     "splu",
     "spsolve",
+    "spsolve_triangular",
     "svds",
     "vdot",
 ]

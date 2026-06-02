@@ -89,12 +89,10 @@ void csr_normal_apply_fused_float(const float *data, const I *indices,
 }
 
 template <typename I>
-void csr_normal_lanczos_cpu_impl(const mx::array &data,
-                                 const mx::array &indices,
-                                 const mx::array &indptr, mx::array &alphas,
-                                 mx::array &betas, mx::array &basis,
-                                 mx::array &actual, int n_rows, int n_cols,
-                                 int k, mx::Stream stream) {
+void csr_normal_lanczos_cpu_impl(
+    const mx::array &data, const mx::array &indices, const mx::array &indptr,
+    const mx::array &v0, mx::array &alphas, mx::array &betas, mx::array &basis,
+    mx::array &actual, int n_rows, int n_cols, int k, mx::Stream stream) {
   alphas.set_data(mx::allocator::malloc(alphas.nbytes()));
   betas.set_data(mx::allocator::malloc(betas.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
@@ -104,6 +102,7 @@ void csr_normal_lanczos_cpu_impl(const mx::array &data,
   encoder.set_input_array(data);
   encoder.set_input_array(indices);
   encoder.set_input_array(indptr);
+  encoder.set_input_array(v0);
   encoder.set_output_array(alphas);
   encoder.set_output_array(betas);
   encoder.set_output_array(basis);
@@ -112,6 +111,7 @@ void csr_normal_lanczos_cpu_impl(const mx::array &data,
   encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
                     indices = mx::array::unsafe_weak_copy(indices),
                     indptr = mx::array::unsafe_weak_copy(indptr),
+                    v0 = mx::array::unsafe_weak_copy(v0),
                     alphas = mx::array::unsafe_weak_copy(alphas),
                     betas = mx::array::unsafe_weak_copy(betas),
                     basis = mx::array::unsafe_weak_copy(basis),
@@ -120,6 +120,7 @@ void csr_normal_lanczos_cpu_impl(const mx::array &data,
     const auto *data_ptr = data.data<float>();
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
+    const auto *v0_ptr = v0.data<float>();
     auto *alphas_ptr = alphas.data<float>();
     auto *betas_ptr = betas.data<float>();
     auto *basis_ptr = basis.data<float>();
@@ -129,9 +130,18 @@ void csr_normal_lanczos_cpu_impl(const mx::array &data,
     std::fill(betas_ptr, betas_ptr + k, 0.0f);
     std::fill(basis_ptr, basis_ptr + static_cast<size_t>(n_cols) * k, 0.0f);
 
-    const float inv_norm = 1.0f / std::sqrt(static_cast<float>(n_cols));
+    double norm_sq = 0.0;
     for (int col = 0; col < n_cols; ++col) {
-      basis_ptr[static_cast<size_t>(col) * k] = inv_norm;
+      norm_sq += static_cast<double>(v0_ptr[col]) * v0_ptr[col];
+    }
+    const float norm = static_cast<float>(std::sqrt(norm_sq));
+    if (norm <= std::numeric_limits<float>::epsilon()) {
+      basis_ptr[0] = 1.0f;
+    } else {
+      const float inv_norm = 1.0f / norm;
+      for (int col = 0; col < n_cols; ++col) {
+        basis_ptr[static_cast<size_t>(col) * k] = v0_ptr[col] * inv_norm;
+      }
     }
 
     std::vector<float> w(static_cast<size_t>(n_cols), 0.0f);
@@ -185,11 +195,13 @@ void csr_normal_lanczos_cpu_impl(const mx::array &data,
 template <typename I>
 std::tuple<mx::array, mx::array, mx::array>
 csr_svds_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
-              int n_cols, int k, int ncv, const std::string &which) {
+              int n_cols, const mx::array &v0, int k, int ncv,
+              const std::string &which) {
   const int steps = std::min(n_cols, std::max(ncv, k + 1));
   auto stream = mx::default_stream(mx::default_device());
-  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] =
-      csr_normal_lanczos(data, indices, indptr, n_rows, n_cols, steps, stream);
+  auto v0_contig = mx::contiguous(v0, false, stream);
+  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] = csr_normal_lanczos(
+      data, indices, indptr, v0_contig, n_rows, n_cols, steps, stream);
   mx::eval(alphas_mx, betas_mx, basis_mx, actual_k_mx);
 
   const int used = static_cast<int>(actual_k_mx.item<int32_t>());
@@ -254,15 +266,16 @@ void CSRNormalLanczos::eval_cpu(const std::vector<mx::array> &inputs,
   auto &data = inputs[0];
   auto &indices = inputs[1];
   auto &indptr = inputs[2];
+  auto &v0 = inputs[3];
 
   if (indices.dtype() == mx::int32) {
-    csr_normal_lanczos_cpu_impl<int32_t>(data, indices, indptr, outputs[0],
+    csr_normal_lanczos_cpu_impl<int32_t>(data, indices, indptr, v0, outputs[0],
                                          outputs[1], outputs[2], outputs[3],
                                          n_rows_, n_cols_, k_, stream());
     return;
   }
   if (indices.dtype() == mx::int64) {
-    csr_normal_lanczos_cpu_impl<int64_t>(data, indices, indptr, outputs[0],
+    csr_normal_lanczos_cpu_impl<int64_t>(data, indices, indptr, v0, outputs[0],
                                          outputs[1], outputs[2], outputs[3],
                                          n_rows_, n_cols_, k_, stream());
     return;
@@ -277,6 +290,7 @@ void CSRNormalLanczos::eval_gpu(const std::vector<mx::array> &inputs,
   auto &data = inputs[0];
   auto &indices = inputs[1];
   auto &indptr = inputs[2];
+  auto &v0 = inputs[3];
   auto &alphas = outputs[0];
   auto &betas = outputs[1];
   auto &basis = outputs[2];
@@ -302,14 +316,15 @@ void CSRNormalLanczos::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_input_array(data, 0);
   encoder.set_input_array(indices, 1);
   encoder.set_input_array(indptr, 2);
-  encoder.set_output_array(alphas, 3);
-  encoder.set_output_array(betas, 4);
-  encoder.set_output_array(basis, 5);
-  encoder.set_output_array(actual, 6);
-  encoder.set_output_array(work, 7);
-  encoder.set_bytes(n_rows_, 8);
-  encoder.set_bytes(n_cols_, 9);
-  encoder.set_bytes(k_, 10);
+  encoder.set_input_array(v0, 3);
+  encoder.set_output_array(alphas, 4);
+  encoder.set_output_array(betas, 5);
+  encoder.set_output_array(basis, 6);
+  encoder.set_output_array(actual, 7);
+  encoder.set_output_array(work, 8);
+  encoder.set_bytes(n_rows_, 9);
+  encoder.set_bytes(n_cols_, 10);
+  encoder.set_bytes(k_, 11);
   encoder.dispatch_threads(MTL::Size(kSolverThreads, 1, 1),
                            MTL::Size(kSolverThreads, 1, 1));
 
@@ -325,8 +340,8 @@ void CSRNormalLanczos::eval_gpu(const std::vector<mx::array> &,
 
 std::tuple<mx::array, mx::array, mx::array, mx::array>
 csr_normal_lanczos(const mx::array &data, const mx::array &indices,
-                   const mx::array &indptr, int n_rows, int n_cols, int k,
-                   mx::StreamOrDevice s) {
+                   const mx::array &indptr, const mx::array &v0, int n_rows,
+                   int n_cols, int k, mx::StreamOrDevice s) {
   if (n_rows <= 0 || n_cols <= 0) {
     throw std::invalid_argument(
         "csr_normal_lanczos requires a non-empty matrix.");
@@ -338,10 +353,13 @@ csr_normal_lanczos(const mx::array &data, const mx::array &indices,
   require_rank(data, 1, "csr_normal_lanczos data");
   require_rank(indices, 1, "csr_normal_lanczos indices");
   require_rank(indptr, 1, "csr_normal_lanczos indptr");
+  require_rank(v0, 1, "csr_normal_lanczos v0");
   require_linalg_float32(data, "csr_normal_lanczos data");
+  require_linalg_float32(v0, "csr_normal_lanczos v0");
   require_same_index_dtype(indices, indptr, "csr_normal_lanczos indices",
                            "csr_normal_lanczos indptr");
   require_size(indptr, n_rows + 1, "csr_normal_lanczos indptr");
+  require_size(v0, n_cols, "csr_normal_lanczos v0");
   if (indices.size() != data.size()) {
     throw std::invalid_argument(
         "csr_normal_lanczos data and indices must have equal length.");
@@ -351,20 +369,21 @@ csr_normal_lanczos(const mx::array &data, const mx::array &indices,
   auto data_contig = mx::contiguous(data, false, stream);
   auto indices_contig = mx::contiguous(indices, false, stream);
   auto indptr_contig = mx::contiguous(indptr, false, stream);
+  auto v0_contig = mx::contiguous(v0, false, stream);
 
   auto primitive =
       std::make_shared<CSRNormalLanczos>(stream, n_rows, n_cols, k);
   auto outputs = mx::array::make_arrays(
       {mx::Shape{k}, mx::Shape{k}, mx::Shape{n_cols, k}, mx::Shape{}},
       {mx::float32, mx::float32, mx::float32, mx::int32}, primitive,
-      {data_contig, indices_contig, indptr_contig});
+      {data_contig, indices_contig, indptr_contig, v0_contig});
   return {outputs[0], outputs[1], outputs[2], outputs[3]};
 }
 
 std::tuple<mx::array, mx::array, mx::array>
 csr_svds(const mx::array &data, const mx::array &indices,
-         const mx::array &indptr, int n_rows, int n_cols, int k, int ncv,
-         const std::string &which) {
+         const mx::array &indptr, const mx::array &v0, int n_rows, int n_cols,
+         int k, int ncv, const std::string &which) {
   if (n_rows <= 0 || n_cols <= 0) {
     throw std::invalid_argument("csr_svds requires a non-empty matrix.");
   }
@@ -374,22 +393,25 @@ csr_svds(const mx::array &data, const mx::array &indices,
   require_rank(data, 1, "csr_svds data");
   require_rank(indices, 1, "csr_svds indices");
   require_rank(indptr, 1, "csr_svds indptr");
+  require_rank(v0, 1, "csr_svds v0");
   require_linalg_float32(data, "csr_svds data");
+  require_linalg_float32(v0, "csr_svds v0");
   require_same_index_dtype(indices, indptr, "csr_svds indices",
                            "csr_svds indptr");
   require_size(indptr, n_rows + 1, "csr_svds indptr");
+  require_size(v0, n_cols, "csr_svds v0");
   if (indices.size() != data.size()) {
     throw std::invalid_argument(
         "csr_svds data and indices must have equal length.");
   }
   ncv = std::min(n_cols, std::max(ncv, k + 1));
   if (indices.dtype() == mx::int32) {
-    return csr_svds_impl<int32_t>(data, indices, indptr, n_rows, n_cols, k, ncv,
-                                  which);
+    return csr_svds_impl<int32_t>(data, indices, indptr, n_rows, n_cols, v0, k,
+                                  ncv, which);
   }
   if (indices.dtype() == mx::int64) {
-    return csr_svds_impl<int64_t>(data, indices, indptr, n_rows, n_cols, k, ncv,
-                                  which);
+    return csr_svds_impl<int64_t>(data, indices, indptr, n_rows, n_cols, v0, k,
+                                  ncv, which);
   }
   throw std::runtime_error("csr_svds requires int32 or int64 indices.");
 }

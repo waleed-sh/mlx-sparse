@@ -358,9 +358,9 @@ def test_native_extension_required_error_paths(
     elif args == "lanczos":
         call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "spectral":
-        call_args = (data, indices, indptr, (1, 1))
+        call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "normal_lanczos":
-        call_args = (data, indices, indptr, (1, 1))
+        call_args = (data, indices, indptr, vector, (1, 1))
     elif args == "factorization":
         call_args = (data, indices, indptr, (1, 1))
     elif args == "ilu0_setup":
