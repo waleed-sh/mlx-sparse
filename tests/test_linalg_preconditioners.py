@@ -405,6 +405,52 @@ def test_aspreconditioner_wraps_callable_inverse_apply(mx, to_numpy):
     np.testing.assert_allclose(to_numpy(got), [1.0, 2.0], rtol=1e-6)
 
 
+def test_aspreconditioner_accepts_documented_inverse_apply_contracts(mx, to_numpy):
+    if not extension_available():
+        pytest.skip("native extension unavailable")
+    A = _general_3x3(mx)
+    rhs_np = np.array([1.0, -2.0, 0.5], dtype=np.float32)
+    expected = np.linalg.solve(to_numpy(A.todense()), rhs_np)
+
+    class _SolveObject:
+        shape = A.shape
+
+        def solve(self, rhs):
+            return rhs / mx.array([5.0, 4.0, 3.5], dtype=mx.float32)
+
+    normalized_none = preconditioners.aspreconditioner(None, A)
+    normalized_object = preconditioners.aspreconditioner(_SolveObject(), A)
+    normalized_callable = preconditioners.aspreconditioner(
+        lambda rhs: rhs / mx.array([5.0, 4.0, 3.5], dtype=mx.float32), A
+    )
+    normalized_preconditioner = preconditioners.aspreconditioner(
+        preconditioners.jacobi(A), A
+    )
+    normalized_lu = preconditioners.aspreconditioner(linalg.sparse_lu(A), A)
+    normalized_factorized = preconditioners.aspreconditioner(
+        linalg.factorized(A, method="lu"), A
+    )
+    spd = _spd_2x2(mx)
+    normalized_cholesky = preconditioners.aspreconditioner(
+        linalg.sparse_cholesky(spd), spd
+    )
+
+    assert isinstance(normalized_none, preconditioners.IdentityPreconditioner)
+    assert isinstance(normalized_object, preconditioners.CallablePreconditioner)
+    assert isinstance(normalized_callable, preconditioners.CallablePreconditioner)
+    assert normalized_preconditioner.kind == "jacobi"
+    for exact_pc in (normalized_lu, normalized_factorized):
+        assert isinstance(exact_pc, preconditioners.ExactFactorPreconditioner)
+        assert exact_pc.shape == A.shape
+        np.testing.assert_allclose(
+            to_numpy(exact_pc(mx.array(rhs_np, dtype=mx.float32))),
+            expected,
+            rtol=1e-3,
+            atol=1e-3,
+        )
+    assert normalized_cholesky.method == "cholesky"
+
+
 def test_identity_preconditioner_validates_rank_and_finiteness(mx, to_numpy):
     M = preconditioners.identity((2, 2))
     rhs = mx.array([[1.0, -2.0], [3.0, 4.0]], dtype=mx.float32)
@@ -2450,9 +2496,25 @@ def _assert_jacobi_csr_coo_csc_correctness(mx, to_numpy):
     )
     rhs_np = np.array([[4.0, 8.0], [16.0, 24.0], [32.0, 48.0]], dtype=np.float32)
     expected = rhs_np / np.diag(dense).astype(np.float32)[:, None]
+    solve_rhs = mx.array([1.0, -2.0, 0.5], dtype=mx.float32)
+    solve_rhs_np = to_numpy(solve_rhs)
+    expected_solution = np.linalg.solve(dense.astype(np.float64), solve_rhs_np)
 
     for sparse in (coo.tocsr(), coo, coo.tocsc()):
         M = preconditioners.jacobi(sparse, check=True)
         assert M.is_positive_definite is True
         got = M(mx.array(rhs_np, dtype=mx.float32))
         np.testing.assert_allclose(to_numpy(got), expected, rtol=1e-6, atol=1e-6)
+        solution, info = linalg.gmres(
+            sparse,
+            solve_rhs,
+            M=M,
+            rtol=1e-6,
+            atol=1e-7,
+            restart=3,
+            maxiter=24,
+        )
+        solution_np = to_numpy(solution)
+        assert info == 0
+        np.testing.assert_allclose(solution_np, expected_solution, rtol=2e-5, atol=2e-5)
+        assert _relative_residual(dense, solution_np, solve_rhs_np) <= 2e-6

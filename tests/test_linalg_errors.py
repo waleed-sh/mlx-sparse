@@ -260,6 +260,23 @@ class TestSolverAPIErrors:
         assert len(seen) == 1
         assert seen[0].shape == x.shape
 
+    def test_jacobi_pcg_callback_is_exit_only(self):
+        csr = _spd_2x2(mx)
+        b = mx.array([1.0, 2.0], dtype=mx.float32)
+        seen = []
+        x, info = linalg.cg(
+            csr,
+            b,
+            M=linalg.preconditioners.jacobi(csr, check=True),
+            callback=seen.append,
+            return_info=True,
+            maxiter=8,
+        )
+        assert info.status == 0
+        assert info.preconditioner == "jacobi"
+        assert len(seen) == 1
+        assert seen[0].shape == x.shape
+
     def test_gmres_rejects_sparse_matrix_as_M(self, mx):
         csr = _spd_2x2(mx)
         b = mx.array([1.0, 2.0], dtype=mx.float32)
@@ -292,6 +309,44 @@ class TestSolverAPIErrors:
             assert x.shape == b.shape
             assert len(seen) == 1
             assert seen[0] == pytest.approx(info.residual_norm)
+
+    def test_gmres_preconditioned_callback_payloads_are_exit_only(self):
+        csr = _spd_2x2(mx)
+        b = mx.array([1.0, 2.0], dtype=mx.float32)
+        M = linalg.preconditioners.jacobi(csr, check=True)
+
+        solution_payloads = []
+        x, info = linalg.gmres(
+            csr,
+            b,
+            M=M,
+            callback=solution_payloads.append,
+            callback_type="x",
+            return_info=True,
+            restart=2,
+            maxiter=8,
+        )
+        assert info.status == 0
+        assert info.preconditioner == "jacobi"
+        assert len(solution_payloads) == 1
+        assert solution_payloads[0].shape == x.shape
+
+        for callback_type in ("pr_norm", "legacy"):
+            residual_payloads = []
+            _, residual_info = linalg.gmres(
+                csr,
+                b,
+                M=M,
+                callback=residual_payloads.append,
+                callback_type=callback_type,
+                return_info=True,
+                restart=2,
+                maxiter=8,
+            )
+            assert residual_info.status == 0
+            assert residual_info.preconditioner == "jacobi"
+            assert len(residual_payloads) == 1
+            assert residual_payloads[0] == pytest.approx(residual_info.residual_norm)
 
     def test_gmres_bad_callback_type_raises(self):
         csr = _spd_2x2(mx)

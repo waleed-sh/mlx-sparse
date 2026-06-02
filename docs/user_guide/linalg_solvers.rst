@@ -60,8 +60,11 @@ are called once after the native CPU/Metal loop finishes, so the default solve
 path does not synchronize with Python inside each Krylov iteration. ``cg`` and
 ``minres`` callbacks receive the final solution. ``gmres(callback_type="x")``
 receives the final solution, while ``"pr_norm"`` and ``"legacy"`` receive the
-final reported residual norm. Use ``return_info=True`` for solver diagnostics
-that do not need a callback.
+final reported residual norm. These GMRES payload names intentionally mirror
+SciPy's callback types, but mlx-sparse does not call Python at every restart or
+inner iteration in native paths, and ``"legacy"`` does not change ``maxiter``
+accounting. Use ``return_info=True`` for solver diagnostics that do not need a
+callback.
 
 Solver support matrix
 ---------------------

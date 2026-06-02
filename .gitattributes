@@ -1,0 +1,4 @@
+
+benchmarks/** -linguist-detectable
+docs/notebooks/** -linguist-detectable
+*.ipynb -linguist-detectable

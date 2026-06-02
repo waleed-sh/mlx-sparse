@@ -37,7 +37,9 @@ def invoke_callback(
     the native solve has completed. ``gmres(callback_type="x")`` receives the
     final solution array. ``"pr_norm"`` and ``"legacy"`` receive the final
     reported residual norm, which is the true residual unless a future native
-    path exposes a distinct preconditioned residual norm.
+    path exposes a distinct preconditioned residual norm. ``"legacy"`` keeps
+    mlx-sparse's normal ``maxiter`` accounting; it does not request a Python
+    callback stream from inside native restart cycles.
     """
 
     if callback is None:
