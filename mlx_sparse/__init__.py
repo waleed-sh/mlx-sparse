@@ -43,7 +43,7 @@ Typical usage::
     Ah = A.H  # Hermitian (conjugate) transpose
 """
 
-from mlx_sparse import linalg, runtime
+from mlx_sparse import linalg, random, runtime
 from mlx_sparse._capabilities import (
     capabilities,
     has_capability,
@@ -202,6 +202,7 @@ __all__ = [
     "issparse",
     "linalg",
     "runtime",
+    "random",
     "has_capability",
     "get_config",
     "set_config",

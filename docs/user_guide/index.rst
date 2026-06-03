@@ -5,6 +5,7 @@ User guide
    :maxdepth: 1
 
    sparse_formats
+   random
    validation
    dtype_policy
    autodiff

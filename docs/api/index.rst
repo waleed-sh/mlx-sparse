@@ -6,6 +6,7 @@ API reference
 
    containers
    constructors
+   random
    operations
    configuration
    runtime
