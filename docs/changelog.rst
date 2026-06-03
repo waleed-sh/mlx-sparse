@@ -1,8 +1,17 @@
 Changelog
 =========
 
-Unreleased
+mlx-sparse v0.0.6b0 (Unreleased)
 ---------------------------------
+
+New Features
+~~~~~~~~~~~~
+
+* Added the public :mod:`mlx_sparse.random` namespace skeleton with
+  SciPy-compatible ``random_array``, ``random``, and ``rand`` signatures,
+  validation, RNG alias handling, and documentation. The constructors currently
+  raise ``NotImplementedError`` after validation until native CPU/Metal sparse
+  random generation kernels are connected.
 
 Improvements
 ~~~~~~~~~~~~

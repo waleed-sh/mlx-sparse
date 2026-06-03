@@ -93,6 +93,12 @@ Constructors
      - Converts existing sparse, SciPy sparse, dense MLX, NumPy, or Python
        rank-2 array-like inputs. Existing CSR/CSC inputs are preserved unless
        a dtype cast is requested, dense and SciPy inputs default to CSR.
+   * - ``ms.random`` namespace
+     - In progress
+     - Public ``random_array``, ``random``, and ``rand`` API skeleton is
+       exported and validated. Production sparse random generation remains
+       blocked on native CPU/Metal structure and value kernels; no Python
+       structural generation path is provided.
 
 Conversions and structural operations
 --------------------------------------
