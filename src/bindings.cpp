@@ -36,6 +36,7 @@
 #include "preconditioners/ilu0/ilu0.h"
 #include "preconditioners/minres/minres.h"
 #include "preconditioners/pcg/pcg.h"
+#include "random/random.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
 #include "sparse/coo_col_sums/coo_col_sums.h"
@@ -521,6 +522,36 @@ NB_MODULE(_ext, m) {
       },
       "dense"_a, "index_dtype_bits"_a, "threshold"_a,
       "Convert a dense rank-2 MLX array into canonical CSR buffers.");
+
+  m.def(
+      "random_coo_indices",
+      [](const mlx_sparse::mx::array &key, long long n_rows, long long n_cols,
+         long long nnz, int index_dtype_bits) {
+        return mlx_sparse::random_coo_indices(key, n_rows, n_cols, nnz,
+                                              index_dtype_bits);
+      },
+      "key"_a, "n_rows"_a, "n_cols"_a, "nnz"_a, "index_dtype_bits"_a,
+      "Generate duplicate-free random COO coordinates directly.");
+
+  m.def(
+      "random_csr_indices",
+      [](const mlx_sparse::mx::array &key, long long n_rows, long long n_cols,
+         long long nnz, int index_dtype_bits) {
+        return mlx_sparse::random_csr_indices(key, n_rows, n_cols, nnz,
+                                              index_dtype_bits);
+      },
+      "key"_a, "n_rows"_a, "n_cols"_a, "nnz"_a, "index_dtype_bits"_a,
+      "Generate duplicate-free sorted CSR structure directly.");
+
+  m.def(
+      "random_csc_indices",
+      [](const mlx_sparse::mx::array &key, long long n_rows, long long n_cols,
+         long long nnz, int index_dtype_bits) {
+        return mlx_sparse::random_csc_indices(key, n_rows, n_cols, nnz,
+                                              index_dtype_bits);
+      },
+      "key"_a, "n_rows"_a, "n_cols"_a, "nnz"_a, "index_dtype_bits"_a,
+      "Generate duplicate-free sorted CSC structure directly.");
 
   m.def(
       "csr_transpose",

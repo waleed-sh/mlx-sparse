@@ -51,6 +51,9 @@ def test_native_extension_imports_after_editable_build():
     assert hasattr(ext, "csc_tocsr")
     assert hasattr(ext, "csc_sort_indices")
     assert hasattr(ext, "csc_sum_duplicates")
+    assert hasattr(ext, "random_coo_indices")
+    assert hasattr(ext, "random_csr_indices")
+    assert hasattr(ext, "random_csc_indices")
     assert hasattr(ext, "_accelerate_csc_adapter_summary_for_testing")
     assert hasattr(ext, "_accelerate_csr_adapter_summary_for_testing")
     assert hasattr(ext, "_accelerate_coo_adapter_summary_for_testing")
@@ -190,6 +193,18 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
             seen.append(("csr_normal_lanczos", kwargs))
             return "normal_lanczos"
 
+        def random_coo_indices(self, *args, **kwargs):
+            seen.append(("random_coo_indices", kwargs))
+            return "random_indices"
+
+        def random_csr_indices(self, *args, **kwargs):
+            seen.append(("random_csr_indices", kwargs))
+            return "random_csr"
+
+        def random_csc_indices(self, *args, **kwargs):
+            seen.append(("random_csc_indices", kwargs))
+            return "random_csc"
+
     monkeypatch.setattr(native, "extension", lambda: FakeExt())
 
     assert native.identity_like("x") == "identity"
@@ -250,5 +265,17 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert (
         native.csr_normal_lanczos("data", "indices", "indptr", "v0", (2, 3), k=2)
         == "normal_lanczos"
+    )
+    assert (
+        native.random_coo_indices("key", (2, 3), 2, index_dtype=native.mx.int32)
+        == "random_indices"
+    )
+    assert (
+        native.random_csr_indices("key", (2, 3), 2, index_dtype=native.mx.int32)
+        == "random_csr"
+    )
+    assert (
+        native.random_csc_indices("key", (2, 3), 2, index_dtype=native.mx.int32)
+        == "random_csc"
     )
     assert all("stream" not in kwargs for _, kwargs in seen)

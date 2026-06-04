@@ -126,7 +126,13 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_tocsc/csr_tocsc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/fromdense/fromdense.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/identity_like/identity_like.cpp)
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/identity_like/identity_like.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/random/common.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/random/compressed.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/random/coo.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/random/csc.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/random/csr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/random/keys.cpp)
 
 target_include_directories(
   mlx_sparse_native
@@ -235,9 +241,13 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_tocsc/csr_tocsc.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/fromdense/fromdense.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/random/common.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/random/compressed.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/random/coo.metal
     DEPS
       ${CMAKE_CURRENT_LIST_DIR}/src/common/metal_common.h
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/common/metal_common.h
+      ${CMAKE_CURRENT_LIST_DIR}/src/random/random_metal.h
     INCLUDE_DIRS
       ${PROJECT_SOURCE_DIR}
       ${CMAKE_CURRENT_LIST_DIR}/src
