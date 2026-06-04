@@ -7,11 +7,14 @@ mlx-sparse v0.0.6b0 (Unreleased)
 New Features
 ~~~~~~~~~~~~
 
-* Added the public :mod:`mlx_sparse.random` namespace skeleton with
-  SciPy-compatible ``random_array``, ``random``, and ``rand`` signatures,
-  validation, RNG alias handling, and documentation. The constructors currently
-  raise ``NotImplementedError`` after validation until native CPU/Metal sparse
-  random generation kernels are connected.
+* Added the public :mod:`mlx_sparse.random` namespace with SciPy-compatible
+  ``random_array``, ``random``, and ``rand`` constructors. Random structure
+  generation is native CPU/Metal, deterministic for the same MLX key, exact in
+  its documented density-to-``nnz`` rounding, duplicate-free in canonical mode,
+  and supports direct COO/CSR/CSC output without dense masks, COO conversion
+  for compressed formats, or Python structural loops. Default values are MLX
+  uniform ``[0, 1)`` samples; custom samplers are called once for explicit
+  custom ranges or distributions.
 
 Improvements
 ~~~~~~~~~~~~

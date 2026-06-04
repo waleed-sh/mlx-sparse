@@ -29,6 +29,7 @@ UNSUPPORTED_SCIPY_FORMATS = ("bsr", "dia", "dok", "lil")
 
 _MAX_NATIVE_ELEMENTS = (1 << 63) - 1
 _MAX_UINT64_SEED = (1 << 64) - 1
+_MAX_MLX_SHAPE_DIMENSION = (1 << 31) - 1
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ def normalize_random_array_args(
     index_dtype = normalize_index_dtype(index_dtype)
     canonical = normalize_canonical(canonical)
     sampler = normalize_sampler(sampler)
+    validate_native_shape_capacity(shape)
     validate_index_capacity(shape, index_dtype)
     nnz = density_to_nnz(shape, density)
     validate_nnz_capacity(nnz, index_dtype)
@@ -146,7 +148,7 @@ def normalize_value_dtype(dtype) -> mx.Dtype:
             "dtype must be one of mx.float32, mx.float16, mx.bfloat16, "
             f"or mx.complex64 for the current sparse containers, got {dtype}. "
             "Native random support for float64, integer, and bool values is "
-            "reserved for the generation-kernel implementation."
+            "reserved for a package-wide sparse dtype expansion."
         )
     return dtype
 
@@ -231,7 +233,21 @@ def validate_index_capacity(shape: Shape2D, index_dtype) -> None:
             )
 
 
+def validate_native_shape_capacity(shape: Shape2D) -> None:
+    for name, dimension in (("n_rows", shape[0]), ("n_cols", shape[1])):
+        if dimension > _MAX_MLX_SHAPE_DIMENSION:
+            raise OverflowError(
+                f"{name}={dimension} exceeds the native MLX shape limit "
+                f"{_MAX_MLX_SHAPE_DIMENSION}."
+            )
+
+
 def validate_nnz_capacity(nnz: int, index_dtype) -> None:
+    if nnz > _MAX_MLX_SHAPE_DIMENSION:
+        raise OverflowError(
+            f"nnz={nnz} exceeds the native MLX output shape limit "
+            f"{_MAX_MLX_SHAPE_DIMENSION}."
+        )
     limit = _index_max(index_dtype)
     if nnz > limit:
         raise OverflowError(

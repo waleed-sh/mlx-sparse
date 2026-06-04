@@ -692,6 +692,63 @@ def csr_fromdense(
     return ext.csr_fromdense(dense, _index_dtype_bits(index_dtype), float(threshold))
 
 
+def random_coo_indices(
+    key: mx.array,
+    shape: Shape2D,
+    nnz: int,
+    *,
+    index_dtype,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("random_coo_indices requires the native extension.")
+    return ext.random_coo_indices(
+        key,
+        int(shape[0]),
+        int(shape[1]),
+        int(nnz),
+        _index_dtype_bits(index_dtype),
+    )
+
+
+def random_csr_indices(
+    key: mx.array,
+    shape: Shape2D,
+    nnz: int,
+    *,
+    index_dtype,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("random_csr_indices requires the native extension.")
+    return ext.random_csr_indices(
+        key,
+        int(shape[0]),
+        int(shape[1]),
+        int(nnz),
+        _index_dtype_bits(index_dtype),
+    )
+
+
+def random_csc_indices(
+    key: mx.array,
+    shape: Shape2D,
+    nnz: int,
+    *,
+    index_dtype,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("random_csc_indices requires the native extension.")
+    return ext.random_csc_indices(
+        key,
+        int(shape[0]),
+        int(shape[1]),
+        int(nnz),
+        _index_dtype_bits(index_dtype),
+    )
+
+
 def csr_cg(
     data: mx.array,
     indices: mx.array,

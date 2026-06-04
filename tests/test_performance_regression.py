@@ -160,6 +160,26 @@ def _eval_csc_product(mx, csc):
     return csc.data
 
 
+def _bench_sparse_buffers_ms(mx, fn, *, warmup: int, iters: int) -> float:
+    for _ in range(warmup):
+        array = fn()
+        if hasattr(array, "row"):
+            mx.eval(array.data, array.row, array.col)
+        else:
+            mx.eval(array.data, array.indices, array.indptr)
+
+    samples = []
+    for _ in range(iters):
+        start = time.perf_counter()
+        array = fn()
+        if hasattr(array, "row"):
+            mx.eval(array.data, array.row, array.col)
+        else:
+            mx.eval(array.data, array.indices, array.indptr)
+        samples.append(1000.0 * (time.perf_counter() - start))
+    return float(np.median(samples))
+
+
 @pytest.mark.performance
 def test_csr_matvec_native_performance_regression(mx, scipy_sparse):
     if not ms.is_available():
@@ -205,6 +225,58 @@ def test_csr_matvec_native_performance_regression(mx, scipy_sparse):
 
     assert native_ms <= max(absolute_ms, dense_factor * dense_ms)
     assert native_ms <= fallback_factor * fallback_ms
+
+
+@pytest.mark.performance
+def test_sparse_random_generation_performance_regression(mx):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    rows = int(os.environ.get("MLX_SPARSE_RANDOM_PERF_ROWS", "1024"))
+    cols = int(os.environ.get("MLX_SPARSE_RANDOM_PERF_COLS", "1024"))
+    density = float(os.environ.get("MLX_SPARSE_RANDOM_PERF_DENSITY", "0.004"))
+    warmup = int(os.environ.get("MLX_SPARSE_RANDOM_PERF_WARMUP", "3"))
+    iters = int(os.environ.get("MLX_SPARSE_RANDOM_PERF_ITERS", "5"))
+
+    expected_nnz = int(round(rows * cols * density))
+    sample = ms.random.random_array(
+        (rows, cols),
+        density=density,
+        format="csr",
+        rng=mx.random.key(0),
+        index_dtype=mx.int32,
+    )
+    assert sample.shape == (rows, cols)
+    assert sample.nnz == expected_nnz
+    assert sample.has_canonical_format
+
+    sparse_ms = _bench_sparse_buffers_ms(
+        mx,
+        lambda: ms.random.random_array(
+            (rows, cols),
+            density=density,
+            format="csr",
+            rng=mx.random.key(123),
+            index_dtype=mx.int32,
+        ),
+        warmup=warmup,
+        iters=iters,
+    )
+    dense_ms = _bench_ms(
+        mx,
+        lambda: mx.random.uniform(
+            shape=(rows, cols),
+            dtype=mx.float32,
+            key=mx.random.key(123),
+        ),
+        warmup=max(1, min(warmup, 2)),
+        iters=max(2, min(iters, 3)),
+    )
+
+    dense_factor = float(os.environ.get("MLX_SPARSE_RANDOM_DENSE_FACTOR", "2.0"))
+    absolute_ms = float(os.environ.get("MLX_SPARSE_RANDOM_ABSOLUTE_MS", "75.0"))
+
+    assert sparse_ms <= max(absolute_ms, dense_factor * dense_ms)
 
 
 @pytest.mark.performance
