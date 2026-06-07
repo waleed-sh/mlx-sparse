@@ -16,6 +16,13 @@ New Features
   uniform ``[0, 1)`` samples; custom samplers are called once for explicit
   custom ranges or distributions.
 
+* Added sparse-sparse addition and subtraction through ``A + B``, ``A - B``,
+  :func:`mlx_sparse.add`, and :func:`mlx_sparse.subtract`. COO, CSR, and CSC
+  operands with equal shape and matching value dtype are canonicalized through
+  native paths, merged by a native CSR CPU/Metal primitive, and returned with
+  duplicate coordinates summed and exact zero cancellations removed. Nonzero
+  scalar and sparse+dense addition are rejected to avoid hidden dense outputs.
+
 Improvements
 ~~~~~~~~~~~~
 

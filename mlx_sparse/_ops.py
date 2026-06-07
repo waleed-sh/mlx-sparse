@@ -25,6 +25,7 @@ from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._validation import (
     ensure_mx_array,
+    sanitize_scalar,
     validate_coo_matmul_inputs,
     validate_coo_matvec_inputs,
     validate_csc_matmul_inputs,
@@ -82,6 +83,194 @@ def todense(array) -> mx.array:
     if hasattr(array, "todense"):
         return array.todense()
     raise TypeError(f"todense expects an mlx-sparse array, got {type(array).__name__}.")
+
+
+def _is_sparse_array(value) -> bool:
+    return isinstance(value, (COOArray, CSRArray, CSCArray))
+
+
+def _sparse_name(value) -> str:
+    return type(value).__name__
+
+
+def _as_canonical_csr(name: str, value) -> CSRArray:
+    if isinstance(value, CSRArray):
+        return value.canonicalize()
+    if isinstance(value, COOArray):
+        return value.tocsr(canonical=True)
+    if isinstance(value, CSCArray):
+        return value.tocsr(canonical=True)
+    raise TypeError(f"{name} expects a sparse array, got {_sparse_name(value)}.")
+
+
+def _is_zero_python_scalar(value) -> bool:
+    sanitize_scalar(value)
+    return bool(value == 0)
+
+
+def _handle_sparse_scalar_addition(
+    sparse, scalar, *, subtract: bool, scalar_left: bool
+):
+    try:
+        is_zero = _is_zero_python_scalar(scalar)
+    except TypeError as exc:
+        raise TypeError(
+            "Sparse addition only supports sparse-sparse operands. "
+            "Sparse+dense addition is intentionally unsupported because it "
+            "would produce a dense result; call sparse.todense() explicitly."
+        ) from exc
+
+    if is_zero:
+        if subtract and scalar_left:
+            return (-1) * sparse
+        return sparse
+
+    if subtract and scalar_left:
+        raise NotImplementedError(
+            "Subtracting a sparse array from a nonzero scalar would produce a "
+            "dense matrix. Call sparse.todense() and subtract explicitly."
+        )
+    raise NotImplementedError(
+        "Adding or subtracting a nonzero scalar from a sparse array would "
+        "produce a dense matrix. Call sparse.todense() explicitly."
+    )
+
+
+def _convert_csr_add_output(result: CSRArray, lhs, rhs):
+    if isinstance(lhs, CSCArray) and isinstance(rhs, CSCArray):
+        return result.tocsc(canonical=True)
+    return result
+
+
+def add(A, B):
+    """Add two sparse arrays without densifying.
+
+    Computes ``A + B`` for rank-2 mlx-sparse arrays with equal shape and
+    matching value dtype. The production path canonicalizes both operands with
+    native sort/sum kernels, merges their CSR structures in native C++ or Metal,
+    sums duplicate coordinates, and removes exact zero cancellations from the
+    result.
+
+    CSR inputs return a canonical :class:`~mlx_sparse.CSRArray`. Homogeneous
+    CSC inputs return a canonical :class:`~mlx_sparse.CSCArray` via native
+    CSR/CSC conversion. COO and mixed-format inputs return canonical CSR output
+    so no dense matrix is created.
+
+    Sparse+dense addition is intentionally out of scope for this release:
+    adding a sparse matrix to a dense matrix returns a dense matrix
+    mathematically, and this API does not hide that cost. Add or subtract a
+    Python scalar only when the scalar is exactly zero; nonzero scalar addition
+    is rejected for the same reason.
+
+    The output structure depends on the input structures and on exact numerical
+    cancellation, so public sparse addition is treated as a dynamic-topology
+    operation. Gradients through integer structure are unsupported, and no
+    fixed-topology sparse-value autodiff contract is claimed for this dynamic
+    operation.
+
+    Args:
+        A: Left sparse operand, or the scalar ``0`` for ``0 + B``.
+        B: Right sparse operand, or the scalar ``0`` for ``A + 0``.
+
+    Returns:
+        A canonical sparse array. The result is CSR except for homogeneous CSC
+        inputs, which return CSC.
+
+    Raises:
+        TypeError: If operands are dense, shapes differ, or value dtypes differ.
+        NotImplementedError: If nonzero scalar addition would densify.
+    """
+    if _is_sparse_array(A) and _is_sparse_array(B):
+        if A.shape != B.shape:
+            raise ValueError(f"sparse add shape mismatch: got {A.shape} and {B.shape}.")
+        if A.data.dtype != B.data.dtype:
+            raise TypeError(
+                "Sparse add requires matching value dtypes, "
+                f"got {A.data.dtype} and {B.data.dtype}."
+            )
+        lhs = _as_canonical_csr("add lhs", A)
+        rhs = _as_canonical_csr("add rhs", B)
+        data, indices, indptr = _native.csr_add(lhs, rhs, subtract=False)
+        result = CSRArray(
+            data=data,
+            indices=indices,
+            indptr=indptr,
+            shape=A.shape,
+            sorted_indices=True,
+            has_canonical_format=True,
+        )
+        return _convert_csr_add_output(result, A, B)
+
+    if _is_sparse_array(A):
+        return _handle_sparse_scalar_addition(A, B, subtract=False, scalar_left=False)
+    if _is_sparse_array(B):
+        return _handle_sparse_scalar_addition(B, A, subtract=False, scalar_left=True)
+    raise TypeError(
+        "add expects at least one mlx-sparse COOArray, CSRArray, or CSCArray operand."
+    )
+
+
+def subtract(A, B):
+    """Subtract two sparse arrays without densifying.
+
+    Computes ``A - B`` for rank-2 mlx-sparse arrays with equal shape and
+    matching value dtype. Semantics match :func:`add`: inputs are canonicalized
+    natively, the structural union is merged in CSR form, duplicate coordinates
+    are summed, and exact zero cancellations are pruned from the canonical
+    output. Homogeneous CSC inputs return CSC; all other supported sparse
+    combinations return CSR.
+
+    Sparse-dense subtraction and nonzero scalar subtraction are rejected because
+    they would produce dense results. The scalar ``0`` is accepted as the
+    additive identity: ``A - 0`` returns ``A`` and ``0 - A`` returns ``-A`` as a
+    sparse array with the same structure.
+
+    The output topology is dynamic because exact cancellation can remove stored
+    entries. Gradients through the public sparse subtraction structure are not
+    claimed in this release.
+
+    Args:
+        A: Left sparse operand, or scalar ``0`` for ``0 - B``.
+        B: Right sparse operand, or scalar ``0`` for ``A - 0``.
+
+    Returns:
+        A canonical sparse array. The result is CSR except for homogeneous CSC
+        inputs, which return CSC.
+
+    Raises:
+        TypeError: If operands are dense, shapes differ, or value dtypes differ.
+        NotImplementedError: If nonzero scalar subtraction would densify.
+    """
+    if _is_sparse_array(A) and _is_sparse_array(B):
+        if A.shape != B.shape:
+            raise ValueError(
+                f"sparse subtract shape mismatch: got {A.shape} and {B.shape}."
+            )
+        if A.data.dtype != B.data.dtype:
+            raise TypeError(
+                "Sparse subtract requires matching value dtypes, "
+                f"got {A.data.dtype} and {B.data.dtype}."
+            )
+        lhs = _as_canonical_csr("subtract lhs", A)
+        rhs = _as_canonical_csr("subtract rhs", B)
+        data, indices, indptr = _native.csr_add(lhs, rhs, subtract=True)
+        result = CSRArray(
+            data=data,
+            indices=indices,
+            indptr=indptr,
+            shape=A.shape,
+            sorted_indices=True,
+            has_canonical_format=True,
+        )
+        return _convert_csr_add_output(result, A, B)
+
+    if _is_sparse_array(A):
+        return _handle_sparse_scalar_addition(A, B, subtract=True, scalar_left=False)
+    if _is_sparse_array(B):
+        return _handle_sparse_scalar_addition(B, A, subtract=True, scalar_left=True)
+    raise TypeError(
+        "subtract expects at least one mlx-sparse COOArray, CSRArray, or CSCArray operand."
+    )
 
 
 def _ensure_csr_array(name: str, a) -> CSRArray:

@@ -37,6 +37,7 @@
 #include "preconditioners/minres/minres.h"
 #include "preconditioners/pcg/pcg.h"
 #include "random/random.h"
+#include "sparse/add/csr_add.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
 #include "sparse/coo_col_sums/coo_col_sums.h"
@@ -493,6 +494,24 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a,
       "Sum adjacent duplicate CSR column entries in each sorted row.");
+
+  m.def(
+      "csr_add",
+      [](const mlx_sparse::mx::array &lhs_data,
+         const mlx_sparse::mx::array &lhs_indices,
+         const mlx_sparse::mx::array &lhs_indptr,
+         const mlx_sparse::mx::array &rhs_data,
+         const mlx_sparse::mx::array &rhs_indices,
+         const mlx_sparse::mx::array &rhs_indptr, int n_rows, int n_cols,
+         bool subtract) {
+        return mlx_sparse::csr_add(lhs_data, lhs_indices, lhs_indptr, rhs_data,
+                                   rhs_indices, rhs_indptr, n_rows, n_cols,
+                                   subtract);
+      },
+      "lhs_data"_a, "lhs_indices"_a, "lhs_indptr"_a, "rhs_data"_a,
+      "rhs_indices"_a, "rhs_indptr"_a, "n_rows"_a, "n_cols"_a,
+      "subtract"_a = false,
+      "Add or subtract two canonical CSR matrices into canonical CSR buffers.");
 
   m.def(
       "csc_sort_indices",
