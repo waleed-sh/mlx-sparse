@@ -46,3 +46,9 @@ def test_public_batched_operation_exports():
     for name in ("csr_batched_matvec", "csr_batched_matmul"):
         assert name in ms.__all__
         assert callable(getattr(ms, name))
+
+
+def test_public_sparse_addition_exports():
+    for name in ("add", "subtract"):
+        assert name in ms.__all__
+        assert callable(getattr(ms, name))

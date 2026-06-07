@@ -68,6 +68,7 @@ from mlx_sparse._csc import CSCArray, csc_array
 from mlx_sparse._csr import CSRArray, csr_array
 from mlx_sparse._device import use_cpu, use_device, use_gpu
 from mlx_sparse._ops import (
+    add,
     coo_batched_matmul,
     coo_batched_matvec,
     coo_col_norms,
@@ -107,6 +108,7 @@ from mlx_sparse._ops import (
     csr_row_sums,
     csr_trace,
     identity_like,
+    subtract,
     todense,
 )
 from mlx_sparse._typing import is_available
@@ -146,6 +148,7 @@ __all__ = [
     "COOArray",
     "CSCArray",
     "CSRArray",
+    "add",
     "asarray",
     "capabilities",
     "coo_array",
@@ -206,6 +209,7 @@ __all__ = [
     "has_capability",
     "get_config",
     "set_config",
+    "subtract",
     "todense",
     "use_cpu",
     "use_device",

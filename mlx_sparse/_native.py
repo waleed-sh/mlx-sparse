@@ -354,6 +354,23 @@ def csc_matmat(lhs, rhs):
     )
 
 
+def csr_add(lhs, rhs, *, subtract: bool = False):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_add requires the native mlx_sparse extension.")
+    return ext.csr_add(
+        lhs.data,
+        lhs.indices,
+        lhs.indptr,
+        rhs.data,
+        rhs.indices,
+        rhs.indptr,
+        lhs.shape[0],
+        lhs.shape[1],
+        bool(subtract),
+    )
+
+
 def csr_transpose(
     data: mx.array,
     indices: mx.array,

@@ -297,6 +297,35 @@ class CSCArray:
             return csc_matmul(self, rhs)
         raise ValueError(f"CSC matmul expects rank-1 or higher RHS, got {rhs.shape}.")
 
+    def __add__(self, other):
+        """Add another sparse array with the ``+`` operator.
+
+        Dispatches to :func:`mlx_sparse.add`. Homogeneous CSC addition returns
+        canonical CSC output through native CSR/CSC conversion. Mixed-format
+        sparse addition returns canonical CSR output.
+        """
+        from mlx_sparse._ops import add
+
+        return add(self, other)
+
+    def __radd__(self, other):
+        """Right-hand sparse addition. See :meth:`__add__`."""
+        from mlx_sparse._ops import add
+
+        return add(other, self)
+
+    def __sub__(self, other):
+        """Subtract another sparse array with the ``-`` operator."""
+        from mlx_sparse._ops import subtract
+
+        return subtract(self, other)
+
+    def __rsub__(self, other):
+        """Right-hand sparse subtraction. Supports ``0 - A`` sparsely."""
+        from mlx_sparse._ops import subtract
+
+        return subtract(other, self)
+
     def __rmul__(self, other):
         """Multiply the current CSCArray by a number using the ``*`` operator.
 

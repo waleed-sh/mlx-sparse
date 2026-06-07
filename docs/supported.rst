@@ -216,8 +216,15 @@ Sparse-dense arithmetic
      - Scales stored values for COO, CSR, and CSC inputs while preserving the
        sparse format and structural metadata.
    * - Sparse-sparse addition
-     - Not planned
-     - Dynamic output size. May be added as a host-side utility.
+     - Done
+     - ``A + B``, ``A - B``, :func:`mlx_sparse.add`, and
+       :func:`mlx_sparse.subtract` support COO/CSR/CSC sparse operands with
+       equal shape and matching value dtype. Inputs canonicalize through native
+       sort/sum and conversion paths, then a native CSR CPU/Metal merge emits
+       canonical output with duplicate coordinates summed and exact zero
+       cancellations removed. Homogeneous CSC inputs return CSC, other
+       supported combinations return CSR. Sparse+dense and nonzero scalar
+       addition are rejected to avoid hidden dense outputs.
 
 Sparse reductions
 -----------------

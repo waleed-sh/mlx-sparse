@@ -280,6 +280,62 @@ def test_sparse_random_generation_performance_regression(mx):
 
 
 @pytest.mark.performance
+def test_csr_sparse_addition_performance_regression(mx):
+    if not ms.is_available():
+        pytest.skip("native extension is required for performance regression checks")
+
+    rows = int(os.environ.get("MLX_SPARSE_ADD_PERF_ROWS", "1536"))
+    cols = int(os.environ.get("MLX_SPARSE_ADD_PERF_COLS", "1536"))
+    density = float(os.environ.get("MLX_SPARSE_ADD_PERF_DENSITY", "0.004"))
+    warmup = int(os.environ.get("MLX_SPARSE_ADD_PERF_WARMUP", "2"))
+    iters = int(os.environ.get("MLX_SPARSE_ADD_PERF_ITERS", "4"))
+
+    lhs = ms.random.random_array(
+        (rows, cols),
+        density=density,
+        format="csr",
+        rng=mx.random.key(100),
+        index_dtype=mx.int32,
+    )
+    rhs = ms.random.random_array(
+        (rows, cols),
+        density=density,
+        format="csr",
+        rng=mx.random.key(101),
+        index_dtype=mx.int32,
+    )
+    dense_lhs = lhs.todense()
+    dense_rhs = rhs.todense()
+
+    out = lhs + rhs
+    np.testing.assert_allclose(
+        to_numpy(out.todense()),
+        to_numpy(dense_lhs + dense_rhs),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    assert out.has_canonical_format
+
+    sparse_ms = _bench_sparse_buffers_ms(
+        mx,
+        lambda: lhs + rhs,
+        warmup=warmup,
+        iters=iters,
+    )
+    dense_ms = _bench_ms(
+        mx,
+        lambda: dense_lhs + dense_rhs,
+        warmup=max(1, min(warmup, 2)),
+        iters=max(2, min(iters, 3)),
+    )
+
+    dense_factor = float(os.environ.get("MLX_SPARSE_ADD_DENSE_FACTOR", "35.0"))
+    absolute_ms = float(os.environ.get("MLX_SPARSE_ADD_ABSOLUTE_MS", "125.0"))
+
+    assert sparse_ms <= max(absolute_ms, dense_factor * dense_ms)
+
+
+@pytest.mark.performance
 def test_csr_matmul_native_performance_regression(mx, scipy_sparse):
     if not ms.is_available():
         pytest.skip("native extension is required for performance regression checks")

@@ -9,8 +9,19 @@ the ``@`` operator on :class:`COOArray`, :class:`CSRArray`, and
 explicit dispatch and for callers who prefer a functional style.
 
 Sparse-dense operations return lazy ``mlx.core.array`` values. Sparse-sparse
-``matmat`` operations return new sparse arrays and may synchronize structure to
-host because their output sparsity pattern is data-dependent.
+``add`` / ``subtract`` and ``matmat`` operations return new sparse arrays and
+may synchronize structure to host because their output sparsity pattern is
+data-dependent.
+
+add
+---
+
+.. autofunction:: add
+
+subtract
+--------
+
+.. autofunction:: subtract
 
 csr\_matvec
 -----------
@@ -169,6 +180,17 @@ primitive. Same-format sparse-sparse products are also native:
 Mixed-format sparse-sparse products remain explicit: convert the operand
 yourself when a different storage format is acceptable.
 
+The ``+`` and ``-`` operators on :class:`COOArray`, :class:`CSRArray`, and
+:class:`CSCArray` dispatch to :func:`add` and :func:`subtract`. Sparse-sparse
+addition supports COO, CSR, and CSC operands with equal shape and matching
+value dtype. Inputs are canonicalized natively, duplicate coordinates are
+summed, exact zero cancellations are removed, and the output is canonical.
+CSR inputs return CSR, homogeneous CSC inputs return CSC, and COO or
+mixed-format inputs return CSR. Sparse+dense addition and nonzero scalar
+addition are rejected because they would produce dense matrices, call
+``A.todense()`` explicitly when that is intended. The scalar ``0`` is accepted
+as a sparse-preserving identity.
+
 All sparse-dense products validate that ``rhs.dtype == A.data.dtype``. There
 is no implicit type promotion. See :doc:`../user_guide/dtype_policy` for the
 full dtype matrix.
@@ -184,11 +206,14 @@ matrices in Python.
 Transpose products used by autodiff are also native. On Metal, ``float32``
 transpose matvec/matmul use atomic scatter-add kernels. Other GPU value dtypes
 lower through native ``csr_transpose`` followed by the ordinary native product.
-Sparse-sparse ``matmat`` is different: its output shape depends on the input
-structure, so it performs symbolic/count work and synchronizes enough structure
-to allocate compact output buffers. CSR uses row symbolic/numeric assembly, COO
-groups coordinate rows without routing through CSR, and CSC walks right-hand
-columns against left-hand compressed columns to produce sorted output columns.
+Sparse-sparse ``add`` / ``subtract`` and ``matmat`` are different: their output
+shape depends on the input structure and, for addition, on exact cancellation,
+so they perform count work and synchronize enough structure to allocate compact
+output buffers. Sparse addition canonicalizes to CSR for the native merge and
+uses CPU or Metal row-merge kernels. CSR ``matmat`` uses row symbolic/numeric
+assembly, COO groups coordinate rows without routing through CSR, and CSC walks
+right-hand columns against left-hand compressed columns to produce sorted output
+columns.
 
 ``coo_matvec`` / ``coo_matmul`` are native coordinate scatter products. On
 Metal, ``float32`` uses atomic scatter-add over stored coordinates, other

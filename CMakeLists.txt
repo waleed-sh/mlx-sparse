@@ -77,6 +77,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/chebyshev.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/ic0.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/pcg.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/add/csr_add.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_norms/coo_col_norms.cpp
@@ -192,6 +193,7 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/minres/minres.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/chebyshev.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/pcg.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/add/csr_add.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_norms/coo_col_norms.metal

@@ -501,6 +501,35 @@ class CSRArray:
             return csr_matmul(self, rhs)
         raise ValueError(f"CSR matmul expects rank-1 or higher RHS, got {rhs.shape}.")
 
+    def __add__(self, other):
+        """Add another sparse array with the ``+`` operator.
+
+        Dispatches to :func:`mlx_sparse.add`. Sparse-sparse addition returns a
+        canonical sparse array without densifying. Adding a nonzero scalar or a
+        dense array is rejected because it would produce a dense matrix.
+        """
+        from mlx_sparse._ops import add
+
+        return add(self, other)
+
+    def __radd__(self, other):
+        """Right-hand sparse addition. See :meth:`__add__`."""
+        from mlx_sparse._ops import add
+
+        return add(other, self)
+
+    def __sub__(self, other):
+        """Subtract another sparse array with the ``-`` operator."""
+        from mlx_sparse._ops import subtract
+
+        return subtract(self, other)
+
+    def __rsub__(self, other):
+        """Right-hand sparse subtraction. Supports ``0 - A`` sparsely."""
+        from mlx_sparse._ops import subtract
+
+        return subtract(other, self)
+
     def __rmul__(self, other):
         """Multiply the current CSRArray by a number using the ``*`` operator.
 

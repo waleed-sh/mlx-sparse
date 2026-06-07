@@ -51,6 +51,7 @@ def test_native_extension_imports_after_editable_build():
     assert hasattr(ext, "csc_tocsr")
     assert hasattr(ext, "csc_sort_indices")
     assert hasattr(ext, "csc_sum_duplicates")
+    assert hasattr(ext, "csr_add")
     assert hasattr(ext, "random_coo_indices")
     assert hasattr(ext, "random_csr_indices")
     assert hasattr(ext, "random_csc_indices")
@@ -181,6 +182,10 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
             seen.append(("csr_sort_indices", kwargs))
             return "sort"
 
+        def csr_add(self, *args, **kwargs):
+            seen.append(("csr_add", kwargs))
+            return "add"
+
         def csc_sort_indices(self, *args, **kwargs):
             seen.append(("csc_sort_indices", kwargs))
             return "sort_csc"
@@ -260,6 +265,10 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
         == "csc_matmul_transpose"
     )
     assert native.csr_sort_indices("data", "indices", "indptr") == "sort"
+    csr_lhs = SimpleNamespace(data="ld", indices="li", indptr="lp", shape=(1, 2))
+    csr_rhs = SimpleNamespace(data="rd", indices="ri", indptr="rp", shape=(1, 2))
+    assert native.csr_add(csr_lhs, csr_rhs) == "add"
+    assert native.csr_add(csr_lhs, csr_rhs, subtract=True) == "add"
     assert native.csc_sort_indices("data", "indices", "indptr") == "sort_csc"
     assert native.csc_sum_duplicates("data", "indices", "indptr") == "sum_csc"
     assert (
