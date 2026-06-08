@@ -23,6 +23,16 @@ subtract
 
 .. autofunction:: subtract
 
+kron
+----
+
+.. autofunction:: kron
+
+kronsum
+-------
+
+.. autofunction:: kronsum
+
 csr\_matvec
 -----------
 
@@ -191,6 +201,18 @@ addition are rejected because they would produce dense matrices, call
 ``A.todense()`` explicitly when that is intended. The scalar ``0`` is accepted
 as a sparse-preserving identity.
 
+The :func:`kron` and :func:`kronsum` structural constructors accept COO, CSR,
+CSC, or dense rank-2 inputs and return COO, CSR, or CSC output. Dense operands
+are first extracted with the native :func:`fromdense` constructor. ``kron`` is
+assembled by the native COO Kronecker primitive after native compressed-to-COO
+conversion for CSR/CSC operands. ``format="coo"`` returns the direct fixed
+product topology and preserves duplicate coordinates when inputs contain
+duplicates, ``format="csr"`` and ``format="csc"`` canonicalize through native
+compressed conversion and sum duplicate products. ``kronsum`` builds
+``kron(I_n, A) + kron(B, I_m)`` for square inputs and uses the native sparse
+addition merge. Unsupported SciPy storage names such as ``"bsr"``, ``"dia"``,
+``"dok"``, and ``"lil"`` are rejected explicitly.
+
 All sparse-dense products validate that ``rhs.dtype == A.data.dtype``. There
 is no implicit type promotion. See :doc:`../user_guide/dtype_policy` for the
 full dtype matrix.
@@ -214,6 +236,14 @@ uses CPU or Metal row-merge kernels. CSR ``matmat`` uses row symbolic/numeric
 assembly, COO groups coordinate rows without routing through CSR, and CSC walks
 right-hand columns against left-hand compressed columns to produce sorted output
 columns.
+
+``kron`` is a fixed-output structural product before optional compressed
+canonicalization. The native COO kernel writes ``nnz_A * nnz_B`` values and
+coordinates directly on CPU or Metal without dense masks and without Python
+loops over stored entries. Sparse-value JVP/VJP is implemented for the COO data
+product when input structures are fixed. Gradients through integer structural
+buffers, dense-to-sparse extraction, and duplicate-summing canonicalization are
+unsupported.
 
 ``coo_matvec`` / ``coo_matmul`` are native coordinate scatter products. On
 Metal, ``float32`` uses atomic scatter-add over stored coordinates, other

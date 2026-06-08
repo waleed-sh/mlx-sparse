@@ -13,7 +13,7 @@ New Features
   its documented density-to-``nnz`` rounding, duplicate-free in canonical mode,
   and supports direct COO/CSR/CSC output without dense masks, COO conversion
   for compressed formats, or Python structural loops. Default values are MLX
-  uniform ``[0, 1)`` samples; custom samplers are called once for explicit
+  uniform ``[0, 1)`` samples, custom samplers are called once for explicit
   custom ranges or distributions.
 
 * Added sparse-sparse addition and subtraction through ``A + B``, ``A - B``,
@@ -22,6 +22,15 @@ New Features
   native paths, merged by a native CSR CPU/Metal primitive, and returned with
   duplicate coordinates summed and exact zero cancellations removed. Nonzero
   scalar and sparse+dense addition are rejected to avoid hidden dense outputs.
+
+* Added native Kronecker products and sums through :func:`mlx_sparse.kron` and
+  :func:`mlx_sparse.kronsum`. ``kron`` accepts COO/CSR/CSC or dense rank-2
+  operands, converts dense inputs through native ``fromdense``, expands
+  compressed formats through native ``tocoo`` paths, and assembles the product
+  with native CPU/Metal COO kernels. COO output preserves the fixed product
+  topology for sparse-value JVP/VJP, while CSR and CSC output canonicalize and
+  sum duplicate products. ``kronsum`` composes native ``kron`` with native
+  sparse addition for square inputs.
 
 Improvements
 ~~~~~~~~~~~~

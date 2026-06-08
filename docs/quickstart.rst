@@ -64,22 +64,18 @@ in the same conversion call.
    # CSRArray(shape=(3, 4), nnz=4, dtype=float32, index_dtype=int32,
    #          sorted_indices=True, has_canonical_format=True)
 
-You can also construct CSR directly from three arrays if you already have the
-CSR buffers (e.g. from SciPy):
+For random sparse inputs, use the native :mod:`mlx_sparse.random` namespace:
 
 .. code-block:: python
 
-   import scipy.sparse
-
-   sp = scipy.sparse.random(256, 256, density=0.01, format="csr",
-                             dtype=np.float32, random_state=0)
-   csr = ms.csr_array(
-       (mx.array(sp.data),
-        mx.array(sp.indices, dtype=mx.int32),
-        mx.array(sp.indptr, dtype=mx.int32)),
-       shape=sp.shape,
-       sorted_indices=True,
-       canonical=True,
+   csr = ms.random.rand(
+       256,
+       256,
+       density=0.01,
+       format="csr",
+       dtype=mx.float32,
+       rng=0,
+       index_dtype=mx.int32,
    )
 
 Structured constructors

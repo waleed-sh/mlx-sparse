@@ -45,9 +45,12 @@ def test_native_extension_imports_after_editable_build():
     assert hasattr(ext, "csr_transpose")
     assert hasattr(ext, "coo_tocsr")
     assert hasattr(ext, "coo_tocsc")
+    assert hasattr(ext, "coo_kron")
     assert hasattr(ext, "csr_todense")
     assert hasattr(ext, "csc_todense")
+    assert hasattr(ext, "csr_tocoo")
     assert hasattr(ext, "csr_tocsc")
+    assert hasattr(ext, "csc_tocoo")
     assert hasattr(ext, "csc_tocsr")
     assert hasattr(ext, "csc_sort_indices")
     assert hasattr(ext, "csc_sum_duplicates")
@@ -93,6 +96,10 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
         def coo_tocsc(self, *args, **kwargs):
             seen.append(("coo_tocsc", kwargs))
             return "coo_csc"
+
+        def coo_kron(self, *args, **kwargs):
+            seen.append(("coo_kron", kwargs))
+            return "kron"
 
         def csr_todense(self, *args, **kwargs):
             seen.append(("csr_todense", kwargs))
@@ -166,9 +173,17 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
             seen.append(("csr_tocsc", kwargs))
             return "tocsc"
 
+        def csr_tocoo(self, *args, **kwargs):
+            seen.append(("csr_tocoo", kwargs))
+            return "csr_coo"
+
         def csc_tocsr(self, *args, **kwargs):
             seen.append(("csc_tocsr", kwargs))
             return "tocsr"
+
+        def csc_tocoo(self, *args, **kwargs):
+            seen.append(("csc_tocoo", kwargs))
+            return "csc_coo"
 
         def csc_matvec_transpose(self, *args, **kwargs):
             seen.append(("csc_matvec_transpose", kwargs))
@@ -215,6 +230,9 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert native.identity_like("x") == "identity"
     assert native.coo_tocsr("data", "row", "col", (1, 2)) == "coo"
     assert native.coo_tocsc("data", "row", "col", (1, 2)) == "coo_csc"
+    coo_lhs = SimpleNamespace(data="ld", row="lr", col="lc", shape=(1, 2))
+    coo_rhs = SimpleNamespace(data="rd", row="rr", col="rc", shape=(2, 3))
+    assert native.coo_kron(coo_lhs, coo_rhs) == "kron"
     assert native.csr_todense("data", "indices", "indptr", (1, 2)) == "dense"
     assert native.csc_todense("data", "indices", "indptr", (1, 2)) == "dense_csc"
     assert native.csr_matvec("data", "indices", "indptr", "x", (1, 2)) == "matvec"
@@ -235,8 +253,6 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     assert native.csr_matmul("data", "indices", "indptr", "x", (1, 2)) == "matmul"
     assert native.coo_matmul("data", "row", "col", "x", (1, 2)) == "coo_matmul"
     assert native.csc_matmul("data", "indices", "indptr", "x", (1, 2)) == "csc_matmul"
-    coo_lhs = SimpleNamespace(data="ld", row="lr", col="lc", shape=(1, 2))
-    coo_rhs = SimpleNamespace(data="rd", row="rr", col="rc", shape=(2, 3))
     csc_lhs = SimpleNamespace(data="ld", indices="li", indptr="lp", shape=(1, 2))
     csc_rhs = SimpleNamespace(data="rd", indices="ri", indptr="rp", shape=(2, 3))
     assert native.coo_matmat(coo_lhs, coo_rhs) == "coo_matmat"
@@ -255,7 +271,9 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     )
     assert native.csr_transpose("data", "indices", "indptr", (1, 2)) == "transpose"
     assert native.csr_tocsc("data", "indices", "indptr", (1, 2)) == "tocsc"
+    assert native.csr_tocoo("data", "indices", "indptr", (1, 2)) == "csr_coo"
     assert native.csc_tocsr("data", "indices", "indptr", (1, 2)) == "tocsr"
+    assert native.csc_tocoo("data", "indices", "indptr", (1, 2)) == "csc_coo"
     assert (
         native.csc_matvec_transpose("data", "indices", "indptr", "x", (1, 2))
         == "csc_matvec_transpose"

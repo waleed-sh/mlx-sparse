@@ -108,6 +108,8 @@ from mlx_sparse._ops import (
     csr_row_sums,
     csr_trace,
     identity_like,
+    kron,
+    kronsum,
     subtract,
     todense,
 )
@@ -203,6 +205,8 @@ __all__ = [
     "identity_like",
     "is_available",
     "issparse",
+    "kron",
+    "kronsum",
     "linalg",
     "runtime",
     "random",

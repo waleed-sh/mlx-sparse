@@ -99,7 +99,7 @@ Constructors
        output with native CPU/Metal duplicate-free structure generation. CSR
        and CSC are generated directly in compressed form rather than through
        COO conversion. Default values use MLX uniform ``[0, 1)`` random vector
-       operations; custom value samplers are called once for custom ranges or
+       operations, custom value samplers are called once for custom ranges or
        distributions and may explicitly provide host values.
 
 Conversions and structural operations
@@ -132,6 +132,15 @@ Conversions and structural operations
    * - ``CSCArray.tocsr()``
      - Done
      - Native ``csc_tocsr`` conversion with count/prefix/fill structure build.
+   * - ``CSRArray.tocoo()``
+     - Done
+     - Native row-pointer expansion to COO row coordinates. Canonical CSR
+       inputs can produce canonical row-major COO metadata.
+   * - ``CSCArray.tocoo()``
+     - Done
+     - Native column-pointer expansion to COO column coordinates. Requested
+       canonical COO output routes through native CSC-to-CSR conversion and
+       CSR-to-COO expansion.
    * - ``CSRArray.todense()``
      - Done
      - Native primitive (CPU and Metal). Sums duplicate column entries.
@@ -225,6 +234,17 @@ Sparse-dense arithmetic
        cancellations removed. Homogeneous CSC inputs return CSC, other
        supported combinations return CSR. Sparse+dense and nonzero scalar
        addition are rejected to avoid hidden dense outputs.
+   * - Kronecker product and sum
+     - Done
+     - :func:`mlx_sparse.kron` accepts COO/CSR/CSC or dense rank-2 operands and
+       returns COO/CSR/CSC. Dense operands are extracted with native
+       ``fromdense``. CSR/CSC operands convert through native compressed-to-COO
+       expansion, the native COO Kronecker CPU/Metal primitive writes product
+       coordinates and values directly, and requested CSR/CSC outputs
+       canonicalize through native compressed conversion. :func:`kronsum`
+       composes native ``kron`` and native sparse addition for square inputs.
+       The fixed-topology COO data product has sparse-value JVP/VJP support,
+       duplicate-summing canonicalization remains a dynamic-topology boundary.
 
 Sparse reductions
 -----------------
