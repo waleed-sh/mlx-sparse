@@ -200,6 +200,41 @@ class CSCArray:
             )
         return out
 
+    def tocoo(self, *, canonical: bool | None = None):
+        """Convert to :class:`~mlx_sparse.COOArray` without densifying.
+
+        Direct CSC-to-COO conversion expands column pointers into COO column
+        coordinates and reuses row-index and data arrays. That order is
+        column-major, so ``canonical=True`` first converts through native CSR
+        canonicalization to produce row-major, duplicate-free COO coordinates.
+
+        Args:
+            canonical: If ``True``, return canonical row-major COO. If
+                ``False`` or ``None`` (default), return the direct structural
+                conversion with ``has_canonical_format=False``.
+
+        Returns:
+            A :class:`~mlx_sparse.COOArray` with the same shape and values.
+        """
+        if canonical is True:
+            return self.tocsr(canonical=True).tocoo(canonical=True)
+
+        from mlx_sparse._coo import COOArray
+
+        data, row, col = _native.csc_tocoo(
+            self.data,
+            self.indices,
+            self.indptr,
+            self.shape,
+        )
+        return COOArray(
+            data=data,
+            row=row,
+            col=col,
+            shape=self.shape,
+            has_canonical_format=False,
+        )
+
     def sort_indices(self) -> "CSCArray":
         """Return a new CSCArray with row indices sorted within each column."""
         if self.sorted_indices:

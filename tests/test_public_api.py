@@ -52,3 +52,9 @@ def test_public_sparse_addition_exports():
     for name in ("add", "subtract"):
         assert name in ms.__all__
         assert callable(getattr(ms, name))
+
+
+def test_public_sparse_kron_exports():
+    for name in ("kron", "kronsum"):
+        assert name in ms.__all__
+        assert callable(getattr(ms, name))

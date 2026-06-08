@@ -62,6 +62,24 @@ def coo_tocsc(
     return ext.coo_tocsc(data, row, col, shape[0], shape[1])
 
 
+def coo_kron(lhs, rhs):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("coo_kron requires the native mlx_sparse extension.")
+    return ext.coo_kron(
+        lhs.data,
+        lhs.row,
+        lhs.col,
+        rhs.data,
+        rhs.row,
+        rhs.col,
+        lhs.shape[0],
+        lhs.shape[1],
+        rhs.shape[0],
+        rhs.shape[1],
+    )
+
+
 def csr_todense(
     data: mx.array,
     indices: mx.array,
@@ -405,6 +423,30 @@ def csc_tocsr(
     if ext is None:
         return _fallback.csc_to_csr(data, indices, indptr, shape)
     return ext.csc_tocsr(data, indices, indptr, shape[0], shape[1])
+
+
+def csr_tocoo(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_tocoo requires the native mlx_sparse extension.")
+    return ext.csr_tocoo(data, indices, indptr, shape[0], shape[1])
+
+
+def csc_tocoo(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    shape: Shape2D,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csc_tocoo requires the native mlx_sparse extension.")
+    return ext.csc_tocoo(data, indices, indptr, shape[0], shape[1])
 
 
 def csr_row_sums(

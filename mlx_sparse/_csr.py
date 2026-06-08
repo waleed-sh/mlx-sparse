@@ -313,6 +313,47 @@ class CSRArray:
             )
         return out
 
+    def tocoo(self, *, canonical: bool | None = None):
+        """Convert to :class:`~mlx_sparse.COOArray` without densifying.
+
+        The native path expands CSR row pointers into COO row coordinates and
+        reuses the stored column-index and data arrays. When ``canonical=True``
+        the CSR input is canonicalized first, producing row-major, duplicate-
+        free COO coordinates with accurate canonical metadata.
+
+        Args:
+            canonical: If ``True``, canonicalize before conversion and mark
+                the returned COO array canonical. If ``False``, force
+                ``has_canonical_format=False``. If ``None`` (default), preserve
+                canonical metadata only when the source CSR is already known
+                canonical.
+
+        Returns:
+            A :class:`~mlx_sparse.COOArray` with the same shape and values.
+        """
+        from mlx_sparse._coo import COOArray
+
+        array = self.canonicalize() if canonical is True else self
+        data, row, col = _native.csr_tocoo(
+            array.data,
+            array.indices,
+            array.indptr,
+            array.shape,
+        )
+        if canonical is True:
+            has_canonical_format = True
+        elif canonical is False:
+            has_canonical_format = False
+        else:
+            has_canonical_format = bool(array.has_canonical_format)
+        return COOArray(
+            data=data,
+            row=row,
+            col=col,
+            shape=array.shape,
+            has_canonical_format=has_canonical_format,
+        )
+
     @property
     def T(self) -> "CSRArray":
         """Transposed matrix. Alias for :meth:`transpose`."""

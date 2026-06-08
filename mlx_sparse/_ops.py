@@ -23,6 +23,7 @@ import mlx_sparse._native as _native
 from mlx_sparse._coo import COOArray
 from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
+from mlx_sparse._typing import VALUE_DTYPES
 from mlx_sparse._validation import (
     ensure_mx_array,
     sanitize_scalar,
@@ -35,6 +36,10 @@ from mlx_sparse._validation import (
     validate_csr_matvec_inputs,
     validate_csr_metadata,
 )
+
+_SUPPORTED_STRUCTURAL_FORMATS = {"coo", "csr", "csc"}
+_UNSUPPORTED_SCIPY_FORMATS = {"bsr", "dia", "dok", "lil"}
+_MAX_MLX_DIM = 2**31 - 1
 
 
 def _prod(values) -> int:
@@ -93,6 +98,143 @@ def _sparse_name(value) -> str:
     return type(value).__name__
 
 
+def _normalize_sparse_format(function_name: str, format, *, default: str) -> str:
+    if format is None:
+        return default
+    if not isinstance(format, str):
+        raise TypeError(f"{function_name} format must be a string or None.")
+    normalized = format.lower()
+    if normalized in _SUPPORTED_STRUCTURAL_FORMATS:
+        return normalized
+    if normalized in _UNSUPPORTED_SCIPY_FORMATS:
+        raise NotImplementedError(
+            f"{function_name} format={format!r} is not implemented in mlx-sparse; "
+            "supported formats are 'coo', 'csr', and 'csc'."
+        )
+    raise ValueError(
+        f"{function_name} format must be one of 'coo', 'csr', or 'csc', "
+        f"got {format!r}."
+    )
+
+
+def _promote_kron_dtype(lhs_dtype, rhs_dtype):
+    if lhs_dtype not in VALUE_DTYPES or rhs_dtype not in VALUE_DTYPES:
+        raise TypeError(
+            "kron operands must have supported sparse value dtypes after dense "
+            "normalization."
+        )
+    if lhs_dtype == mx.complex64 or rhs_dtype == mx.complex64:
+        return mx.complex64
+    if lhs_dtype == mx.float32 or rhs_dtype == mx.float32:
+        return mx.float32
+    if lhs_dtype == rhs_dtype:
+        return lhs_dtype
+    return mx.float32
+
+
+def _supported_dense_value_dtype(dtype):
+    if dtype in VALUE_DTYPES:
+        return dtype
+    return mx.float32
+
+
+def _astype_sparse_value(array, dtype):
+    if array.data.dtype == dtype:
+        return array
+    if isinstance(array, COOArray):
+        return COOArray(
+            data=array.data.astype(dtype),
+            row=array.row,
+            col=array.col,
+            shape=array.shape,
+            has_canonical_format=array.has_canonical_format,
+        )
+    if isinstance(array, CSRArray):
+        return CSRArray(
+            data=array.data.astype(dtype),
+            indices=array.indices,
+            indptr=array.indptr,
+            shape=array.shape,
+            sorted_indices=array.sorted_indices,
+            has_canonical_format=array.has_canonical_format,
+        )
+    if isinstance(array, CSCArray):
+        return CSCArray(
+            data=array.data.astype(dtype),
+            indices=array.indices,
+            indptr=array.indptr,
+            shape=array.shape,
+            sorted_indices=array.sorted_indices,
+            has_canonical_format=array.has_canonical_format,
+        )
+    raise TypeError(f"Expected sparse array, got {type(array).__name__}.")
+
+
+def _as_sparse_rank2(name: str, value):
+    if _is_sparse_array(value):
+        return value
+
+    dense = ensure_mx_array(value)
+    if dense.ndim != 2:
+        raise ValueError(
+            f"{name} must be a sparse array or dense rank-2 array, "
+            f"got shape={dense.shape}."
+        )
+    dtype = _supported_dense_value_dtype(dense.dtype)
+    from mlx_sparse._construct import fromdense
+
+    return fromdense(dense, dtype=dtype)
+
+
+def _to_coo_for_kron(name: str, value) -> COOArray:
+    if isinstance(value, COOArray):
+        return value
+    if isinstance(value, CSRArray):
+        return value.tocoo(canonical=None)
+    if isinstance(value, CSCArray):
+        return value.tocoo(canonical=False)
+    raise TypeError(f"{name} expects a COOArray, CSRArray, or CSCArray.")
+
+
+def _checked_product_for_kron(lhs: int, rhs: int, name: str) -> int:
+    if lhs < 0 or rhs < 0:
+        raise ValueError(f"{name} dimensions must be non-negative.")
+    if lhs and rhs > _MAX_MLX_DIM // lhs:
+        raise OverflowError(f"{name} exceeds MLX rank-2 shape limits.")
+    return lhs * rhs
+
+
+def _check_kron_overflow(lhs, rhs) -> tuple[int, int]:
+    out_rows = _checked_product_for_kron(lhs.shape[0], rhs.shape[0], "kron rows")
+    out_cols = _checked_product_for_kron(lhs.shape[1], rhs.shape[1], "kron columns")
+    _checked_product_for_kron(lhs.nnz, rhs.nnz, "kron nnz")
+    return out_rows, out_cols
+
+
+def _coo_kron_raw(lhs: COOArray, rhs: COOArray) -> COOArray:
+    out_shape = _check_kron_overflow(lhs, rhs)
+    data, row, col = _native.coo_kron(lhs, rhs)
+    return COOArray(
+        data=data,
+        row=row,
+        col=col,
+        shape=out_shape,
+        has_canonical_format=(
+            bool(lhs.has_canonical_format) and bool(rhs.has_canonical_format)
+        ),
+    )
+
+
+def _coo_to_requested_format(coo: COOArray, format: str):
+    if format == "coo":
+        return coo
+    if format == "csr":
+        return coo.tocsr(canonical=True)
+    if format == "csc":
+        return coo.tocsc(canonical=True)
+    raise ValueError(f"unsupported sparse format {format!r}.")
+
+
 def _as_canonical_csr(name: str, value) -> CSRArray:
     if isinstance(value, CSRArray):
         return value.canonicalize()
@@ -101,6 +243,132 @@ def _as_canonical_csr(name: str, value) -> CSRArray:
     if isinstance(value, CSCArray):
         return value.tocsr(canonical=True)
     raise TypeError(f"{name} expects a sparse array, got {_sparse_name(value)}.")
+
+
+def kron(A, B, format=None):
+    """Return the sparse Kronecker product of two rank-2 operands.
+
+    ``kron(A, B)`` builds the matrix whose stored entries follow
+    ``row = row_A * B.shape[0] + row_B``,
+    ``col = col_A * B.shape[1] + col_B``, and
+    ``data = data_A * data_B``. COO, CSR, CSC, and dense rank-2 MLX-compatible
+    inputs are accepted; dense inputs are converted with the native
+    :func:`mlx_sparse.fromdense` path before assembly, never with Python loops
+    over entries.
+
+    ``format`` may be ``"coo"``, ``"csr"``, ``"csc"``, or ``None``. The
+    default is COO, matching the construction-oriented SciPy API. COO output is
+    the direct native fixed-topology product and preserves duplicate structural
+    entries if either input contains duplicates. CSR and CSC output canonicalize
+    through native compressed conversion, summing duplicate products and
+    returning duplicate-free compressed structures. Unsupported SciPy formats
+    such as ``"bsr"``, ``"dia"``, ``"dok"``, and ``"lil"`` are rejected
+    explicitly.
+
+    Value dtype promotion follows the package's sparse value constraints:
+    ``complex64`` wins over real dtypes, any ``float32`` operand yields
+    ``float32``, equal low-precision operands keep their dtype, and mixed
+    ``float16``/``bfloat16`` promotes to ``float32``. Dense integer or boolean
+    operands are converted to ``float32`` because mlx-sparse sparse containers
+    do not store integer or boolean value buffers in this release.
+
+    Sparse-value JVP/VJP is implemented for the native COO data product when
+    the input structures are fixed. Gradients through integer coordinates,
+    dense-to-sparse extraction, and duplicate-summing canonicalization are not
+    part of the differentiable contract.
+
+    Args:
+        A: Left COO, CSR, CSC, or dense rank-2 operand.
+        B: Right COO, CSR, CSC, or dense rank-2 operand.
+        format: Output format, one of ``None``, ``"coo"``, ``"csr"``, or
+            ``"csc"``. ``None`` defaults to ``"coo"``.
+
+    Returns:
+        A :class:`~mlx_sparse.COOArray`, :class:`~mlx_sparse.CSRArray`, or
+        :class:`~mlx_sparse.CSCArray` with shape
+        ``(A.shape[0] * B.shape[0], A.shape[1] * B.shape[1])``.
+
+    Raises:
+        ValueError: If an operand is not rank-2, the requested format is
+            unknown, or output dimensions exceed MLX limits.
+        TypeError: If ``format`` is not a string or ``None``.
+        NotImplementedError: If a known unsupported SciPy sparse format is
+            requested.
+    """
+    out_format = _normalize_sparse_format("kron", format, default="coo")
+    lhs = _as_sparse_rank2("kron A", A)
+    rhs = _as_sparse_rank2("kron B", B)
+    dtype = _promote_kron_dtype(lhs.data.dtype, rhs.data.dtype)
+    lhs = _astype_sparse_value(lhs, dtype)
+    rhs = _astype_sparse_value(rhs, dtype)
+    lhs_coo = _to_coo_for_kron("kron A", lhs)
+    rhs_coo = _to_coo_for_kron("kron B", rhs)
+    return _coo_to_requested_format(_coo_kron_raw(lhs_coo, rhs_coo), out_format)
+
+
+def kronsum(A, B, format=None):
+    """Return the Kronecker sum of two square sparse or dense matrices.
+
+    The Kronecker sum is defined as ``kron(I_n, A) + kron(B, I_m)`` for
+    ``A.shape == (m, m)`` and ``B.shape == (n, n)``. Inputs may be COO, CSR,
+    CSC, or dense rank-2 arrays. Dense inputs are extracted with native
+    :func:`mlx_sparse.fromdense`; the two Kronecker products are assembled with
+    native COO kernels and the sum is merged with native sparse addition.
+
+    ``format`` may be ``"coo"``, ``"csr"``, ``"csc"``, or ``None``. The
+    default is COO. The intermediate sum is canonical CSR, so returned CSR and
+    CSC outputs are canonical; returned COO is produced by native CSR-to-COO
+    expansion and is also canonical.
+
+    Args:
+        A: Left square COO, CSR, CSC, or dense rank-2 operand.
+        B: Right square COO, CSR, CSC, or dense rank-2 operand.
+        format: Output format, one of ``None``, ``"coo"``, ``"csr"``, or
+            ``"csc"``. ``None`` defaults to ``"coo"``.
+
+    Returns:
+        A sparse array with shape ``(A.shape[0] * B.shape[0],
+        A.shape[1] * B.shape[1])``.
+
+    Raises:
+        ValueError: If either operand is not square or if output shape/nnz
+            limits are exceeded.
+        TypeError: If ``format`` is not a string or ``None``.
+        NotImplementedError: If a known unsupported SciPy sparse format is
+            requested.
+    """
+    out_format = _normalize_sparse_format("kronsum", format, default="coo")
+    lhs = _as_sparse_rank2("kronsum A", A)
+    rhs = _as_sparse_rank2("kronsum B", B)
+    if lhs.shape[0] != lhs.shape[1]:
+        raise ValueError(f"kronsum A must be square, got shape={lhs.shape}.")
+    if rhs.shape[0] != rhs.shape[1]:
+        raise ValueError(f"kronsum B must be square, got shape={rhs.shape}.")
+
+    dtype = _promote_kron_dtype(lhs.data.dtype, rhs.data.dtype)
+    lhs = _astype_sparse_value(lhs, dtype)
+    rhs = _astype_sparse_value(rhs, dtype)
+
+    from mlx_sparse._construct import eye
+
+    index_dtype = (
+        mx.int64
+        if (
+            getattr(lhs, "index_dtype", mx.int32) == mx.int64
+            or getattr(rhs, "index_dtype", mx.int32) == mx.int64
+        )
+        else mx.int32
+    )
+    lhs_identity = eye(rhs.shape[0], dtype=dtype, index_dtype=index_dtype)
+    rhs_identity = eye(lhs.shape[0], dtype=dtype, index_dtype=index_dtype)
+    left = kron(lhs_identity, lhs, format="csr")
+    right = kron(rhs, rhs_identity, format="csr")
+    summed = add(left, right)
+    if out_format == "csr":
+        return summed
+    if out_format == "csc":
+        return summed.tocsc(canonical=True)
+    return summed.tocoo(canonical=True)
 
 
 def _is_zero_python_scalar(value) -> bool:

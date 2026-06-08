@@ -64,6 +64,7 @@
 #include "sparse/csc_row_sums/csc_row_sums.h"
 #include "sparse/csc_sort_indices/csc_sort_indices.h"
 #include "sparse/csc_sum_duplicates/csc_sum_duplicates.h"
+#include "sparse/csc_tocoo/csc_tocoo.h"
 #include "sparse/csc_tocsr/csc_tocsr.h"
 #include "sparse/csc_todense/csc_todense.h"
 #include "sparse/csc_trace/csc_trace.h"
@@ -80,12 +81,14 @@
 #include "sparse/csr_row_sums/csr_row_sums.h"
 #include "sparse/csr_sort_indices/csr_sort_indices.h"
 #include "sparse/csr_sum_duplicates/csr_sum_duplicates.h"
+#include "sparse/csr_tocoo/csr_tocoo.h"
 #include "sparse/csr_tocsc/csr_tocsc.h"
 #include "sparse/csr_todense/csr_todense.h"
 #include "sparse/csr_trace/csr_trace.h"
 #include "sparse/csr_transpose/csr_transpose.h"
 #include "sparse/fromdense/fromdense.h"
 #include "sparse/identity_like/identity_like.h"
+#include "sparse/kron/coo_kron.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -456,6 +459,24 @@ NB_MODULE(_ext, m) {
       "duplicates.");
 
   m.def(
+      "coo_kron",
+      [](const mlx_sparse::mx::array &lhs_data,
+         const mlx_sparse::mx::array &lhs_row,
+         const mlx_sparse::mx::array &lhs_col,
+         const mlx_sparse::mx::array &rhs_data,
+         const mlx_sparse::mx::array &rhs_row,
+         const mlx_sparse::mx::array &rhs_col, int lhs_n_rows, int lhs_n_cols,
+         int rhs_n_rows, int rhs_n_cols) {
+        return mlx_sparse::coo_kron(lhs_data, lhs_row, lhs_col, rhs_data,
+                                    rhs_row, rhs_col, lhs_n_rows, lhs_n_cols,
+                                    rhs_n_rows, rhs_n_cols);
+      },
+      "lhs_data"_a, "lhs_row"_a, "lhs_col"_a, "rhs_data"_a, "rhs_row"_a,
+      "rhs_col"_a, "lhs_n_rows"_a, "lhs_n_cols"_a, "rhs_n_rows"_a,
+      "rhs_n_cols"_a,
+      "Build COO buffers for the Kronecker product of two COO structures.");
+
+  m.def(
       "csr_todense",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -593,6 +614,16 @@ NB_MODULE(_ext, m) {
       "Convert CSR buffers into CSC buffers.");
 
   m.def(
+      "csr_tocoo",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csr_tocoo(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Expand CSR row pointers into COO row coordinates.");
+
+  m.def(
       "csc_tocsr",
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
@@ -601,6 +632,16 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
       "Convert CSC buffers into CSR buffers.");
+
+  m.def(
+      "csc_tocoo",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols) {
+        return mlx_sparse::csc_tocoo(data, indices, indptr, n_rows, n_cols);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
+      "Expand CSC column pointers into COO column coordinates.");
 
   m.def(
       "csr_row_sums",

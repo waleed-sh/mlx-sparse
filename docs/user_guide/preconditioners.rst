@@ -315,18 +315,15 @@ Example: PCG with IC(0)
 
    import mlx.core as mx
    import numpy as np
-   import scipy.sparse
    import mlx_sparse as ms
 
    grid = 16
    main = 4.0 * np.ones(grid, dtype=np.float32)
    off = -1.0 * np.ones(grid - 1, dtype=np.float32)
-   T = scipy.sparse.diags([off, main, off], [-1, 0, 1], format="csr")
-   I = scipy.sparse.eye(grid, format="csr", dtype=np.float32)
-   Y = scipy.sparse.diags([off, off], [-1, 1], shape=(grid, grid), format="csr")
-   A_sp = (scipy.sparse.kron(I, T) + scipy.sparse.kron(Y, I)).astype(np.float32)
-
-   A = ms.from_scipy(A_sp)
+   T = ms.diags([off, main, off], [-1, 0, 1])
+   I = ms.eye(grid, dtype=mx.float32)
+   Y = ms.diags([off, off], [-1, 1], shape=(grid, grid))
+   A = ms.kron(I, T, format="csr") + ms.kron(Y, I, format="csr")
    b = mx.ones((A.shape[0],), dtype=mx.float32)
 
    M = ms.linalg.preconditioners.ichol0(A)
@@ -377,16 +374,15 @@ raises and asks for explicit ``lambda_min``/``lambda_max`` values.
 
    import mlx.core as mx
    import numpy as np
-   import scipy.sparse
    import mlx_sparse as ms
 
    grid = 16
    main = 4.0 * np.ones(grid, dtype=np.float32)
    off = -1.0 * np.ones(grid - 1, dtype=np.float32)
-   T = scipy.sparse.diags([off, main, off], [-1, 0, 1], format="csr")
-   I = scipy.sparse.eye(grid, format="csr", dtype=np.float32)
-   Y = scipy.sparse.diags([off, off], [-1, 1], shape=(grid, grid), format="csr")
-   A = ms.from_scipy((scipy.sparse.kron(I, T) + scipy.sparse.kron(Y, I)).astype(np.float32))
+   T = ms.diags([off, main, off], [-1, 0, 1])
+   I = ms.eye(grid, dtype=mx.float32)
+   Y = ms.diags([off, off], [-1, 1], shape=(grid, grid))
+   A = ms.kron(I, T, format="csr") + ms.kron(Y, I, format="csr")
    b = mx.ones((A.shape[0],), dtype=mx.float32)
 
    M = ms.linalg.preconditioners.chebyshev(A, degree=2)

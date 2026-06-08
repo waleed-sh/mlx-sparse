@@ -78,6 +78,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/ic0.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/pcg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/add/csr_add.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/kron/coo_kron.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_norms/coo_col_norms.cpp
@@ -104,6 +105,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_row_sums/csc_row_sums.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sort_indices/csc_sort_indices.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sum_duplicates/csc_sum_duplicates.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_tocoo/csc_tocoo.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_tocsr/csc_tocsr.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_todense/csc_todense.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_trace/csc_trace.cpp
@@ -122,6 +124,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_row_sums/csr_row_sums.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sum_duplicates/csr_sum_duplicates.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_tocoo/csr_tocoo.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_trace/csr_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.cpp
@@ -194,6 +197,7 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/chebyshev.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/pcg/pcg.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/add/csr_add.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/kron/coo_kron.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsr/coo_tocsr.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_tocsc/coo_tocsc.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_col_norms/coo_col_norms.metal
@@ -220,6 +224,7 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_row_sums/csc_row_sums.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sort_indices/csc_sort_indices.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_sum_duplicates/csc_sum_duplicates.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_tocoo/csc_tocoo.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_tocsr/csc_tocsr.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_todense/csc_todense.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_trace/csc_trace.metal
@@ -238,6 +243,7 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_row_sums/csr_row_sums.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sort_indices/csr_sort_indices.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_sum_duplicates/csr_sum_duplicates.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_tocoo/csr_tocoo.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_todense/csr_todense.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_trace/csr_trace.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csr_transpose/csr_transpose.metal
