@@ -30,3 +30,14 @@ def test_identity_like_native_smoke(mx):
     y = ms.identity_like(x)
 
     np.testing.assert_allclose(to_numpy(y), np.array([1.0, 2.0], dtype=np.float32))
+
+
+@pytest.mark.native
+def test_structural_native_symbols_are_exported():
+    if not ms.is_available():
+        pytest.skip("native extension is not built")
+
+    import mlx_sparse._ext as ext
+
+    for name in ("coo_block", "coo_triangular", "csr_triangular", "csc_triangular"):
+        assert hasattr(ext, name)

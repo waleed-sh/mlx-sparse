@@ -22,10 +22,50 @@ eye
 
 .. autofunction:: eye
 
+identity
+--------
+
+.. autofunction:: identity
+
 diags
 -----
 
 .. autofunction:: diags
+
+block\_array
+------------
+
+.. autofunction:: block_array
+
+bmat
+----
+
+.. autofunction:: bmat
+
+block\_diag
+-----------
+
+.. autofunction:: block_diag
+
+vstack
+------
+
+.. autofunction:: vstack
+
+hstack
+------
+
+.. autofunction:: hstack
+
+tril
+----
+
+.. autofunction:: tril
+
+triu
+----
+
+.. autofunction:: triu
 
 fromdense
 ---------
@@ -76,12 +116,18 @@ See :doc:`../user_guide/validation` for a detailed discussion.
 Structured constructors
 -----------------------
 
-:func:`eye`, :func:`diags`, :func:`fromdense`, :func:`from_dense`,
+:func:`eye`, :func:`identity`, :func:`diags`, :func:`block_array`,
+:func:`bmat`, :func:`block_diag`, :func:`vstack`, :func:`hstack`,
+:func:`tril`, :func:`triu`, :func:`fromdense`, :func:`from_dense`,
 :func:`from_numpy`, :func:`from_scipy`, and :func:`asarray` all make common
-construction paths explicit. Dense conversions return a canonical
-:class:`CSRArray` (``has_canonical_format=True``, ``sorted_indices=True``).
-They are host-side assembly operations and call ``mx.eval`` internally when
-necessary to determine the output size.
+construction paths explicit.
+
+Block assembly and triangular extraction are native-backed and avoid Python
+loops over stored entries. ``None`` entries in :func:`block_array` represent
+implicit zero blocks. Dense blocks are converted with the native
+:func:`fromdense` path before sparse assembly. CSR and CSC format requests use
+native compressed conversion and canonicalization where duplicate coordinates
+may need to be summed.
 
 .. code-block:: python
 
@@ -104,3 +150,9 @@ necessary to determine the output size.
 
    # Convert SciPy sparse or dense NumPy inputs without hand-building buffers
    W_from_np = ms.asarray(np.eye(8, dtype=np.float32))
+
+   # Assemble a saddle-point-style block matrix
+   K = ms.block_array([[T, None], [None, ms.identity(4)]], format="csr")
+
+   # Extract a triangular sparse view without densifying
+   L = ms.tril(K, format="csr")

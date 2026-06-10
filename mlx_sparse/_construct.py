@@ -15,11 +15,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+from operator import index as operator_index
 
 import mlx.core as mx
 import numpy as np
 
 import mlx_sparse._native as _native
+from mlx_sparse._coo import COOArray
 from mlx_sparse._csc import CSCArray
 from mlx_sparse._csr import CSRArray
 from mlx_sparse._host import to_mx, to_numpy
@@ -84,6 +87,307 @@ def _normalize_index_dtype(index_dtype):
     if index_dtype not in INDEX_DTYPES:
         raise TypeError(f"index_dtype must be mx.int32 or mx.int64, got {index_dtype}.")
     return index_dtype
+
+
+_SUPPORTED_STRUCTURAL_FORMATS = {"coo", "csr", "csc"}
+_UNSUPPORTED_SCIPY_FORMATS = {"bsr", "dia", "dok", "lil"}
+
+
+@dataclass(frozen=True)
+class _RawBlock:
+    value: object
+    shape: Shape2D
+    dtype: object
+    is_sparse: bool
+
+
+def _normalize_sparse_format(function_name: str, format, *, default: str) -> str:
+    if format is None:
+        return default
+    if not isinstance(format, str):
+        raise TypeError(f"{function_name} format must be a string or None.")
+    normalized = format.lower()
+    if normalized in _SUPPORTED_STRUCTURAL_FORMATS:
+        return normalized
+    if normalized in _UNSUPPORTED_SCIPY_FORMATS:
+        raise NotImplementedError(
+            f"{function_name} format={format!r} is not implemented in mlx-sparse; "
+            "supported formats are 'coo', 'csr', and 'csc'."
+        )
+    raise ValueError(
+        f"{function_name} format must be one of 'coo', 'csr', or 'csc', "
+        f"got {format!r}."
+    )
+
+
+def _promote_constructor_dtype(lhs, rhs):
+    if lhs is None:
+        return rhs
+    if rhs is None:
+        return lhs
+    if lhs == mx.complex64 or rhs == mx.complex64:
+        return mx.complex64
+    if lhs == mx.float32 or rhs == mx.float32:
+        return mx.float32
+    if lhs == rhs:
+        return lhs
+    return mx.float32
+
+
+def _infer_dense_constructor_dtype(dense: mx.array):
+    return dense.dtype if dense.dtype in VALUE_DTYPES else mx.float32
+
+
+def _constructor_dtype(raw_blocks: Sequence[_RawBlock], dtype):
+    if dtype is not None:
+        return _normalize_value_dtype(dtype)
+    inferred = None
+    for block in raw_blocks:
+        inferred = _promote_constructor_dtype(inferred, block.dtype)
+    return inferred if inferred is not None else mx.float32
+
+
+def _constructor_index_dtype(raw_blocks: Sequence[_RawBlock]):
+    for block in raw_blocks:
+        if (
+            block.is_sparse
+            and getattr(block.value, "index_dtype", mx.int32) == mx.int64
+        ):
+            return mx.int64
+    return mx.int32
+
+
+def _is_sparse_array(value) -> bool:
+    return isinstance(value, (COOArray, CSRArray, CSCArray))
+
+
+def _as_raw_block(function_name: str, value) -> _RawBlock:
+    if _is_sparse_array(value):
+        return _RawBlock(
+            value=value,
+            shape=value.shape,
+            dtype=value.data.dtype,
+            is_sparse=True,
+        )
+
+    dense = ensure_mx_array(value)
+    if dense.ndim != 2:
+        raise ValueError(
+            f"{function_name} blocks must be sparse arrays or dense rank-2 arrays, "
+            f"got shape={dense.shape}."
+        )
+    return _RawBlock(
+        value=dense,
+        shape=normalize_shape(dense.shape),
+        dtype=_infer_dense_constructor_dtype(dense),
+        is_sparse=False,
+    )
+
+
+def _cast_sparse_value(array, dtype):
+    if array.data.dtype == dtype:
+        return array
+    if isinstance(array, COOArray):
+        return COOArray(
+            data=array.data.astype(dtype),
+            row=array.row,
+            col=array.col,
+            shape=array.shape,
+            has_canonical_format=array.has_canonical_format,
+        )
+    if isinstance(array, CSRArray):
+        return CSRArray(
+            data=array.data.astype(dtype),
+            indices=array.indices,
+            indptr=array.indptr,
+            shape=array.shape,
+            sorted_indices=array.sorted_indices,
+            has_canonical_format=array.has_canonical_format,
+        )
+    if isinstance(array, CSCArray):
+        return CSCArray(
+            data=array.data.astype(dtype),
+            indices=array.indices,
+            indptr=array.indptr,
+            shape=array.shape,
+            sorted_indices=array.sorted_indices,
+            has_canonical_format=array.has_canonical_format,
+        )
+    raise TypeError(f"Expected sparse array, got {type(array).__name__}.")
+
+
+def _cast_coo_index(array: COOArray, index_dtype):
+    if array.row.dtype == index_dtype and array.col.dtype == index_dtype:
+        return array
+    return COOArray(
+        data=array.data,
+        row=array.row.astype(index_dtype),
+        col=array.col.astype(index_dtype),
+        shape=array.shape,
+        has_canonical_format=array.has_canonical_format,
+    )
+
+
+def _raw_block_to_coo(block: _RawBlock, *, dtype, index_dtype) -> COOArray:
+    if block.is_sparse:
+        sparse = _cast_sparse_value(block.value, dtype)
+        if isinstance(sparse, COOArray):
+            coo = sparse
+        elif isinstance(sparse, CSRArray):
+            coo = sparse.tocoo(canonical=None)
+        elif isinstance(sparse, CSCArray):
+            coo = sparse.tocoo(canonical=False)
+        else:
+            raise TypeError(f"Expected sparse array, got {type(sparse).__name__}.")
+        return _cast_coo_index(coo, index_dtype)
+
+    csr = fromdense(block.value, dtype=dtype, index_dtype=index_dtype)
+    return csr.tocoo(canonical=True)
+
+
+def _empty_coo(shape: Shape2D, *, dtype, index_dtype) -> COOArray:
+    return COOArray(
+        data=mx.zeros((0,), dtype=dtype),
+        row=mx.zeros((0,), dtype=index_dtype),
+        col=mx.zeros((0,), dtype=index_dtype),
+        shape=shape,
+        has_canonical_format=True,
+    )
+
+
+def _coo_to_format(coo: COOArray, format: str):
+    if format == "coo":
+        return coo
+    if format == "csr":
+        return coo.tocsr(canonical=True)
+    if format == "csc":
+        return coo.tocsc(canonical=True)
+    raise ValueError(f"unsupported sparse format {format!r}.")
+
+
+def _assemble_offset_blocks(
+    blocks: Sequence[_RawBlock],
+    row_offsets: Sequence[int],
+    col_offsets: Sequence[int],
+    shape: Shape2D,
+    *,
+    function_name: str,
+    format,
+    dtype,
+) -> COOArray | CSRArray | CSCArray:
+    out_format = _normalize_sparse_format(function_name, format, default="coo")
+    shape = normalize_shape(shape)
+    if len(blocks) != len(row_offsets) or len(blocks) != len(col_offsets):
+        raise ValueError(
+            f"{function_name} internal block and offset counts do not match."
+        )
+
+    value_dtype = _constructor_dtype(blocks, dtype)
+    index_dtype = _constructor_index_dtype(blocks)
+    coo_blocks: list[COOArray] = []
+    kept_row_offsets: list[int] = []
+    kept_col_offsets: list[int] = []
+    all_canonical = True
+    for block, row_offset, col_offset in zip(
+        blocks, row_offsets, col_offsets, strict=True
+    ):
+        if row_offset < 0 or col_offset < 0:
+            raise ValueError(f"{function_name} block offsets must be non-negative.")
+        coo = _raw_block_to_coo(block, dtype=value_dtype, index_dtype=index_dtype)
+        all_canonical = all_canonical and bool(coo.has_canonical_format)
+        if coo.nnz == 0:
+            continue
+        coo_blocks.append(coo)
+        kept_row_offsets.append(int(row_offset))
+        kept_col_offsets.append(int(col_offset))
+
+    if not coo_blocks:
+        return _coo_to_format(
+            _empty_coo(shape, dtype=value_dtype, index_dtype=index_dtype),
+            out_format,
+        )
+
+    data, row, col = _native.coo_block(
+        coo_blocks,
+        kept_row_offsets,
+        kept_col_offsets,
+        shape,
+    )
+    return _coo_to_format(
+        COOArray(
+            data=data,
+            row=row,
+            col=col,
+            shape=shape,
+            has_canonical_format=all_canonical,
+        ),
+        out_format,
+    )
+
+
+def _normalize_block_grid(blocks) -> list[list[object]]:
+    if isinstance(blocks, (COOArray, CSRArray, CSCArray, mx.array)):
+        raise ValueError("block_array blocks must be a 2-D grid, got rank-2 input.")
+    try:
+        rows = [list(row) for row in blocks]
+    except TypeError as exc:
+        raise ValueError("block_array blocks must be a 2-D grid.") from exc
+    if not rows:
+        raise ValueError("block_array blocks must be 2-D and non-empty.")
+    n_cols = len(rows[0])
+    if n_cols == 0:
+        raise ValueError("block_array block rows must be non-empty.")
+    for row in rows:
+        if len(row) != n_cols:
+            raise ValueError("block_array requires a rectangular block grid.")
+    return rows
+
+
+def _validate_block_grid(
+    blocks,
+) -> tuple[list[_RawBlock], list[int], list[int], Shape2D]:
+    grid = _normalize_block_grid(blocks)
+    n_block_rows = len(grid)
+    n_block_cols = len(grid[0])
+    row_heights: list[int | None] = [None] * n_block_rows
+    col_widths: list[int | None] = [None] * n_block_cols
+    raw_by_position: list[tuple[_RawBlock, int, int]] = []
+
+    for i, row in enumerate(grid):
+        for j, value in enumerate(row):
+            if value is None:
+                continue
+            raw = _as_raw_block("block_array", value)
+            height, width = raw.shape
+            if row_heights[i] is None:
+                row_heights[i] = height
+            elif row_heights[i] != height:
+                raise ValueError(
+                    f"block_array row {i} has incompatible block heights "
+                    f"{row_heights[i]} and {height}."
+                )
+            if col_widths[j] is None:
+                col_widths[j] = width
+            elif col_widths[j] != width:
+                raise ValueError(
+                    f"block_array column {j} has incompatible block widths "
+                    f"{col_widths[j]} and {width}."
+                )
+            raw_by_position.append((raw, i, j))
+
+    resolved_row_heights = [0 if height is None else height for height in row_heights]
+    resolved_col_widths = [0 if width is None else width for width in col_widths]
+    row_starts = [0]
+    for height in resolved_row_heights:
+        row_starts.append(row_starts[-1] + height)
+    col_starts = [0]
+    for width in resolved_col_widths:
+        col_starts.append(col_starts[-1] + width)
+
+    raw_blocks = [raw for raw, _, _ in raw_by_position]
+    row_offsets = [row_starts[i] for _, i, _ in raw_by_position]
+    col_offsets = [col_starts[j] for _, _, j in raw_by_position]
+    return raw_blocks, row_offsets, col_offsets, (row_starts[-1], col_starts[-1])
 
 
 def _csr_from_sorted_triplets(
@@ -181,6 +485,54 @@ def eye(
         dtype=dtype,
         index_dtype=index_dtype,
     )
+
+
+def identity(
+    n: int,
+    dtype=None,
+    format=None,
+    *,
+    index_dtype=mx.int32,
+):
+    """Return a sparse square identity matrix.
+
+    ``identity(n)`` is a SciPy-compatible square alias for
+    :func:`mlx_sparse.eye`. The default output format is CSR, matching
+    ``eye(n)``. Pass ``format="coo"`` or ``format="csc"`` to request another
+    supported sparse format. Unsupported SciPy formats such as ``"dia"`` and
+    ``"bsr"`` are rejected explicitly.
+
+    Args:
+        n: Number of rows and columns. Must be non-negative.
+        dtype: Stored value dtype. ``None`` defaults to ``mx.float32``.
+        format: Output format, one of ``None``, ``"csr"``, ``"coo"``, or
+            ``"csc"``. ``None`` returns CSR.
+        index_dtype: Integer dtype for sparse indices, ``mx.int32`` or
+            ``mx.int64``.
+
+    Returns:
+        A sparse square identity matrix in the requested format.
+    """
+    out_format = _normalize_sparse_format("identity", format, default="csr")
+    shape = normalize_shape((int(n), int(n)))
+    dtype = _normalize_value_dtype(mx.float32 if dtype is None else dtype)
+    index_dtype = _normalize_index_dtype(index_dtype)
+    data = mx.ones((shape[0],), dtype=dtype)
+    indices = mx.arange(shape[0], dtype=index_dtype)
+    indptr = mx.arange(shape[0] + 1, dtype=index_dtype)
+    csr = CSRArray(
+        data=data,
+        indices=indices,
+        indptr=indptr,
+        shape=shape,
+        sorted_indices=True,
+        has_canonical_format=True,
+    )
+    if out_format == "csr":
+        return csr
+    if out_format == "coo":
+        return csr.tocoo(canonical=True)
+    return csr.tocsc(canonical=True)
 
 
 def _as_diagonal_sequence(diagonals) -> list[np.ndarray]:
@@ -658,6 +1010,319 @@ def asarray(
         dtype=dtype,
         index_dtype=index_dtype,
     )
+
+
+def block_array(blocks, *, format=None, dtype=None):
+    """Build a sparse array from a rectangular grid of sparse or dense blocks.
+
+    ``block_array`` mirrors the SciPy structural constructor while returning
+    mlx-sparse arrays. Each non-``None`` entry must be a COO, CSR, CSC, or
+    dense rank-2 array. ``None`` entries represent all-zero blocks whose shape
+    is inferred from the other blocks in the same block row and block column;
+    all-``None`` rows or columns are assigned size zero.
+
+    The block grid is validated before assembly: every block row must have a
+    consistent height, every block column must have a consistent width, the
+    grid must be rectangular, and only ``"coo"``, ``"csr"``, and ``"csc"``
+    output formats are supported. Dense blocks are converted with the native
+    :func:`fromdense` path. Sparse blocks are converted to COO through native
+    format conversion, then one native coordinate-offset primitive copies
+    values and offsets coordinates. No stored entries are iterated in Python.
+
+    ``format=None`` defaults to COO because block assembly is a construction
+    operation. CSR and CSC requests canonicalize through the existing native
+    compressed conversion path, summing duplicate coordinates.
+
+    Args:
+        blocks: Rectangular 2-D grid of sparse arrays, dense rank-2 arrays, or
+            ``None`` entries.
+        format: Output format, one of ``None``, ``"coo"``, ``"csr"``, or
+            ``"csc"``.
+        dtype: Optional output value dtype. When omitted, value dtypes are
+            promoted across non-``None`` blocks under mlx-sparse's sparse value
+            dtype policy.
+
+    Returns:
+        A :class:`~mlx_sparse.COOArray`, :class:`~mlx_sparse.CSRArray`, or
+        :class:`~mlx_sparse.CSCArray`.
+    """
+    raw_blocks, row_offsets, col_offsets, shape = _validate_block_grid(blocks)
+    return _assemble_offset_blocks(
+        raw_blocks,
+        row_offsets,
+        col_offsets,
+        shape,
+        function_name="block_array",
+        format=format,
+        dtype=dtype,
+    )
+
+
+def bmat(blocks, format=None, dtype=None):
+    """Compatibility alias for :func:`block_array`.
+
+    Unlike SciPy's historical matrix-returning ``bmat`` behavior, mlx-sparse
+    always returns sparse array containers (COO, CSR, or CSC). See
+    :func:`block_array` for validation, dtype promotion, and native assembly
+    details.
+    """
+    return block_array(blocks, format=format, dtype=dtype)
+
+
+def block_diag(mats, format=None, dtype=None):
+    """Build a block diagonal sparse array from a sequence of matrices.
+
+    Each input must be a sparse COO/CSR/CSC array or a dense rank-2 array.
+    Blocks are placed on the main block diagonal using native coordinate-offset
+    assembly; off-diagonal zero regions are implicit and never materialized.
+    ``None`` is not accepted because it has no shape in this constructor.
+
+    ``format=None`` defaults to COO, matching SciPy's construction-oriented
+    default. CSR and CSC requests canonicalize through native conversion.
+
+    Args:
+        mats: Non-empty sequence of sparse or dense rank-2 matrices.
+        format: Output format, one of ``None``, ``"coo"``, ``"csr"``, or
+            ``"csc"``.
+        dtype: Optional output value dtype.
+
+    Returns:
+        A sparse block diagonal array.
+    """
+    try:
+        mats_list = list(mats)
+    except TypeError as exc:
+        raise TypeError("block_diag mats must be an iterable of matrices.") from exc
+    if not mats_list:
+        raise ValueError("block_diag requires at least one matrix.")
+    if any(mat is None for mat in mats_list):
+        raise TypeError("block_diag does not accept None blocks; use block_array.")
+
+    raw_blocks = [_as_raw_block("block_diag", mat) for mat in mats_list]
+    row_offsets: list[int] = []
+    col_offsets: list[int] = []
+    row_cursor = 0
+    col_cursor = 0
+    for block in raw_blocks:
+        row_offsets.append(row_cursor)
+        col_offsets.append(col_cursor)
+        row_cursor += block.shape[0]
+        col_cursor += block.shape[1]
+
+    return _assemble_offset_blocks(
+        raw_blocks,
+        row_offsets,
+        col_offsets,
+        (row_cursor, col_cursor),
+        function_name="block_diag",
+        format=format,
+        dtype=dtype,
+    )
+
+
+def vstack(blocks, format=None, dtype=None):
+    """Stack sparse or dense rank-2 blocks vertically.
+
+    All blocks must have the same number of columns. The implementation uses
+    the same native coordinate-offset assembly as :func:`block_array` with a
+    single block column. ``None`` entries are rejected because their row height
+    cannot be inferred in a one-dimensional stack.
+
+    Args:
+        blocks: Non-empty sequence of sparse or dense rank-2 matrices.
+        format: Output format, one of ``None``, ``"coo"``, ``"csr"``, or
+            ``"csc"``. ``None`` defaults to COO.
+        dtype: Optional output value dtype.
+
+    Returns:
+        A sparse array containing the vertical stack.
+    """
+    try:
+        blocks_list = list(blocks)
+    except TypeError as exc:
+        raise TypeError("vstack blocks must be an iterable of matrices.") from exc
+    if not blocks_list:
+        raise ValueError("vstack requires at least one block.")
+    if any(block is None for block in blocks_list):
+        raise TypeError("vstack does not accept None blocks; use block_array.")
+
+    raw_blocks = [_as_raw_block("vstack", block) for block in blocks_list]
+    n_cols = raw_blocks[0].shape[1]
+    row_offsets: list[int] = []
+    row_cursor = 0
+    for i, block in enumerate(raw_blocks):
+        if block.shape[1] != n_cols:
+            raise ValueError(
+                f"vstack block {i} has {block.shape[1]} columns, expected {n_cols}."
+            )
+        row_offsets.append(row_cursor)
+        row_cursor += block.shape[0]
+
+    return _assemble_offset_blocks(
+        raw_blocks,
+        row_offsets,
+        [0] * len(raw_blocks),
+        (row_cursor, n_cols),
+        function_name="vstack",
+        format=format,
+        dtype=dtype,
+    )
+
+
+def hstack(blocks, format=None, dtype=None):
+    """Stack sparse or dense rank-2 blocks horizontally.
+
+    All blocks must have the same number of rows. The implementation uses
+    native coordinate-offset assembly with a single block row. ``None`` entries
+    are rejected because their column width cannot be inferred in a
+    one-dimensional stack.
+
+    Args:
+        blocks: Non-empty sequence of sparse or dense rank-2 matrices.
+        format: Output format, one of ``None``, ``"coo"``, ``"csr"``, or
+            ``"csc"``. ``None`` defaults to COO.
+        dtype: Optional output value dtype.
+
+    Returns:
+        A sparse array containing the horizontal stack.
+    """
+    try:
+        blocks_list = list(blocks)
+    except TypeError as exc:
+        raise TypeError("hstack blocks must be an iterable of matrices.") from exc
+    if not blocks_list:
+        raise ValueError("hstack requires at least one block.")
+    if any(block is None for block in blocks_list):
+        raise TypeError("hstack does not accept None blocks; use block_array.")
+
+    raw_blocks = [_as_raw_block("hstack", block) for block in blocks_list]
+    n_rows = raw_blocks[0].shape[0]
+    col_offsets: list[int] = []
+    col_cursor = 0
+    for i, block in enumerate(raw_blocks):
+        if block.shape[0] != n_rows:
+            raise ValueError(
+                f"hstack block {i} has {block.shape[0]} rows, expected {n_rows}."
+            )
+        col_offsets.append(col_cursor)
+        col_cursor += block.shape[1]
+
+    return _assemble_offset_blocks(
+        raw_blocks,
+        [0] * len(raw_blocks),
+        col_offsets,
+        (n_rows, col_cursor),
+        function_name="hstack",
+        format=format,
+        dtype=dtype,
+    )
+
+
+def _as_sparse_for_triangular(name: str, value):
+    if _is_sparse_array(value):
+        return value
+    dense = ensure_mx_array(value)
+    if dense.ndim != 2:
+        raise ValueError(f"{name} expects a rank-2 array, got shape={dense.shape}.")
+    return fromdense(dense, dtype=_infer_dense_constructor_dtype(dense))
+
+
+def _triangular_to_format(array, format: str):
+    if format == "coo":
+        if isinstance(array, COOArray):
+            return array
+        return array.tocoo(canonical=None)
+    if format == "csr":
+        if isinstance(array, CSRArray):
+            return array
+        if isinstance(array, COOArray):
+            return array.tocsr(canonical=True)
+        return array.tocsr(canonical=True)
+    if format == "csc":
+        if isinstance(array, CSCArray):
+            return array
+        if isinstance(array, COOArray):
+            return array.tocsc(canonical=True)
+        return array.tocsc(canonical=True)
+    raise ValueError(f"unsupported sparse format {format!r}.")
+
+
+def _triangular(A, *, k=0, format=None, upper: bool):
+    name = "triu" if upper else "tril"
+    out_format = _normalize_sparse_format(name, format, default="coo")
+    diagonal = operator_index(k)
+    array = _as_sparse_for_triangular(name, A)
+
+    if isinstance(array, COOArray):
+        data, row, col = _native.coo_triangular(
+            array,
+            k=diagonal,
+            upper=upper,
+        )
+        out = COOArray(
+            data=data,
+            row=row,
+            col=col,
+            shape=array.shape,
+            has_canonical_format=array.has_canonical_format,
+        )
+    elif isinstance(array, CSRArray):
+        data, indices, indptr = _native.csr_triangular(
+            array,
+            k=diagonal,
+            upper=upper,
+        )
+        out = CSRArray(
+            data=data,
+            indices=indices,
+            indptr=indptr,
+            shape=array.shape,
+            sorted_indices=array.sorted_indices,
+            has_canonical_format=array.has_canonical_format,
+        )
+    elif isinstance(array, CSCArray):
+        data, indices, indptr = _native.csc_triangular(
+            array,
+            k=diagonal,
+            upper=upper,
+        )
+        out = CSCArray(
+            data=data,
+            indices=indices,
+            indptr=indptr,
+            shape=array.shape,
+            sorted_indices=array.sorted_indices,
+            has_canonical_format=array.has_canonical_format,
+        )
+    else:
+        raise TypeError(f"{name} expects a sparse or dense rank-2 array.")
+
+    return _triangular_to_format(out, out_format)
+
+
+def tril(A, k=0, format=None):
+    """Return the lower triangular portion of a sparse or dense matrix.
+
+    Elements with ``column - row <= k`` are retained. ``k=0`` keeps the main
+    diagonal, positive ``k`` includes superdiagonals, and negative ``k`` moves
+    the cutoff below the main diagonal. COO, CSR, CSC, and dense rank-2 inputs
+    are accepted. Dense inputs are first extracted with native
+    :func:`fromdense`; sparse inputs are filtered with native staged count/fill
+    kernels for their storage format.
+
+    ``format=None`` defaults to COO, matching SciPy's triangular extraction
+    default. CSR and CSC requests are returned in the requested sparse format.
+    """
+    return _triangular(A, k=k, format=format, upper=False)
+
+
+def triu(A, k=0, format=None):
+    """Return the upper triangular portion of a sparse or dense matrix.
+
+    Elements with ``column - row >= k`` are retained. See :func:`tril` for
+    input handling, native compaction details, and format semantics.
+    """
+    return _triangular(A, k=k, format=format, upper=True)
 
 
 def from_numpy(

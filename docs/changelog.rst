@@ -32,6 +32,17 @@ New Features
   sum duplicate products. ``kronsum`` composes native ``kron`` with native
   sparse addition for square inputs.
 
+* Added SciPy-compatible structural constructors
+  :func:`mlx_sparse.block_array`, :func:`mlx_sparse.bmat`,
+  :func:`mlx_sparse.block_diag`, :func:`mlx_sparse.vstack`,
+  :func:`mlx_sparse.hstack`, :func:`mlx_sparse.tril`,
+  :func:`mlx_sparse.triu`, and :func:`mlx_sparse.identity`. Block and stack
+  assembly use native CPU/Metal coordinate-offset kernels over COO buffers,
+  support COO/CSR/CSC and dense rank-2 inputs, infer ``None`` zero-block sizes
+  in block grids, and provide sparse-value JVP/VJP for fixed-topology
+  assembly. Triangular extraction uses native staged count/fill kernels for
+  COO, CSR, and CSC inputs without Python filtering.
+
 Improvements
 ~~~~~~~~~~~~
 

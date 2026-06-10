@@ -80,6 +80,66 @@ def coo_kron(lhs, rhs):
     )
 
 
+def coo_block(blocks, row_offsets, col_offsets, shape: Shape2D):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("coo_block requires the native mlx_sparse extension.")
+    return ext.coo_block(
+        [block.data for block in blocks],
+        [block.row for block in blocks],
+        [block.col for block in blocks],
+        [int(offset) for offset in row_offsets],
+        [int(offset) for offset in col_offsets],
+        int(shape[0]),
+        int(shape[1]),
+    )
+
+
+def coo_triangular(array, *, k: int, upper: bool):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("coo_triangular requires the native mlx_sparse extension.")
+    return ext.coo_triangular(
+        array.data,
+        array.row,
+        array.col,
+        array.shape[0],
+        array.shape[1],
+        int(k),
+        bool(upper),
+    )
+
+
+def csr_triangular(array, *, k: int, upper: bool):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_triangular requires the native mlx_sparse extension.")
+    return ext.csr_triangular(
+        array.data,
+        array.indices,
+        array.indptr,
+        array.shape[0],
+        array.shape[1],
+        int(k),
+        bool(upper),
+    )
+
+
+def csc_triangular(array, *, k: int, upper: bool):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csc_triangular requires the native mlx_sparse extension.")
+    return ext.csc_triangular(
+        array.data,
+        array.indices,
+        array.indptr,
+        array.shape[0],
+        array.shape[1],
+        int(k),
+        bool(upper),
+    )
+
+
 def csr_todense(
     data: mx.array,
     indices: mx.array,

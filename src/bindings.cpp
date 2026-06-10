@@ -38,6 +38,7 @@
 #include "preconditioners/pcg/pcg.h"
 #include "random/random.h"
 #include "sparse/add/csr_add.h"
+#include "sparse/block/coo_block.h"
 #include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_col_norms/coo_col_norms.h"
 #include "sparse/coo_col_sums/coo_col_sums.h"
@@ -89,6 +90,7 @@
 #include "sparse/fromdense/fromdense.h"
 #include "sparse/identity_like/identity_like.h"
 #include "sparse/kron/coo_kron.h"
+#include "sparse/triangular_extract/triangular_extract.h"
 
 namespace nb = nanobind;
 using namespace nb::literals;
@@ -475,6 +477,57 @@ NB_MODULE(_ext, m) {
       "rhs_col"_a, "lhs_n_rows"_a, "lhs_n_cols"_a, "rhs_n_rows"_a,
       "rhs_n_cols"_a,
       "Build COO buffers for the Kronecker product of two COO structures.");
+
+  m.def(
+      "coo_block",
+      [](const std::vector<mlx_sparse::mx::array> &data_arrays,
+         const std::vector<mlx_sparse::mx::array> &row_arrays,
+         const std::vector<mlx_sparse::mx::array> &col_arrays,
+         const std::vector<int> &row_offsets,
+         const std::vector<int> &col_offsets, int n_rows, int n_cols) {
+        return mlx_sparse::coo_block(data_arrays, row_arrays, col_arrays,
+                                     row_offsets, col_offsets, n_rows, n_cols);
+      },
+      "data_arrays"_a, "row_arrays"_a, "col_arrays"_a, "row_offsets"_a,
+      "col_offsets"_a, "n_rows"_a, "n_cols"_a,
+      "Assemble COO buffers by offsetting and concatenating COO blocks.");
+
+  m.def(
+      "coo_triangular",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols, int k,
+         bool upper) {
+        return mlx_sparse::coo_triangular(data, row, col, n_rows, n_cols, k,
+                                          upper);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a, "k"_a, "upper"_a,
+      "Extract lower or upper triangular COO buffers with native compaction.");
+
+  m.def(
+      "csr_triangular",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols, int k,
+         bool upper) {
+        return mlx_sparse::csr_triangular(data, indices, indptr, n_rows, n_cols,
+                                          k, upper);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "upper"_a,
+      "Extract lower or upper triangular CSR buffers with native compaction.");
+
+  m.def(
+      "csc_triangular",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, int n_rows, int n_cols, int k,
+         bool upper) {
+        return mlx_sparse::csc_triangular(data, indices, indptr, n_rows, n_cols,
+                                          k, upper);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a, "k"_a,
+      "upper"_a,
+      "Extract lower or upper triangular CSC buffers with native compaction.");
 
   m.def(
       "csr_todense",

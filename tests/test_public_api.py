@@ -58,3 +58,18 @@ def test_public_sparse_kron_exports():
     for name in ("kron", "kronsum"):
         assert name in ms.__all__
         assert callable(getattr(ms, name))
+
+
+def test_public_structural_constructor_exports():
+    for name in (
+        "block_array",
+        "bmat",
+        "block_diag",
+        "vstack",
+        "hstack",
+        "tril",
+        "triu",
+        "identity",
+    ):
+        assert name in ms.__all__
+        assert callable(getattr(ms, name))
