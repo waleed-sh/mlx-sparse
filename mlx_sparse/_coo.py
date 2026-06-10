@@ -243,17 +243,22 @@ class COOArray:
         raise ValueError(f"COOArray.sum axis must be None, 0, or 1; got {axis!r}.")
 
     def __matmul__(self, rhs):
-        """Matrix multiplication via the ``@`` operator."""
+        """Matrix multiplication via the ``@`` operator.
+
+        Sparse RHS operands return canonical COO output. Mixed CSR/CSC RHS
+        operands are normalized to COO through native format conversion before
+        dispatching to the native COO sparse-sparse product; no dense
+        intermediate is formed.
+        """
         from mlx_sparse._csc import CSCArray
         from mlx_sparse._ops import coo_matmat, coo_matmul, coo_matvec
 
         if isinstance(rhs, COOArray):
             return coo_matmat(self, rhs)
-        if isinstance(rhs, (CSRArray, CSCArray)):
-            raise NotImplementedError(
-                "Mixed-format COO sparse-sparse matmul is not implemented. "
-                "Convert explicitly if another format is acceptable for your workload."
-            )
+        if isinstance(rhs, CSRArray):
+            return coo_matmat(self, rhs.tocoo(canonical=None))
+        if isinstance(rhs, CSCArray):
+            return coo_matmat(self, rhs.tocoo(canonical=False))
 
         rhs = ensure_mx_array(rhs)
         if rhs.ndim == 1:

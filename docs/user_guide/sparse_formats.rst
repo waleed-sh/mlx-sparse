@@ -61,11 +61,13 @@ contribution into the output. On Metal, ``float32`` uses atomic scatter-add,
 other value dtypes remain native through a serial scatter path because Metal
 does not expose compatible atomic adds for those storage types.
 
-COO also has a same-format sparse-sparse product. ``COOArray @ COOArray``
-dispatches to native ``coo_matmat``: it groups coordinates by row, performs a
-symbolic pass to size each output row, fills sorted coordinates, sums duplicate
-contributions, and prunes exact zero cancellations. It returns canonical COO
-without silently converting through CSR. The optimized host path is the default,
+COO also has sparse-sparse products. ``COOArray @ COOArray`` dispatches to
+native ``coo_matmat``: it groups coordinates by row, performs a symbolic pass
+to size each output row, fills sorted coordinates, sums duplicate
+contributions, and prunes exact zero cancellations. A CSR or CSC right-hand
+operand is first expanded through native COO conversion, then the same native
+COO product is used. The operator returns canonical COO and never converts
+through dense storage. The optimized host path is the default,
 ``ms.config.EXPERIMENTAL_METAL_SPGEMM`` enables an experimental staged Metal
 path with COO-specific symbolic, numeric-fill, and prune kernels.
 
@@ -174,17 +176,19 @@ output column is an independent compressed-column dot product.
 
 CSC also has native reductions. ``col_sums`` and ``col_norms`` are especially
 efficient because each output column is already contiguous in memory. ``row_sums``
-and ``row_norms`` scatter contributions into row outputs; on Metal, ``float32``
+and ``row_norms`` scatter contributions into row outputs, on Metal, ``float32``
 sum scatter uses atomics and norms accumulate squared magnitudes into
 ``float32`` atomics for all supported value dtypes. ``diagonal`` and ``trace``
 walk compressed columns and sum duplicate diagonal entries.
 
-Same-format sparse-sparse products are also column-native. ``CSCArray @
-CSCArray`` dispatches to ``csc_matmat``, which walks each right-hand compressed
-column, gathers the needed left-hand compressed columns, and writes canonical
-CSC output with sorted row indices per column. The optimized host path is the
-default, ``ms.config.EXPERIMENTAL_METAL_SPGEMM`` enables an experimental staged
-Metal path with CSC-specific symbolic, numeric-fill, and prune kernels.
+Sparse-sparse products are also column-native for CSC left operands.
+``CSCArray @ CSCArray`` dispatches to ``csc_matmat``, which walks each
+right-hand compressed column, gathers the needed left-hand compressed columns,
+and writes canonical CSC output with sorted row indices per column. CSR or COO
+right-hand operands are normalized through native CSC conversion before the
+same native product. The optimized host path is the default,
+``ms.config.EXPERIMENTAL_METAL_SPGEMM`` enables an experimental staged Metal
+path with CSC-specific symbolic, numeric-fill, and prune kernels.
 
 Canonical form
 --------------

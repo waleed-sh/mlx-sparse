@@ -313,17 +313,22 @@ class CSCArray:
         return self.conj().transpose()
 
     def __matmul__(self, rhs):
-        """Matrix multiplication via the ``@`` operator."""
+        """Matrix multiplication via the ``@`` operator.
+
+        Sparse RHS operands return canonical CSC output. Mixed CSR/COO RHS
+        operands are normalized to CSC through native format conversion before
+        dispatching to the native CSC sparse-sparse product; no dense
+        intermediate is formed.
+        """
         from mlx_sparse._coo import COOArray
         from mlx_sparse._ops import csc_matmat, csc_matmul, csc_matvec
 
         if isinstance(rhs, CSCArray):
             return csc_matmat(self, rhs)
-        if isinstance(rhs, CSRArray | COOArray):
-            raise NotImplementedError(
-                "Mixed-format CSC sparse-sparse matmul is not implemented. "
-                "Convert explicitly if another format is acceptable for your workload."
-            )
+        if isinstance(rhs, CSRArray):
+            return csc_matmat(self, rhs.tocsc(canonical=True))
+        if isinstance(rhs, COOArray):
+            return csc_matmat(self, rhs.tocsc(canonical=True))
 
         rhs = ensure_mx_array(rhs)
         if rhs.ndim == 1:

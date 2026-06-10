@@ -277,8 +277,10 @@ def test_csc_conjugate_transpose_and_sparse_matmul_paths(mx):
     )
 
     rhs = ms.eye(2, dtype=mx.complex64)
-    with pytest.raises(NotImplementedError, match="Mixed-format CSC"):
-        csc @ rhs
+    csr_out = csc @ rhs
+    assert isinstance(csr_out, ms.CSCArray)
+    np.testing.assert_allclose(to_numpy(csr_out.todense()), to_numpy(csc.todense()))
+
     csc_rhs = rhs.tocsc(canonical=True)
     csc_out = csc @ csc_rhs
     assert isinstance(csc_out, ms.CSCArray)

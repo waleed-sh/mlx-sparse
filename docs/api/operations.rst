@@ -184,11 +184,13 @@ The explicit function calls accept the same arguments:
 For :class:`COOArray` and :class:`CSCArray`, dense RHS dispatch mirrors CSR:
 rank-1 RHS uses format-native matvec, rank-2 RHS uses format-native matmul,
 and higher-rank RHS is flattened into the corresponding native batched
-primitive. Same-format sparse-sparse products are also native:
-``COOArray @ COOArray`` returns canonical COO via :func:`coo_matmat`, and
-``CSCArray @ CSCArray`` returns canonical CSC via :func:`csc_matmat`.
-Mixed-format sparse-sparse products remain explicit: convert the operand
-yourself when a different storage format is acceptable.
+primitive. Sparse-sparse ``@`` supports every COO/CSR/CSC format pair. The
+operator result follows the left-hand sparse format: COO left operands return
+canonical COO, CSR left operands return canonical CSR, and CSC left operands
+return canonical CSC. Same-format products dispatch directly to the native
+format-specific kernel. Mixed-format products normalize the RHS through native
+format conversion before calling the same native kernel, never through dense
+materialization or Python loops over stored entries.
 
 The ``+`` and ``-`` operators on :class:`COOArray`, :class:`CSRArray`, and
 :class:`CSCArray` dispatch to :func:`add` and :func:`subtract`. Sparse-sparse
@@ -235,7 +237,9 @@ output buffers. Sparse addition canonicalizes to CSR for the native merge and
 uses CPU or Metal row-merge kernels. CSR ``matmat`` uses row symbolic/numeric
 assembly, COO groups coordinate rows without routing through CSR, and CSC walks
 right-hand columns against left-hand compressed columns to produce sorted output
-columns.
+columns. Mixed-format ``@`` uses native RHS conversion plus the left-hand
+format's native sparse-sparse product, direct mixed-format kernels should be
+added only when benchmarks show conversion overhead is material.
 
 ``kron`` is a fixed-output structural product before optional compressed
 canonicalization. The native COO kernel writes ``nnz_A * nnz_B`` values and

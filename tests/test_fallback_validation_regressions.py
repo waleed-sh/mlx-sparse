@@ -383,7 +383,7 @@ def test_sparse_container_edge_methods(mx):
     np.testing.assert_allclose(to_numpy(complex_csc.conjugate().data), [1.0 - 2.0j])
     np.testing.assert_allclose(to_numpy(complex_csc.H.todense()), [[1.0 - 2.0j]])
 
-    with pytest.raises(NotImplementedError, match="Mixed-format CSC"):
+    with pytest.raises(ValueError, match="dimension mismatch"):
         _ = csc @ csc.tocsr(canonical=True)
     with pytest.raises(ValueError, match="rank-1 or higher"):
         _ = csc @ mx.array(1.0, dtype=mx.float32)

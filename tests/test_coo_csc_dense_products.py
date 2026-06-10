@@ -423,10 +423,20 @@ def test_coo_and_csc_sparse_sparse_matmat_match_scipy(
         to_numpy(csc_out.todense()), expected, rtol=rtol, atol=atol
     )
 
-    with pytest.raises(NotImplementedError, match="Mixed-format COO"):
-        _ = coo @ rhs_csc
-    with pytest.raises(NotImplementedError, match="Mixed-format CSC"):
-        _ = csc @ rhs_coo
+    coo_mixed_out = coo @ rhs_csc
+    assert isinstance(coo_mixed_out, ms.COOArray)
+    assert coo_mixed_out.has_canonical_format
+    np.testing.assert_allclose(
+        to_numpy(coo_mixed_out.todense()), expected, rtol=rtol, atol=atol
+    )
+
+    csc_mixed_out = csc @ rhs_coo
+    assert isinstance(csc_mixed_out, ms.CSCArray)
+    assert csc_mixed_out.sorted_indices
+    assert csc_mixed_out.has_canonical_format
+    np.testing.assert_allclose(
+        to_numpy(csc_mixed_out.todense()), expected, rtol=rtol, atol=atol
+    )
 
 
 def test_coo_spgemm_duplicate_cancellation_and_rectangular_output(mx, scipy_sparse):

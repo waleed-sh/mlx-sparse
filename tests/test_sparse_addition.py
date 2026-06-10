@@ -165,7 +165,7 @@ def test_coo_and_mixed_format_addition_return_sparse_without_densifying(
 
 @pytest.mark.parametrize("lhs_format", ["csr", "csc", "coo"])
 @pytest.mark.parametrize("rhs_format", ["csr", "csc", "coo"])
-def test_all_sparse_format_pairs_match_dense_reference(
+def test_all_sparse_add_sub_format_pairs_match_dense_reference(
     lhs_format, rhs_format, mx, to_numpy
 ):
     base_lhs = _csr_with_duplicates(mx).canonicalize()
@@ -208,16 +208,24 @@ def test_all_sparse_format_pairs_match_dense_reference(
     lhs = choices_lhs[lhs_format]
     rhs = choices_rhs[rhs_format]
 
-    out = lhs + rhs
+    added = lhs + rhs
+    subtracted = lhs - rhs
 
-    assert ms.issparse(out)
+    assert ms.issparse(added)
+    assert ms.issparse(subtracted)
     if lhs_format == rhs_format == "csc":
-        assert isinstance(out, ms.CSCArray)
+        assert isinstance(added, ms.CSCArray)
+        assert isinstance(subtracted, ms.CSCArray)
     else:
-        assert isinstance(out, ms.CSRArray)
-        _assert_canonical_csr(out, to_numpy)
+        assert isinstance(added, ms.CSRArray)
+        assert isinstance(subtracted, ms.CSRArray)
+        _assert_canonical_csr(added, to_numpy)
+        _assert_canonical_csr(subtracted, to_numpy)
     np.testing.assert_allclose(
-        to_numpy(out.todense()), to_numpy(lhs.todense() + rhs.todense())
+        to_numpy(added.todense()), to_numpy(lhs.todense() + rhs.todense())
+    )
+    np.testing.assert_allclose(
+        to_numpy(subtracted.todense()), to_numpy(lhs.todense() - rhs.todense())
     )
 
 

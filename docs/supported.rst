@@ -243,6 +243,12 @@ Sparse-dense arithmetic
      - Done
      - Native compressed-column symbolic/count pass, prefix allocation, sorted
        numeric fill, and zero pruning returning canonical CSC.
+   * - Mixed-format sparse-sparse multiplication
+     - Done
+     - ``COO/CSR/CSC @ COO/CSR/CSC`` works for all format pairs. Mixed RHS
+       operands are normalized through native format conversion, then the
+       left-hand format's native sparse-sparse product is used. Output format
+       follows the left operand: COO, CSR, or CSC.
    * - Scalar multiply (``alpha * A``)
      - Done
      - Scales stored values for COO, CSR, and CSC inputs while preserving the

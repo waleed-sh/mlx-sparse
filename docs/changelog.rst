@@ -46,6 +46,14 @@ New Features
 Improvements
 ~~~~~~~~~~~~
 
+* Completed mixed-format sparse-sparse ``@`` dispatch for all COO/CSR/CSC
+  format pairs. Mixed RHS operands are normalized through native conversions
+  and then multiplied with the left-hand format's native sparse-sparse kernel,
+  so ``COO @ CSR/CSC`` and ``CSC @ CSR/COO`` no longer raise
+  ``NotImplementedError``. Added pairwise format tests and a benchmark harness
+  for comparing native normalization with pre-normalized same-format products
+  before adding any direct mixed-format kernels.
+
 * Allow for right multiply, in addition to the existing left multiply, of sparse matrices by numbers.
 
 
