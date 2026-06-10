@@ -220,6 +220,23 @@ availability fallback, not a dtype-specific path in normal wheels.
   available behind ``ms.config.EXPERIMENTAL_METAL_SPGEMM`` for experimentation,
   but the optimized host path remains the default on the current benchmark set.
 
+**Mixed-format sparse-sparse products**
+
+* ``COO/CSR/CSC @ COO/CSR/CSC`` supports every format pair. Same-format pairs
+  dispatch directly to the format-native sparse-sparse product.
+
+* Mixed-format pairs normalize the right-hand operand with native conversion,
+  then use the left-hand format's native sparse-sparse product. This keeps the
+  operator output predictable, avoids dense temporaries, and confines the
+  extra cost to a conversion whose memory footprint is proportional to the RHS
+  structure.
+
+* Direct mixed-format kernels are intentionally deferred until benchmark data
+  shows that conversion materially hurts time-to-solution or creates
+  unacceptable temporary memory for representative workloads. Use
+  ``benchmarks/bench_mixed_format_matmul.py`` to compare the mixed operator
+  path with pre-normalized same-format products.
+
 **COO x COO and CSC x CSC**
 
 .. important::
@@ -316,7 +333,7 @@ while other CPU kernels are still being optimized incrementally:
   do not share mutable destination counters between workers.
 * Non-batched COO/CSC forward dense products remain serial on CPU because they
   scatter into shared dense output rows.  Parallelizing those paths requires a
-  measured race-free design such as output ownership or private accumulators;
+  measured race-free design such as output ownership or private accumulators,
   unsynchronized scatter writes are not used.
 * Axis-mismatched compressed reductions and transpose products are treated as
   scatter-style kernels.  CSR transpose products and axis-mismatched COO/CSC
@@ -332,7 +349,7 @@ while other CPU kernels are still being optimized incrementally:
   columns so each sparse factor row is scanned once per triangular solve rather
   than once per Python-sliced RHS column.  Solver parallelism is controlled
   separately with ``MLX_SPARSE_SOLVER_PARALLEL`` and
-  ``MLX_SPARSE_SOLVER_THREADS``; it is not enabled by ``SPGEMM_THREADS``.
+  ``MLX_SPARSE_SOLVER_THREADS``, it is not enabled by ``SPGEMM_THREADS``.
 * CSR triangular-solve structural analysis is available internally for
   benchmark and development work: diagonal positions can be precomputed, and a
   dependency-level schedule is emitted only when the factor graph has level
@@ -355,7 +372,7 @@ while other CPU kernels are still being optimized incrementally:
   materialization.
 * The worker count is the configured runtime value. It is not changed
   heuristically from matrix shape, density, or nnz.
-* No architecture-specific SIMD intrinsics are required in the default build;
+* No architecture-specific SIMD intrinsics are required in the default build,
   the CPU changes in v0.0.4b1 prefer cache-friendly loop layout, row/column
   ownership, and compiler auto-vectorization.
 * ``float16`` and ``bfloat16`` reductions use ``float32`` accumulators where

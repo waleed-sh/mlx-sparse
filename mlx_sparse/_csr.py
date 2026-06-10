@@ -502,15 +502,19 @@ class CSRArray:
     def __matmul__(self, rhs):
         """Matrix multiplication via the ``@`` operator.
 
-        Dispatches to :func:`~mlx_sparse.csr_matmat` for CSR operands,
+        Dispatches to :func:`~mlx_sparse.csr_matmat` for sparse operands,
         :func:`~mlx_sparse.csr_matvec` for a rank-1 dense ``rhs``, or
         :func:`~mlx_sparse.csr_matmul` for rank-2 and batched dense operands.
+        COO and CSC sparse RHS operands are converted to canonical CSR through
+        native format conversion before multiplication, so sparse-sparse
+        operator output follows the left-hand CSR format without densifying.
         Dense inputs are converted to MLX arrays if needed.
 
         Args:
-            rhs: CSR sparse matrix, dense vector of shape ``(n_cols,)``, dense
-                matrix of shape ``(n_cols, k)``, or batched dense matrix with
-                sparse dimension at ``rhs.shape[-2]``.
+            rhs: Sparse COO/CSR/CSC matrix, dense vector of shape
+                ``(n_cols,)``, dense matrix of shape ``(n_cols, k)``, or
+                batched dense matrix with sparse dimension at
+                ``rhs.shape[-2]``.
 
         Returns:
             A CSRArray for CSR RHS, otherwise a dense MLX array.
@@ -525,8 +529,13 @@ class CSRArray:
             return csr_matmat(self, rhs)
 
         from mlx_sparse._coo import COOArray
+        from mlx_sparse._csc import CSCArray
 
         if isinstance(rhs, COOArray):
+            from mlx_sparse._ops import csr_matmat
+
+            return csr_matmat(self, rhs.tocsr(canonical=True))
+        if isinstance(rhs, CSCArray):
             from mlx_sparse._ops import csr_matmat
 
             return csr_matmat(self, rhs.tocsr(canonical=True))
