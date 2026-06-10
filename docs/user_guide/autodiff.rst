@@ -18,12 +18,17 @@ What is differentiable
 * JVP and VJP for the dense matrix ``X`` in ``A @ X``.
 * JVP and VJP for explicit batched sparse-dense products:
   ``coo_*``, ``csr_*``, and ``csc_*`` batched matvec/matmul helpers.
+* JVP and VJP for sparse values in fixed-topology block and stack assembly:
+  ``block_array``, ``bmat``, ``block_diag``, ``vstack``, and ``hstack`` when
+  the block structures and placements are fixed.
 * Real dtypes and ``complex64`` on CPU and Metal GPU.
 
 **Not implemented:**
 
 * Gradients with respect to ``indices`` or ``indptr``. They are discrete
   structure, not differentiable values.
+* Gradients with respect to block shapes, ``None`` placement, row/column
+  offsets, or sparse coordinate buffers in structural constructors.
 * Autodiff through sparse-sparse ``matmat``. Its output structure is
   data-dependent and returned as a sparse container, so the differentiable API
   is restricted to fixed-output sparse-dense products.
@@ -83,6 +88,35 @@ For matmul, the right-hand side has columns ``k`` and the VJP sums over them:
 
 The bar over ``x`` / ``X`` denotes complex conjugation. For real inputs it is a
 no-op. These are fixed-output primitives with CPU and Metal implementations.
+
+Fixed-Topology Constructors
+---------------------------
+
+Block and stack constructors concatenate stored values while applying fixed
+coordinate offsets to the integer structure. When the block structures and
+placements are fixed, the value transform is just a native concatenation, so
+``mx.jvp`` concatenates value tangents and ``mx.vjp`` splits output cotangents
+back to the corresponding input ``data`` buffers.
+
+.. code-block:: python
+
+   row = mx.array([0, 1], dtype=mx.int32)
+   col = mx.array([0, 1], dtype=mx.int32)
+
+   def assembled_values(left_data, right_data):
+       A = ms.coo_array((left_data, (row, col)), shape=(2, 2), canonical=True)
+       B = ms.coo_array((right_data, (row, col)), shape=(2, 2), canonical=True)
+       return ms.block_array([[A, B]], format="coo").data
+
+   _, tangent = mx.jvp(
+       assembled_values,
+       (mx.ones(2), mx.ones(2)),
+       (mx.ones(2), 2 * mx.ones(2)),
+   )
+
+Dynamic-topology operations such as ``fromdense``, random structure sampling,
+canonicalization that sums duplicates, and sparse-sparse products remain
+outside the structural autodiff contract.
 
 Dense-RHS JVP
 -------------

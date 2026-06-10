@@ -6,6 +6,7 @@ User guide
 
    sparse_formats
    random
+   structural
    validation
    dtype_policy
    autodiff

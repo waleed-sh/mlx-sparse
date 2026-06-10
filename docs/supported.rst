@@ -68,9 +68,25 @@ Constructors
    * - ``eye(n, m, k)``
      - Done
      - Sparse identity or shifted-diagonal matrix. Returns canonical CSR.
+   * - ``identity(n)``
+     - Done
+     - Square identity alias. Defaults to CSR and supports COO/CSR/CSC output.
    * - ``diags(diagonals, offsets)``
      - Done
      - One or more diagonals at specified offsets. Returns canonical CSR.
+   * - ``block_array`` / ``bmat``
+     - Done
+     - Native COO coordinate-offset assembly for COO/CSR/CSC and dense blocks.
+       ``None`` entries represent implicit zero blocks with inferred sizes.
+   * - ``block_diag`` / ``vstack`` / ``hstack``
+     - Done
+     - Native block-offset assembly without Python loops over stored entries.
+       Supports COO/CSR/CSC output and dense inputs through native
+       ``fromdense``.
+   * - ``tril`` / ``triu``
+     - Done
+     - Native staged count/fill extraction for COO, CSR, and CSC inputs.
+       Dense inputs route through native ``fromdense`` first.
    * - ``fromdense(array, threshold)``
      - Done
      - Native staged conversion with optional threshold for near-zeros.
@@ -154,6 +170,13 @@ Conversions and structural operations
    * - ``ms.todense(array)``
      - Done
      - Module-level dispatch helper.
+   * - Structural block and stack assembly
+     - Done
+     - CPU and Metal native coordinate-offset kernels. CSR/CSC format requests
+       canonicalize through native compressed conversion.
+   * - Triangular extraction
+     - Done
+     - CPU and Metal native count/fill kernels for COO, CSR, and CSC.
    * - ``CSRArray.sort_indices()``
      - Done
      - Native primitive (CPU and Metal).
