@@ -459,7 +459,8 @@ Automatic differentiation
      - Structural parameters are not differentiable variables.
    * - ``vmap`` over dense RHS
      - Done
-     - Batched dense RHS uses native batched sparse-dense kernels.
+     - COO, CSR, and CSC matvec/matmul primitive ``vmap`` methods batch dense
+       RHS axes through native batched sparse-dense kernels.
    * - VJP/JVP through batched dense RHS
      - Done
      - Native batched matvec/matmul primitives support sparse-value and
@@ -468,9 +469,11 @@ Automatic differentiation
      - Not planned for v0.1
      - Output topology is data-dependent and returned as a sparse container.
        Fixed-output sparse-dense products are the differentiable path.
-   * - ``vmap`` over sparse matrices
-     - Not planned
-     - Batch of sparse matrices is an unusual use case. Deferred.
+   * - ``vmap`` over sparse values or structure
+     - Limited
+     - Sparse buffers must be unmapped. Fixed-topology sparse ``data`` batches
+       are a named v0.0.6b0 limitation because native batched kernels currently
+       share one sparse value buffer and batch only dense RHS arrays.
 
 Metal GPU kernel coverage
 --------------------------

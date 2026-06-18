@@ -14,6 +14,7 @@
 
 #include "sparse/csr_matvec/csr_matvec.h"
 
+#include "sparse/csr_batched_matvec/csr_batched_matvec.h"
 #include "sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.h"
 #include "sparse/csr_matvec_transpose/csr_matvec_transpose.h"
 #include <algorithm>
@@ -22,6 +23,7 @@
 
 #include "common/common.h"
 #include "common/cpu_parallel.h"
+#include "common/vmap.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -59,9 +61,8 @@ public:
                              const std::vector<mx::array> &) override;
 
   std::pair<std::vector<mx::array>, std::vector<int>>
-  vmap(const std::vector<mx::array> &, const std::vector<int> &) override {
-    throw std::runtime_error("CSRMatVec vmap is not implemented in v0.1.");
-  }
+  vmap(const std::vector<mx::array> &inputs,
+       const std::vector<int> &axes) override;
 
   const char *name() const override { return "CSRMatVec"; }
 
@@ -255,6 +256,22 @@ std::vector<mx::array> CSRMatVec::vjp(const std::vector<mx::array> &primals,
     }
   }
   return vjps;
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+CSRMatVec::vmap(const std::vector<mx::array> &inputs,
+                const std::vector<int> &axes) {
+  require_vmap_arity(inputs, axes, 4, "CSRMatVec");
+  require_fixed_sparse_vmap_axes(axes, 3, "CSRMatVec");
+
+  auto rhs =
+      dense_rhs_with_vmap_axis_front(inputs[3], axes[3], stream(), "CSRMatVec");
+  require_vmap_rhs_rank(rhs, 2, "CSRMatVec");
+  require_vmap_rhs_sparse_dim(rhs, 1, n_cols_, "CSRMatVec");
+
+  return {{csr_batched_matvec(inputs[0], inputs[1], inputs[2], rhs, n_rows_,
+                              n_cols_, stream())},
+          {0}};
 }
 
 #ifdef _METAL_

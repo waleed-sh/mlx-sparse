@@ -34,7 +34,7 @@ cost is amortized over all products.
 Running the benchmarks
 -----------------------
 
-Two benchmark scripts ship in the ``benchmarks/`` directory.
+Several benchmark scripts ship in the ``benchmarks/`` directory.
 
 ``bench_csr_matvec.py``
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -75,6 +75,18 @@ Output example:
 
    # Complex dtype
    python benchmarks/bench_csr_matmul.py --complex --rhs-cols 8
+
+``bench_vmap_sparse_dense.py``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   # Compare mx.vmap, explicit batched helper, Python loop, and dense baseline
+   python benchmarks/bench_vmap_sparse_dense.py --format csr --mode matvec
+
+   # Matrix RHS and alternate formats
+   python benchmarks/bench_vmap_sparse_dense.py --format coo --mode matmul
+   python benchmarks/bench_vmap_sparse_dense.py --format csc --mode matmul --device gpu
 
 Current kernel characteristics
 --------------------------------
@@ -315,6 +327,9 @@ while other CPU kernels are still being optimized incrementally:
 * ``coo_batched_matmul`` and ``csc_batched_matmul`` use fixed-worker
   batch-owned partitions on CPU.  Batched matvec wrappers use the same native
   path with a single RHS column.
+* ``mx.vmap`` over COO/CSR/CSC sparse-dense products lowers to the same native
+  batched matvec/matmul primitives after moving the mapped dense RHS axis to
+  the front.  The implementation does not loop over batch elements in Python.
 * Storage-aligned CSR row reductions, CSR diagonal extraction, CSR dense
   conversion, CSC column reductions, CSC diagonal extraction, and CSC dense
   conversion use fixed-worker row/column partitions when

@@ -192,6 +192,17 @@ format-specific kernel. Mixed-format products normalize the RHS through native
 format conversion before calling the same native kernel, never through dense
 materialization or Python loops over stored entries.
 
+Vectorized sparse-dense products use the same native path. For COO, CSR, and
+CSC matrices with fixed sparse structure, ``mx.vmap(lambda x: A @ x)(X)``
+routes to the format-native batched matvec primitive and
+``mx.vmap(lambda X: A @ X)(XB)`` routes to the format-native batched matmul
+primitive. The mapped dense RHS axis may be any valid RHS axis, the primitive
+normalizes it internally and reports a stable mapped output axis back to MLX so
+``out_axes`` is handled by MLX. Mapping sparse ``data`` or structural index
+buffers is intentionally rejected in v0.0.6b0, use explicit batched dense RHS
+helpers when the sparse topology is fixed and only the right-hand side is
+batched.
+
 The ``+`` and ``-`` operators on :class:`COOArray`, :class:`CSRArray`, and
 :class:`CSCArray` dispatch to :func:`add` and :func:`subtract`. Sparse-sparse
 addition supports COO, CSR, and CSC operands with equal shape and matching
