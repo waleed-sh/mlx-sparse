@@ -14,6 +14,7 @@
 
 #include "sparse/csr_matmul/csr_matmul.h"
 
+#include "sparse/csr_batched_matmul/csr_batched_matmul.h"
 #include "sparse/csr_matmul_data_vjp/csr_matmul_data_vjp.h"
 #include "sparse/csr_matmul_transpose/csr_matmul_transpose.h"
 #include <algorithm>
@@ -23,6 +24,7 @@
 
 #include "common/common.h"
 #include "common/cpu_parallel.h"
+#include "common/vmap.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -61,9 +63,8 @@ public:
                              const std::vector<mx::array> &outputs) override;
 
   std::pair<std::vector<mx::array>, std::vector<int>>
-  vmap(const std::vector<mx::array> &, const std::vector<int> &) override {
-    throw std::runtime_error("CSRMatMul vmap is not implemented.");
-  }
+  vmap(const std::vector<mx::array> &inputs,
+       const std::vector<int> &axes) override;
 
   const char *name() const override { return "CSRMatMul"; }
 
@@ -359,6 +360,24 @@ std::vector<mx::array> CSRMatMul::vjp(const std::vector<mx::array> &primals,
     }
   }
   return vjps;
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+CSRMatMul::vmap(const std::vector<mx::array> &inputs,
+                const std::vector<int> &axes) {
+  require_vmap_arity(inputs, axes, 4, "CSRMatMul");
+  require_fixed_sparse_vmap_axes(axes, 3, "CSRMatMul");
+
+  auto rhs =
+      dense_rhs_with_vmap_axis_front(inputs[3], axes[3], stream(), "CSRMatMul");
+  require_vmap_rhs_rank(rhs, 3, "CSRMatMul");
+  require_vmap_rhs_sparse_dim(rhs, 1, n_cols_, "CSRMatMul");
+  require_vmap_rhs_dim(rhs, 2, rhs_cols_, "dense RHS column dimension",
+                       "CSRMatMul");
+
+  return {{csr_batched_matmul(inputs[0], inputs[1], inputs[2], rhs, n_rows_,
+                              n_cols_, stream())},
+          {0}};
 }
 
 mx::array csr_matmul(const mx::array &data, const mx::array &indices,

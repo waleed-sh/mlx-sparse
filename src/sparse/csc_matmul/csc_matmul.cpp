@@ -4,6 +4,7 @@
 
 #include "sparse/csc_matmul/csc_matmul.h"
 
+#include "sparse/csc_batched_matmul/csc_batched_matmul.h"
 #include "sparse/csc_matmul_data_vjp/csc_matmul_data_vjp.h"
 #include "sparse/csc_matmul_transpose/csc_matmul_transpose.h"
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/vmap.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -42,6 +44,10 @@ public:
                              const std::vector<mx::array> &cotangents,
                              const std::vector<int> &argnums,
                              const std::vector<mx::array> &) override;
+
+  std::pair<std::vector<mx::array>, std::vector<int>>
+  vmap(const std::vector<mx::array> &inputs,
+       const std::vector<int> &axes) override;
 
   const char *name() const override { return "CSCMatMul"; }
 
@@ -275,6 +281,24 @@ std::vector<mx::array> CSCMatMul::vjp(const std::vector<mx::array> &primals,
     }
   }
   return vjps;
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+CSCMatMul::vmap(const std::vector<mx::array> &inputs,
+                const std::vector<int> &axes) {
+  require_vmap_arity(inputs, axes, 4, "CSCMatMul");
+  require_fixed_sparse_vmap_axes(axes, 3, "CSCMatMul");
+
+  auto rhs =
+      dense_rhs_with_vmap_axis_front(inputs[3], axes[3], stream(), "CSCMatMul");
+  require_vmap_rhs_rank(rhs, 3, "CSCMatMul");
+  require_vmap_rhs_sparse_dim(rhs, 1, n_cols_, "CSCMatMul");
+  require_vmap_rhs_dim(rhs, 2, rhs_cols_, "dense RHS column dimension",
+                       "CSCMatMul");
+
+  return {{csc_batched_matmul(inputs[0], inputs[1], inputs[2], rhs, n_rows_,
+                              n_cols_, stream())},
+          {0}};
 }
 
 mx::array csc_matmul(const mx::array &data, const mx::array &indices,

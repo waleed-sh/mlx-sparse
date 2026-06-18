@@ -1,11 +1,12 @@
 Autodiff
 ========
 
-mlx-sparse integrates with MLX's automatic differentiation system (``mx.grad``,
-``mx.vjp``, ``mx.jvp``) for COO, CSR, and CSC sparse-dense products. The
-differentiable numerical inputs are the sparse value buffer (``data``) and the
-dense right-hand side. Structural buffers (``row`` / ``col`` / ``indices`` /
-``indptr``) are integer topology and are intentionally non-differentiable.
+mlx-sparse integrates with MLX's automatic differentiation and batching system
+(``mx.grad``, ``mx.vjp``, ``mx.jvp``, ``mx.vmap``) for COO, CSR, and CSC
+sparse-dense products. The differentiable numerical inputs are the sparse
+value buffer (``data``) and the dense right-hand side. Structural buffers
+(``row`` / ``col`` / ``indices`` / ``indptr``) are integer topology and are
+intentionally non-differentiable.
 
 What is differentiable
 ----------------------
@@ -18,6 +19,8 @@ What is differentiable
 * JVP and VJP for the dense matrix ``X`` in ``A @ X``.
 * JVP and VJP for explicit batched sparse-dense products:
   ``coo_*``, ``csr_*``, and ``csc_*`` batched matvec/matmul helpers.
+* ``mx.vmap`` over dense vector and dense matrix RHS for COO, CSR, and CSC
+  sparse arrays with fixed sparse structure.
 * JVP and VJP for sparse values in fixed-topology block and stack assembly:
   ``block_array``, ``bmat``, ``block_diag``, ``vstack``, and ``hstack`` when
   the block structures and placements are fixed.
@@ -29,6 +32,9 @@ What is differentiable
   structure, not differentiable values.
 * Gradients with respect to block shapes, ``None`` placement, row/column
   offsets, or sparse coordinate buffers in structural constructors.
+* ``mx.vmap`` over sparse ``data`` batches. This fixed-topology sparse-data
+  batch mode is a named v0.0.6b0 limitation because the current native batched
+  kernels assume one shared value buffer and batch only the dense RHS.
 * Autodiff through sparse-sparse ``matmat``. Its output structure is
   data-dependent and returned as a sparse container, so the differentiable API
   is restricted to fixed-output sparse-dense products.
@@ -143,6 +149,26 @@ flatten the leading batch dimensions only inside the native primitive, then
 reshape the gradients back to the user's batch shape. Sparse-value VJPs reuse
 fixed-output data-VJP kernels over the flattened RHS/cotangent columns, and
 dense-RHS VJPs reuse the native transpose-product path.
+
+Using ``mx.vmap``
+-----------------
+
+For fixed sparse structure, MLX vectorization over the dense RHS dispatches to
+native batched sparse-dense work rather than a Python loop:
+
+.. code-block:: python
+
+   vectors = mx.ones((8, A.shape[1]), dtype=A.dtype)
+   matrices = mx.ones((8, A.shape[1], 4), dtype=A.dtype)
+
+   ys = mx.vmap(lambda x: A @ x)(vectors)      # shape (8, A.shape[0])
+   Ys = mx.vmap(lambda X: A @ X)(matrices)     # shape (8, A.shape[0], 4)
+
+``in_axes`` may point at any dense RHS axis that represents the mapped batch,
+and MLX ``out_axes`` is honored from the primitive's reported mapped output
+axis. Sparse buffers must be unmapped. Mapping ``data``, ``row`` / ``col``, or
+``indices`` / ``indptr`` raises a precise limitation error instead of silently
+falling back to host-side looping.
 
 Using ``mx.grad``
 -----------------

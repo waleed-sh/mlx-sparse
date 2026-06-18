@@ -54,6 +54,15 @@ Improvements
   for comparing native normalization with pre-normalized same-format products
   before adding any direct mixed-format kernels.
 
+* Added native primitive ``vmap(...)`` methods for COO, CSR, and CSC
+  sparse-dense matvec/matmul and their explicit batched helper primitives.
+  ``mx.vmap(lambda x: A @ x)(X)`` and
+  ``mx.vmap(lambda X: A @ X)(XB)`` now route fixed-structure sparse matrices
+  to native batched sparse-dense kernels, including nonzero dense RHS
+  ``in_axes`` and MLX-managed ``out_axes``. Sparse ``data`` batching remains a
+  documented v0.0.6b0 limitation because the current batched kernels share one
+  sparse value buffer and batch only dense RHS arrays.
+
 * Allow for right multiply, in addition to the existing left multiply, of sparse matrices by numbers.
 
 

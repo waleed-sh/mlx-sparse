@@ -14,6 +14,7 @@
 
 #include "sparse/coo_matmul/coo_matmul.h"
 
+#include "sparse/coo_batched_matmul/coo_batched_matmul.h"
 #include "sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.h"
 #include <algorithm>
 #include <stdexcept>
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include "common/common.h"
+#include "common/vmap.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -54,6 +56,10 @@ public:
                              const std::vector<mx::array> &cotangents,
                              const std::vector<int> &argnums,
                              const std::vector<mx::array> &) override;
+
+  std::pair<std::vector<mx::array>, std::vector<int>>
+  vmap(const std::vector<mx::array> &inputs,
+       const std::vector<int> &axes) override;
 
   const char *name() const override { return "COOMatMul"; }
 
@@ -282,6 +288,24 @@ std::vector<mx::array> COOMatMul::vjp(const std::vector<mx::array> &primals,
     }
   }
   return vjps;
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+COOMatMul::vmap(const std::vector<mx::array> &inputs,
+                const std::vector<int> &axes) {
+  require_vmap_arity(inputs, axes, 4, "COOMatMul");
+  require_fixed_sparse_vmap_axes(axes, 3, "COOMatMul");
+
+  auto rhs =
+      dense_rhs_with_vmap_axis_front(inputs[3], axes[3], stream(), "COOMatMul");
+  require_vmap_rhs_rank(rhs, 3, "COOMatMul");
+  require_vmap_rhs_sparse_dim(rhs, 1, n_cols_, "COOMatMul");
+  require_vmap_rhs_dim(rhs, 2, rhs_cols_, "dense RHS column dimension",
+                       "COOMatMul");
+
+  return {{coo_batched_matmul(inputs[0], inputs[1], inputs[2], rhs, n_rows_,
+                              n_cols_, stream())},
+          {0}};
 }
 
 mx::array coo_matmul(const mx::array &data, const mx::array &row,

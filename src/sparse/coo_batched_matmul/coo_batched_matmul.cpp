@@ -13,6 +13,7 @@
 
 #include "common/common.h"
 #include "common/cpu_parallel.h"
+#include "common/vmap.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -44,6 +45,10 @@ public:
                              const std::vector<mx::array> &cotangents,
                              const std::vector<int> &argnums,
                              const std::vector<mx::array> &) override;
+
+  std::pair<std::vector<mx::array>, std::vector<int>>
+  vmap(const std::vector<mx::array> &inputs,
+       const std::vector<int> &axes) override;
 
   const char *name() const override { return "COOBatchedMatMul"; }
 
@@ -410,6 +415,34 @@ COOBatchedMatMul::vjp(const std::vector<mx::array> &primals,
     }
   }
   return vjps;
+}
+
+std::pair<std::vector<mx::array>, std::vector<int>>
+COOBatchedMatMul::vmap(const std::vector<mx::array> &inputs,
+                       const std::vector<int> &axes) {
+  require_vmap_arity(inputs, axes, 4, "COOBatchedMatMul");
+  require_fixed_sparse_vmap_axes(axes, 3, "COOBatchedMatMul");
+
+  auto rhs = dense_rhs_with_vmap_axis_front(inputs[3], axes[3], stream(),
+                                            "COOBatchedMatMul");
+  require_vmap_rhs_rank(rhs, 4, "COOBatchedMatMul");
+  require_vmap_rhs_dim(rhs, 1, batch_size_, "dense RHS batch dimension",
+                       "COOBatchedMatMul");
+  require_vmap_rhs_sparse_dim(rhs, 2, n_cols_, "COOBatchedMatMul");
+  require_vmap_rhs_dim(rhs, 3, rhs_cols_, "dense RHS column dimension",
+                       "COOBatchedMatMul");
+
+  const int outer_batch = rhs.shape(0);
+  const int flat_batch =
+      checked_vmap_batch_product(outer_batch, batch_size_, "COOBatchedMatMul");
+  auto flat_rhs =
+      mx::reshape(rhs, mx::Shape{flat_batch, n_cols_, rhs_cols_}, stream());
+  auto flat_out = coo_batched_matmul(inputs[0], inputs[1], inputs[2], flat_rhs,
+                                     n_rows_, n_cols_, stream());
+  auto out = mx::reshape(
+      flat_out, mx::Shape{outer_batch, batch_size_, n_rows_, rhs_cols_},
+      stream());
+  return {{out}, {0}};
 }
 
 mx::array coo_batched_matmul(const mx::array &data, const mx::array &row,
