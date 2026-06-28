@@ -126,6 +126,15 @@ public:
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
 
+  std::vector<mx::array> jvp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &,
+                             const std::vector<mx::array> &) override;
+
   const char *name() const override { return "COOTriangularFill"; }
 
   bool is_equivalent(const mx::Primitive &) const override { return true; }
@@ -169,6 +178,15 @@ public:
                 std::vector<mx::array> &outputs) override;
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "CompressedTriangularFill"; }
 
@@ -419,6 +437,15 @@ compressed_fill(const mx::array &data, const mx::array &indices,
   return {outputs[0], outputs[1]};
 }
 
+[[noreturn]] void throw_triangular_autodiff_error(const char *primitive,
+                                                  const char *transform) {
+  throw std::runtime_error(
+      std::string("triangular_extract ") + transform +
+      " is not supported for " + primitive +
+      " because tril/triu are structural filters that compact sparse topology. "
+      "Use an explicit fixed-topology value transform when differentiating.");
+}
+
 void validate_coo_inputs(const mx::array &data, const mx::array &row,
                          const mx::array &col, int n_rows, int n_cols) {
   if (n_rows < 0 || n_cols < 0) {
@@ -541,6 +568,19 @@ void COOTriangularFill::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_COO_TRI_FILL
 
   throw std::runtime_error("coo_triangular fill unsupported value dtype.");
+}
+
+std::vector<mx::array> COOTriangularFill::jvp(const std::vector<mx::array> &,
+                                              const std::vector<mx::array> &,
+                                              const std::vector<int> &) {
+  throw_triangular_autodiff_error("COOTriangularFill", "JVP");
+}
+
+std::vector<mx::array> COOTriangularFill::vjp(const std::vector<mx::array> &,
+                                              const std::vector<mx::array> &,
+                                              const std::vector<int> &,
+                                              const std::vector<mx::array> &) {
+  throw_triangular_autodiff_error("COOTriangularFill", "VJP");
 }
 
 #ifdef _METAL_
@@ -668,6 +708,19 @@ void CompressedTriangularFill::eval_cpu(const std::vector<mx::array> &inputs,
 
   throw std::runtime_error(
       "triangular compressed fill unsupported value dtype.");
+}
+
+std::vector<mx::array>
+CompressedTriangularFill::jvp(const std::vector<mx::array> &,
+                              const std::vector<mx::array> &,
+                              const std::vector<int> &) {
+  throw_triangular_autodiff_error("CompressedTriangularFill", "JVP");
+}
+
+std::vector<mx::array> CompressedTriangularFill::vjp(
+    const std::vector<mx::array> &, const std::vector<mx::array> &,
+    const std::vector<int> &, const std::vector<mx::array> &) {
+  throw_triangular_autodiff_error("CompressedTriangularFill", "VJP");
 }
 
 #ifdef _METAL_

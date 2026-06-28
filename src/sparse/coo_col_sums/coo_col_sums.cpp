@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/autodiff.h"
 #include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
@@ -44,6 +45,15 @@ public:
                 std::vector<mx::array> &outputs) override;
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "COOColSums"; }
 
@@ -181,6 +191,40 @@ void COOColSums::eval_cpu(const std::vector<mx::array> &inputs,
   throw std::runtime_error("coo_col_sums unsupported value dtype.");
 }
 
+std::vector<mx::array> COOColSums::jvp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &tangents,
+                                       const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    require_sparse_value_autodiff_arg(argnums[i], "COOColSums", "JVP");
+    terms.push_back(coo_col_sums(tangents[i], primals[1], primals[2], n_rows_,
+                                 n_cols_, stream()));
+  }
+  if (terms.empty()) {
+    throw std::runtime_error("COOColSums JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array> COOColSums::vjp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &cotangents,
+                                       const std::vector<int> &argnums,
+                                       const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    require_sparse_value_autodiff_arg(argnum, "COOColSums", "VJP");
+    vjps.push_back(
+        sparse_vector_cotangent_gather(cotangents[0], primals[2], stream()));
+  }
+  return vjps;
+}
+
 #ifdef _METAL_
 void COOColSums::eval_gpu(const std::vector<mx::array> &inputs,
                           std::vector<mx::array> &outputs) {
@@ -195,7 +239,10 @@ void COOColSums::eval_gpu(const std::vector<mx::array> &inputs,
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
   auto &encoder = mx::metal::get_command_encoder(s);
 
-  auto *zero_kernel = device.get_kernel("coo_col_sums_zero_float32", lib);
+  auto *zero_kernel = device.get_kernel(data.dtype() == mx::complex64
+                                            ? "coo_col_sums_zero_complex64"
+                                            : "coo_col_sums_zero_float32",
+                                        lib);
   encoder.set_compute_pipeline_state(zero_kernel);
   encoder.set_output_array(out, 0);
   encoder.set_bytes(n_cols_, 1);
@@ -205,8 +252,11 @@ void COOColSums::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.dispatch_threads(MTL::Size(zero_threads, 1, 1),
                            MTL::Size(zero_group, 1, 1));
 
-  auto kernel_name =
-      std::string("coo_col_sums_atomic_") + index_kernel_suffix(col.dtype());
+  auto kernel_name = data.dtype() == mx::complex64
+                         ? std::string("coo_col_sums_atomic_complex64_") +
+                               index_kernel_suffix(col.dtype())
+                         : std::string("coo_col_sums_atomic_") +
+                               index_kernel_suffix(col.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
   encoder.set_compute_pipeline_state(kernel);
   encoder.set_input_array(data, 0);
@@ -237,7 +287,8 @@ mx::array coo_col_sums(const mx::array &data, const mx::array &row,
   auto row_contig = mx::contiguous(row, false, stream);
   auto col_contig = mx::contiguous(col, false, stream);
 
-  if (stream.device == mx::Device::gpu && data.dtype() != mx::float32) {
+  if (stream.device == mx::Device::gpu && data.dtype() != mx::float32 &&
+      data.dtype() != mx::complex64) {
     auto [csc_data, csc_indices, csc_indptr] =
         coo_tocsc(data_contig, row_contig, col_contig, n_rows, n_cols, stream);
     return csc_col_sums(csc_data, csc_indices, csc_indptr, n_rows, n_cols,

@@ -57,6 +57,15 @@ public:
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
 
+  std::vector<mx::array> jvp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &,
+                             const std::vector<mx::array> &) override;
+
   const char *name() const override { return "CSCDuplicateCounts"; }
 
   bool is_equivalent(const mx::Primitive &) const override { return true; }
@@ -71,6 +80,15 @@ public:
 
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "CSCDuplicateFill"; }
 
@@ -251,6 +269,16 @@ duplicate_fill(const mx::array &data, const mx::array &indices,
   return {outputs[0], outputs[1]};
 }
 
+[[noreturn]] void
+throw_csc_sum_duplicates_autodiff_error(const char *primitive,
+                                        const char *transform) {
+  throw std::runtime_error(
+      std::string("csc_sum_duplicates ") + transform +
+      " is not supported for " + primitive +
+      " because canonicalization sums duplicates and changes sparse topology. "
+      "Use fixed-topology constructors when differentiating sparse values.");
+}
+
 } // namespace
 
 void CSCDuplicateCounts::eval_cpu(const std::vector<mx::array> &inputs,
@@ -269,6 +297,19 @@ void CSCDuplicateCounts::eval_cpu(const std::vector<mx::array> &inputs,
   }
   throw std::runtime_error(
       "csc_sum_duplicates requires int32 or int64 indices.");
+}
+
+std::vector<mx::array> CSCDuplicateCounts::jvp(const std::vector<mx::array> &,
+                                               const std::vector<mx::array> &,
+                                               const std::vector<int> &) {
+  throw_csc_sum_duplicates_autodiff_error("CSCDuplicateCounts", "JVP");
+}
+
+std::vector<mx::array> CSCDuplicateCounts::vjp(const std::vector<mx::array> &,
+                                               const std::vector<mx::array> &,
+                                               const std::vector<int> &,
+                                               const std::vector<mx::array> &) {
+  throw_csc_sum_duplicates_autodiff_error("CSCDuplicateCounts", "VJP");
 }
 
 #ifdef _METAL_
@@ -335,6 +376,19 @@ void CSCDuplicateFill::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_CSC_SUM_DUP_VALUE
 
   throw std::runtime_error("csc_sum_duplicates unsupported value dtype.");
+}
+
+std::vector<mx::array> CSCDuplicateFill::jvp(const std::vector<mx::array> &,
+                                             const std::vector<mx::array> &,
+                                             const std::vector<int> &) {
+  throw_csc_sum_duplicates_autodiff_error("CSCDuplicateFill", "JVP");
+}
+
+std::vector<mx::array> CSCDuplicateFill::vjp(const std::vector<mx::array> &,
+                                             const std::vector<mx::array> &,
+                                             const std::vector<int> &,
+                                             const std::vector<mx::array> &) {
+  throw_csc_sum_duplicates_autodiff_error("CSCDuplicateFill", "VJP");
 }
 
 #ifdef _METAL_

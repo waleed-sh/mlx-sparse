@@ -92,6 +92,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_norms/coo_row_norms.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_sums/coo_row_sums.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_todense/coo_todense.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_trace/coo_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_batched_matmul/csc_batched_matmul.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_col_norms/csc_col_norms.cpp
@@ -213,6 +214,7 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_matmul_data_vjp/coo_matmul_data_vjp.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_norms/coo_row_norms.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_row_sums/coo_row_sums.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_todense/coo_todense.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/coo_trace/coo_trace.metal
 	  ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_batched_matmul/csc_batched_matmul.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/sparse/csc_col_norms/csc_col_norms.metal

@@ -19,12 +19,14 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/autodiff.h"
 #include "common/common.h"
 #include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
 #include "mlx/primitives.h"
+#include "sparse/csc_tocoo/csc_tocoo.h"
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
@@ -44,6 +46,15 @@ public:
 
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "CSCToDense"; }
 
@@ -146,6 +157,42 @@ void CSCToDense::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_CSC_TODENSE_VALUE
 
   throw std::runtime_error("csc_todense unsupported value dtype.");
+}
+
+std::vector<mx::array> CSCToDense::jvp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &tangents,
+                                       const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    require_sparse_value_autodiff_arg(argnums[i], "CSCToDense", "JVP");
+    terms.push_back(csc_todense(tangents[i], primals[1], primals[2], n_rows_,
+                                n_cols_, stream()));
+  }
+  if (terms.empty()) {
+    throw std::runtime_error("CSCToDense JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array> CSCToDense::vjp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &cotangents,
+                                       const std::vector<int> &argnums,
+                                       const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    require_sparse_value_autodiff_arg(argnum, "CSCToDense", "VJP");
+    auto [_, row, col] = csc_tocoo(primals[0], primals[1], primals[2], n_rows_,
+                                   n_cols_, stream());
+    vjps.push_back(sparse_dense_cotangent_gather(cotangents[0], row, col,
+                                                 n_cols_, stream()));
+  }
+  return vjps;
 }
 
 #ifdef _METAL_

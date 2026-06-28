@@ -88,6 +88,15 @@ public:
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
 
+  std::vector<mx::array> jvp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &,
+                             const std::vector<mx::array> &) override;
+
   const char *name() const override { return "FromDenseCounts"; }
 
   bool is_equivalent(const mx::Primitive &other) const override {
@@ -110,6 +119,15 @@ public:
 
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &,
+                             const std::vector<mx::array> &,
+                             const std::vector<int> &,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "FromDenseFill"; }
 
@@ -210,6 +228,15 @@ void fromdense_fill_cpu_impl(const mx::array &dense,
     const auto ranges = equal_cpu_ranges(n_rows, workers);
     parallel_for_cpu_ranges(ranges, fill_rows);
   });
+}
+
+[[noreturn]] void throw_fromdense_autodiff_error(const char *primitive,
+                                                 const char *transform) {
+  throw std::runtime_error(
+      std::string("csr_fromdense ") + transform + " is not supported for " +
+      primitive +
+      " because fromdense has value-dependent sparse topology. Use a fixed-"
+      "topology sparse constructor when differentiating sparse values.");
 }
 
 template <typename I>
@@ -473,6 +500,19 @@ void FromDenseCounts::eval_cpu(const std::vector<mx::array> &inputs,
   throw std::runtime_error("csr_fromdense unsupported value dtype.");
 }
 
+std::vector<mx::array> FromDenseCounts::jvp(const std::vector<mx::array> &,
+                                            const std::vector<mx::array> &,
+                                            const std::vector<int> &) {
+  throw_fromdense_autodiff_error("FromDenseCounts", "JVP");
+}
+
+std::vector<mx::array> FromDenseCounts::vjp(const std::vector<mx::array> &,
+                                            const std::vector<mx::array> &,
+                                            const std::vector<int> &,
+                                            const std::vector<mx::array> &) {
+  throw_fromdense_autodiff_error("FromDenseCounts", "VJP");
+}
+
 #ifdef _METAL_
 void FromDenseCounts::eval_gpu(const std::vector<mx::array> &inputs,
                                std::vector<mx::array> &outputs) {
@@ -538,6 +578,19 @@ void FromDenseFill::eval_cpu(const std::vector<mx::array> &inputs,
   throw std::runtime_error("csr_fromdense unsupported value dtype.");
 }
 
+std::vector<mx::array> FromDenseFill::jvp(const std::vector<mx::array> &,
+                                          const std::vector<mx::array> &,
+                                          const std::vector<int> &) {
+  throw_fromdense_autodiff_error("FromDenseFill", "JVP");
+}
+
+std::vector<mx::array> FromDenseFill::vjp(const std::vector<mx::array> &,
+                                          const std::vector<mx::array> &,
+                                          const std::vector<int> &,
+                                          const std::vector<mx::array> &) {
+  throw_fromdense_autodiff_error("FromDenseFill", "VJP");
+}
+
 #ifdef _METAL_
 void FromDenseFill::eval_gpu(const std::vector<mx::array> &inputs,
                              std::vector<mx::array> &outputs) {
@@ -601,10 +654,6 @@ csr_fromdense(const mx::array &dense, int index_dtype_bits, float threshold,
 
   auto stream = mx::to_stream(s);
   auto dense_contig = mx::contiguous(dense, false, stream);
-  if (stream.device == mx::Device::cpu) {
-    return csr_fromdense_host(std::move(dense_contig), n_rows, n_cols,
-                              index_dtype, threshold);
-  }
   auto counts = fromdense_counts(dense_contig, n_rows, index_dtype, n_cols,
                                  threshold, stream);
   mx::eval(counts);

@@ -16,8 +16,10 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
+#include "common/autodiff.h"
 #include "common/common.h"
 #include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
@@ -44,10 +46,42 @@ public:
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
 
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &outputs) override;
+
   const char *name() const override { return "CSCToCSR"; }
 
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSCToCSR &>(other);
+    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_;
+  }
+
+private:
+  int n_rows_;
+  int n_cols_;
+};
+
+class CSCToCSRDataVJP : public mx::Primitive {
+public:
+  CSCToCSRDataVJP(mx::Stream stream, int n_rows, int n_cols)
+      : Primitive(stream), n_rows_(n_rows), n_cols_(n_cols) {}
+
+  void eval_cpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  void eval_gpu(const std::vector<mx::array> &inputs,
+                std::vector<mx::array> &outputs) override;
+
+  const char *name() const override { return "CSCToCSRDataVJP"; }
+
+  bool is_equivalent(const mx::Primitive &other) const override {
+    const auto &rhs = static_cast<const CSCToCSRDataVJP &>(other);
     return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_;
   }
 
@@ -166,6 +200,84 @@ void csc_tocsr_cpu_impl(const mx::array &data, const mx::array &indices,
   });
 }
 
+template <typename T, typename I>
+void csc_tocsr_data_vjp_cpu_impl(const mx::array &cotangent,
+                                 const mx::array &indices,
+                                 const mx::array &indptr,
+                                 const mx::array &out_indices,
+                                 const mx::array &out_indptr, mx::array &out,
+                                 int n_rows, int n_cols, mx::Stream stream) {
+  out.set_data(mx::allocator::malloc(out.nbytes()));
+
+  auto &encoder = mx::cpu::get_command_encoder(stream);
+  encoder.set_input_array(cotangent);
+  encoder.set_input_array(indices);
+  encoder.set_input_array(indptr);
+  encoder.set_input_array(out_indices);
+  encoder.set_input_array(out_indptr);
+  encoder.set_output_array(out);
+
+  encoder.dispatch([cotangent = mx::array::unsafe_weak_copy(cotangent),
+                    indices = mx::array::unsafe_weak_copy(indices),
+                    indptr = mx::array::unsafe_weak_copy(indptr),
+                    out_indices = mx::array::unsafe_weak_copy(out_indices),
+                    out_indptr = mx::array::unsafe_weak_copy(out_indptr),
+                    out = mx::array::unsafe_weak_copy(out), n_rows,
+                    n_cols]() mutable {
+    const auto *cotangent_ptr = cotangent.data<T>();
+    const auto *indices_ptr = indices.data<I>();
+    const auto *indptr_ptr = indptr.data<I>();
+    const auto *out_indices_ptr = out_indices.data<I>();
+    const auto *out_indptr_ptr = out_indptr.data<I>();
+    auto *out_ptr = out.data<T>();
+
+    auto compute_cols = [&](CpuRange range) {
+      for (int col = range.begin; col < range.end; ++col) {
+        const auto start_p = static_cast<size_t>(indptr_ptr[col]);
+        const auto end_p = static_cast<size_t>(indptr_ptr[col + 1]);
+        for (size_t p = start_p; p < end_p; ++p) {
+          const auto row = indices_ptr[p];
+          if (row < I{0} || static_cast<int>(row) >= n_rows) {
+            out_ptr[p] = T(0);
+            continue;
+          }
+
+          size_t duplicate_ordinal = 0;
+          for (size_t q = start_p; q < p; ++q) {
+            if (indices_ptr[q] == row) {
+              duplicate_ordinal += 1;
+            }
+          }
+
+          size_t seen = 0;
+          T value = T(0);
+          const auto row_start = static_cast<size_t>(out_indptr_ptr[row]);
+          const auto row_end = static_cast<size_t>(out_indptr_ptr[row + I{1}]);
+          for (size_t dst = row_start; dst < row_end; ++dst) {
+            if (out_indices_ptr[dst] != static_cast<I>(col)) {
+              continue;
+            }
+            if (seen == duplicate_ordinal) {
+              value = cotangent_ptr[dst];
+              break;
+            }
+            seen += 1;
+          }
+          out_ptr[p] = value;
+        }
+      }
+    };
+
+    const int workers = configured_cpu_worker_count();
+    const auto ranges = equal_cpu_ranges(n_cols, std::max(workers, 1));
+    if (ranges.size() <= 1) {
+      compute_cols({0, n_cols});
+    } else {
+      parallel_for_cpu_ranges(ranges, compute_cols);
+    }
+  });
+}
+
 } // namespace
 
 void CSCToCSR::eval_cpu(const std::vector<mx::array> &inputs,
@@ -199,6 +311,88 @@ void CSCToCSR::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_CSC_TO_CSR_VALUE
 
   throw std::runtime_error("csc_tocsr unsupported value dtype.");
+}
+
+std::vector<mx::array> CSCToCSR::jvp(const std::vector<mx::array> &primals,
+                                     const std::vector<mx::array> &tangents,
+                                     const std::vector<int> &argnums) {
+  if (argnums.empty()) {
+    throw std::runtime_error("CSCToCSR JVP requires a value tangent.");
+  }
+  require_sparse_value_autodiff_arg(argnums[0], "CSCToCSR", "JVP");
+  auto first_tangent = csc_tocsr(tangents[0], primals[1], primals[2], n_rows_,
+                                 n_cols_, stream());
+  auto data_tangent = std::get<0>(first_tangent);
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    if (i == 0) {
+      continue;
+    }
+    require_sparse_value_autodiff_arg(argnums[i], "CSCToCSR", "JVP");
+    auto tangent_outputs = csc_tocsr(tangents[i], primals[1], primals[2],
+                                     n_rows_, n_cols_, stream());
+    auto tangent_data = std::get<0>(tangent_outputs);
+    data_tangent = mx::add(data_tangent, tangent_data, stream());
+  }
+  return {data_tangent,
+          mx::zeros(mx::Shape{static_cast<int>(primals[1].size())},
+                    primals[1].dtype(), stream()),
+          mx::zeros(mx::Shape{n_rows_ + 1}, primals[2].dtype(), stream())};
+}
+
+std::vector<mx::array> CSCToCSR::vjp(const std::vector<mx::array> &primals,
+                                     const std::vector<mx::array> &cotangents,
+                                     const std::vector<int> &argnums,
+                                     const std::vector<mx::array> &outputs) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    require_sparse_value_autodiff_arg(argnum, "CSCToCSR", "VJP");
+    vjps.push_back(mx::array(
+        mx::Shape{static_cast<int>(primals[0].size())}, primals[0].dtype(),
+        std::make_shared<CSCToCSRDataVJP>(stream(), n_rows_, n_cols_),
+        {mx::contiguous(cotangents[0], false, stream()),
+         mx::contiguous(primals[1], false, stream()),
+         mx::contiguous(primals[2], false, stream()),
+         mx::contiguous(outputs[1], false, stream()),
+         mx::contiguous(outputs[2], false, stream())}));
+  }
+  return vjps;
+}
+
+void CSCToCSRDataVJP::eval_cpu(const std::vector<mx::array> &inputs,
+                               std::vector<mx::array> &outputs) {
+  auto &cotangent = inputs[0];
+  auto &indices = inputs[1];
+  auto &indptr = inputs[2];
+  auto &out_indices = inputs[3];
+  auto &out_indptr = inputs[4];
+
+  if (indices.dtype() != mx::int32 && indices.dtype() != mx::int64) {
+    throw std::runtime_error(
+        "csc_tocsr_data_vjp requires int32 or int64 indices.");
+  }
+
+#define DISPATCH_CSC_TO_CSR_DATA_VJP(DTYPE, TYPE)                              \
+  if (cotangent.dtype() == DTYPE) {                                            \
+    if (indices.dtype() == mx::int32) {                                        \
+      csc_tocsr_data_vjp_cpu_impl<TYPE, int32_t>(                              \
+          cotangent, indices, indptr, out_indices, out_indptr, outputs[0],     \
+          n_rows_, n_cols_, stream());                                         \
+    } else {                                                                   \
+      csc_tocsr_data_vjp_cpu_impl<TYPE, int64_t>(                              \
+          cotangent, indices, indptr, out_indices, out_indptr, outputs[0],     \
+          n_rows_, n_cols_, stream());                                         \
+    }                                                                          \
+    return;                                                                    \
+  }
+
+  DISPATCH_CSC_TO_CSR_DATA_VJP(mx::float32, float)
+  DISPATCH_CSC_TO_CSR_DATA_VJP(mx::float16, mx::float16_t)
+  DISPATCH_CSC_TO_CSR_DATA_VJP(mx::bfloat16, mx::bfloat16_t)
+  DISPATCH_CSC_TO_CSR_DATA_VJP(mx::complex64, mx::complex64_t)
+#undef DISPATCH_CSC_TO_CSR_DATA_VJP
+
+  throw std::runtime_error("csc_tocsr_data_vjp unsupported value dtype.");
 }
 
 #ifdef _METAL_
@@ -281,11 +475,51 @@ void CSCToCSR::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.add_temporary(std::move(counts));
   encoder.add_temporary(std::move(next));
 }
+
+void CSCToCSRDataVJP::eval_gpu(const std::vector<mx::array> &inputs,
+                               std::vector<mx::array> &outputs) {
+  auto &cotangent = inputs[0];
+  auto &indices = inputs[1];
+  auto &indptr = inputs[2];
+  auto &out_indices = inputs[3];
+  auto &out_indptr = inputs[4];
+  auto &out = outputs[0];
+
+  out.set_data(mx::allocator::malloc(out.nbytes()));
+
+  auto &s = stream();
+  auto &device = mx::metal::device(s.device);
+  auto *lib = device.get_library("mlx_sparse", current_binary_dir());
+  auto &encoder = mx::metal::get_command_encoder(s);
+
+  auto kernel_name = sparse_kernel_name("csc_tocsr_data_vjp", cotangent.dtype(),
+                                        indices.dtype());
+  auto *kernel = device.get_kernel(kernel_name, lib);
+  encoder.set_compute_pipeline_state(kernel);
+  encoder.set_input_array(cotangent, 0);
+  encoder.set_input_array(indices, 1);
+  encoder.set_input_array(indptr, 2);
+  encoder.set_input_array(out_indices, 3);
+  encoder.set_input_array(out_indptr, 4);
+  encoder.set_output_array(out, 5);
+  encoder.set_bytes(n_rows_, 6);
+  encoder.set_bytes(n_cols_, 7);
+
+  auto threads = static_cast<size_t>(std::max(n_cols_, 1));
+  auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
+  encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+}
 #else
 void CSCToCSR::eval_gpu(const std::vector<mx::array> &,
                         std::vector<mx::array> &) {
   throw std::runtime_error(
       "csc_tocsr has no GPU implementation in this build.");
+}
+
+void CSCToCSRDataVJP::eval_gpu(const std::vector<mx::array> &,
+                               std::vector<mx::array> &) {
+  throw std::runtime_error(
+      "csc_tocsr_data_vjp has no GPU implementation in this build.");
 }
 #endif
 

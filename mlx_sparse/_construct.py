@@ -75,12 +75,34 @@ def _infer_value_dtype_from_numpy(array: np.ndarray):
     return mx.float32
 
 
-def _infer_diagonal_dtype(diagonal_arrays: Sequence[np.ndarray]):
-    if any(np.iscomplexobj(diag) for diag in diagonal_arrays):
+def _infer_diagonal_array_dtype(diag):
+    if isinstance(diag, mx.array):
+        return _infer_dense_constructor_dtype(diag)
+    diag_np = np.asarray(diag)
+    if np.iscomplexobj(diag_np):
         return mx.complex64
-    if any(diag.dtype == np.float16 for diag in diagonal_arrays):
+    if diag_np.dtype == np.float16:
         return mx.float16
     return mx.float32
+
+
+def _infer_diagonal_dtype(diagonal_arrays: Sequence[object]):
+    inferred = None
+    for diag in diagonal_arrays:
+        inferred = _promote_constructor_dtype(
+            inferred, _infer_diagonal_array_dtype(diag)
+        )
+    return inferred if inferred is not None else mx.float32
+
+
+def _diagonal_size(diag) -> int:
+    return int(diag.size if isinstance(diag, mx.array) else np.asarray(diag).size)
+
+
+def _diagonal_to_mx(diag, *, dtype):
+    if isinstance(diag, mx.array):
+        return diag.astype(dtype) if diag.dtype != dtype else diag
+    return to_mx(np.asarray(diag), dtype=dtype)
 
 
 def _normalize_index_dtype(index_dtype):
@@ -391,7 +413,7 @@ def _validate_block_grid(
 
 
 def _csr_from_sorted_triplets(
-    data: np.ndarray,
+    data,
     row: np.ndarray,
     col: np.ndarray,
     shape: Shape2D,
@@ -406,7 +428,7 @@ def _csr_from_sorted_triplets(
         indptr[1:] = np.cumsum(counts, dtype=index_np_dtype)
 
     return CSRArray(
-        data=to_mx(data, dtype=dtype),
+        data=_diagonal_to_mx(data, dtype=dtype),
         indices=to_mx(col.astype(index_np_dtype, copy=False), dtype=index_dtype),
         indptr=to_mx(indptr, dtype=index_dtype),
         shape=shape,
@@ -535,21 +557,41 @@ def identity(
     return csr.tocsc(canonical=True)
 
 
-def _as_diagonal_sequence(diagonals) -> list[np.ndarray]:
+def _as_diagonal_sequence(diagonals) -> list[object]:
     if isinstance(diagonals, mx.array):
         if diagonals.ndim == 0:
-            return [np.asarray([to_numpy(diagonals).item()])]
+            return [mx.reshape(diagonals, (1,))]
         if diagonals.ndim == 1:
-            return [to_numpy(diagonals)]
+            return [diagonals]
         if diagonals.ndim == 2:
-            return [row for row in to_numpy(diagonals)]
+            return [diagonals[i] for i in range(diagonals.shape[0])]
     if np.isscalar(diagonals):
         return [np.asarray([diagonals])]
+    if isinstance(diagonals, np.ndarray):
+        if diagonals.ndim == 0:
+            return [diagonals.reshape(1)]
+        if diagonals.ndim == 1:
+            return [diagonals]
+        if diagonals.ndim == 2:
+            return [row for row in diagonals]
     if isinstance(diagonals, Sequence):
         if not diagonals:
             return []
         first = diagonals[0]
         if np.isscalar(first) or isinstance(first, mx.array) and first.ndim == 0:
+            if any(isinstance(d, mx.array) for d in diagonals):
+                parts = []
+                for d in diagonals:
+                    if isinstance(d, mx.array):
+                        if d.ndim != 0:
+                            raise ValueError(
+                                "diags scalar diagonal sequences cannot mix "
+                                "scalar and non-scalar MLX arrays."
+                            )
+                        parts.append(mx.reshape(d, (1,)))
+                    else:
+                        parts.append(mx.array([d]))
+                return [mx.concatenate(parts, axis=0)]
             return [
                 np.asarray(
                     [
@@ -558,9 +600,7 @@ def _as_diagonal_sequence(diagonals) -> list[np.ndarray]:
                     ]
                 )
             ]
-        return [
-            to_numpy(d) if isinstance(d, mx.array) else np.asarray(d) for d in diagonals
-        ]
+        return [d if isinstance(d, mx.array) else np.asarray(d) for d in diagonals]
     return [np.asarray(diagonals)]
 
 
@@ -578,7 +618,9 @@ def diags(
     :class:`~mlx_sparse.CSRArray`. Each diagonal is placed at the position
     specified by the corresponding offset. Diagonals are assembled into a COO
     triple and sorted before the CSR row-pointer array is built, so the result
-    is always in canonical form.
+    is always in canonical form. When diagonal values are MLX arrays, the fixed
+    diagonal topology is assembled without converting those values to NumPy, so
+    ``mx.jvp`` and ``mx.vjp`` propagate sparse-value tangents and cotangents.
 
     Args:
         diagonals: The diagonal values. Accepted forms:
@@ -651,7 +693,7 @@ def diags(
     if shape is None:
         dim = 0
         for diag, offset in zip(diagonal_arrays, offsets_array, strict=True):
-            dim = max(dim, int(diag.size) + abs(int(offset)))
+            dim = max(dim, _diagonal_size(diag) + abs(int(offset)))
         shape_2d = (dim, dim)
     else:
         shape_2d = normalize_shape(shape)
@@ -664,31 +706,35 @@ def diags(
         row_start = max(0, -offset)
         col_start = max(0, offset)
         capacity = max(0, min(shape_2d[0] - row_start, shape_2d[1] - col_start))
-        if diag.size > capacity:
+        diag_size = _diagonal_size(diag)
+        if diag_size > capacity:
             raise ValueError(
-                f"diagonal at offset {offset} has length {diag.size}, "
+                f"diagonal at offset {offset} has length {diag_size}, "
                 f"but shape {shape_2d} can hold at most {capacity} values."
             )
-        nnz = int(diag.size)
+        nnz = int(diag_size)
         if nnz == 0:
             continue
         positions = np.arange(nnz, dtype=index_np_dtype)
         row_parts.append(row_start + positions)
         col_parts.append(col_start + positions)
-        data_parts.append(np.asarray(diag))
+        data_parts.append(_diagonal_to_mx(diag, dtype=dtype))
 
     if data_parts:
         row = np.concatenate(row_parts).astype(index_np_dtype, copy=False)
         col = np.concatenate(col_parts).astype(index_np_dtype, copy=False)
-        data = np.concatenate(data_parts)
+        if len(data_parts) == 1:
+            data = data_parts[0]
+        else:
+            data = mx.concatenate(data_parts, axis=0)
         order = np.lexsort((col, row))
         row = row[order]
         col = col[order]
-        data = data[order]
+        data = mx.take(data, to_mx(order.astype(index_np_dtype), dtype=index_dtype))
     else:
         row = np.empty((0,), dtype=index_np_dtype)
         col = np.empty((0,), dtype=index_np_dtype)
-        data = np.empty((0,), dtype=np.float32)
+        data = mx.zeros((0,), dtype=dtype)
 
     return _csr_from_sorted_triplets(
         data,
@@ -713,6 +759,9 @@ def fromdense(
     packages them into a :class:`~mlx_sparse.CSRArray`. The native path stages
     this as count, allocate, then fill work so Metal builds can perform the
     dense scan and CSR writes on device while still returning compact buffers.
+    Because the output sparse topology depends on numerical values and the
+    threshold, ``fromdense`` is intentionally not differentiable; use fixed-
+    topology constructors when sparse values need gradients.
 
     The value dtype is preserved from the input array. Index dtype defaults to
     ``int32`` and can be overridden for matrices with more than ~2 billion
@@ -1312,6 +1361,8 @@ def tril(A, k=0, format=None):
 
     ``format=None`` defaults to COO, matching SciPy's triangular extraction
     default. CSR and CSC requests are returned in the requested sparse format.
+    Triangular extraction compacts sparse structure based on coordinates and is
+    intentionally forward-only under MLX autodiff in v0.0.6b0.
     """
     return _triangular(A, k=k, format=format, upper=False)
 
@@ -1320,7 +1371,8 @@ def triu(A, k=0, format=None):
     """Return the upper triangular portion of a sparse or dense matrix.
 
     Elements with ``column - row >= k`` are retained. See :func:`tril` for
-    input handling, native compaction details, and format semantics.
+    input handling, native compaction details, format semantics, and autodiff
+    limitations.
     """
     return _triangular(A, k=k, format=format, upper=True)
 

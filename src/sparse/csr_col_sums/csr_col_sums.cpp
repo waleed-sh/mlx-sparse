@@ -21,11 +21,13 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/autodiff.h"
 #include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
 #include "mlx/primitives.h"
+#include "sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.h"
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
@@ -44,6 +46,15 @@ public:
                 std::vector<mx::array> &outputs) override;
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "CSRColSums"; }
 
@@ -195,6 +206,41 @@ void CSRColSums::eval_cpu(const std::vector<mx::array> &inputs,
   throw std::runtime_error("csr_col_sums unsupported value dtype.");
 }
 
+std::vector<mx::array> CSRColSums::jvp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &tangents,
+                                       const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    require_sparse_value_autodiff_arg(argnums[i], "CSRColSums", "JVP");
+    terms.push_back(csr_col_sums(tangents[i], primals[1], primals[2], n_rows_,
+                                 n_cols_, stream()));
+  }
+  if (terms.empty()) {
+    throw std::runtime_error("CSRColSums JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array> CSRColSums::vjp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &cotangents,
+                                       const std::vector<int> &argnums,
+                                       const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  auto ones = mx::ones(mx::Shape{n_rows_}, primals[0].dtype(), stream());
+  for (int argnum : argnums) {
+    require_sparse_value_autodiff_arg(argnum, "CSRColSums", "VJP");
+    vjps.push_back(csr_matvec_data_vjp(primals[1], primals[2], cotangents[0],
+                                       ones, n_rows_, n_cols_, stream()));
+  }
+  return vjps;
+}
+
 #ifdef _METAL_
 void CSRColSums::eval_gpu(const std::vector<mx::array> &inputs,
                           std::vector<mx::array> &outputs) {
@@ -210,7 +256,10 @@ void CSRColSums::eval_gpu(const std::vector<mx::array> &inputs,
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
 
   auto &encoder = mx::metal::get_command_encoder(s);
-  auto *zero_kernel = device.get_kernel("csr_col_sums_zero_float32", lib);
+  auto *zero_kernel = device.get_kernel(data.dtype() == mx::complex64
+                                            ? "csr_col_sums_zero_complex64"
+                                            : "csr_col_sums_zero_float32",
+                                        lib);
   encoder.set_compute_pipeline_state(zero_kernel);
   encoder.set_output_array(out, 0);
   encoder.set_bytes(n_cols_, 1);
@@ -220,8 +269,12 @@ void CSRColSums::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.dispatch_threads(MTL::Size(zero_threads, 1, 1),
                            MTL::Size(zero_group, 1, 1));
 
-  auto atomic_kernel_name = std::string("csr_col_sums_atomic_") +
-                            index_kernel_suffix(indices.dtype());
+  auto atomic_kernel_name =
+      data.dtype() == mx::complex64
+          ? std::string("csr_col_sums_atomic_complex64_") +
+                index_kernel_suffix(indices.dtype())
+          : std::string("csr_col_sums_atomic_") +
+                index_kernel_suffix(indices.dtype());
   auto *kernel = device.get_kernel(atomic_kernel_name, lib);
   encoder.set_compute_pipeline_state(kernel);
   encoder.set_input_array(data, 0);
@@ -253,7 +306,8 @@ mx::array csr_col_sums(const mx::array &data, const mx::array &indices,
   auto indices_contig = mx::contiguous(indices, false, stream);
   auto indptr_contig = mx::contiguous(indptr, false, stream);
 
-  if (stream.device == mx::Device::gpu && data.dtype() != mx::float32) {
+  if (stream.device == mx::Device::gpu && data.dtype() != mx::float32 &&
+      data.dtype() != mx::complex64) {
     auto [transpose_data, transpose_indices, transpose_indptr] = csr_transpose(
         data_contig, indices_contig, indptr_contig, n_rows, n_cols, stream);
     return csr_row_sums(transpose_data, transpose_indices, transpose_indptr,
