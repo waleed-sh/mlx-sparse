@@ -63,6 +63,21 @@ Improvements
   documented v0.0.6b0 limitation because the current batched kernels share one
   sparse value buffer and batch only dense RHS arrays.
 
+* Added sparse-value JVP/VJP coverage for fixed-topology materialization,
+  reductions, and constructors. ``todense`` for COO/CSR/CSC samples dense
+  cotangents at stored coordinates, ``row_sums`` / ``col_sums`` /
+  ``diagonal`` / ``trace`` propagate value tangents and cotangents natively,
+  and fixed-topology ``diags`` / ``kron`` / block and stack assembly preserve
+  sparse-value gradients. Dynamic-topology paths such as ``fromdense``,
+  duplicate-summing canonicalization, sparse-sparse products, and
+  ``tril`` / ``triu`` compaction now document or raise precise autodiff
+  limitation errors. Row/column norm gradients remain deferred pending an
+  explicit zero-norm and complex-norm policy. Fixed-topology ``COO -> CSR`` and
+  ``CSC -> CSR`` conversions now carry sparse-value JVP/VJP through their data
+  permutation, and COO/CSR/CSC complex row and column sums use direct Metal
+  component atomics or segmented kernels instead of detouring through temporary
+  format conversions.
+
 * Allow for right multiply, in addition to the existing left multiply, of sparse matrices by numbers.
 
 

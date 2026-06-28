@@ -21,6 +21,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/autodiff.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -43,6 +44,15 @@ public:
                 std::vector<mx::array> &outputs) override;
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "COODiagonal"; }
 
@@ -149,6 +159,43 @@ void COODiagonal::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_COO_DIAGONAL
 
   throw std::runtime_error("coo_diagonal unsupported value dtype.");
+}
+
+std::vector<mx::array> COODiagonal::jvp(const std::vector<mx::array> &primals,
+                                        const std::vector<mx::array> &tangents,
+                                        const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    require_sparse_value_autodiff_arg(argnums[i], "COODiagonal", "JVP");
+    terms.push_back(coo_diagonal(tangents[i], primals[1], primals[2], n_rows_,
+                                 n_cols_, stream()));
+  }
+  if (terms.empty()) {
+    throw std::runtime_error("COODiagonal JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array>
+COODiagonal::vjp(const std::vector<mx::array> &primals,
+                 const std::vector<mx::array> &cotangents,
+                 const std::vector<int> &argnums,
+                 const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  const int diag_size = std::min(n_rows_, n_cols_);
+  for (int argnum : argnums) {
+    require_sparse_value_autodiff_arg(argnum, "COODiagonal", "VJP");
+    vjps.push_back(sparse_diagonal_cotangent_gather(cotangents[0], primals[1],
+                                                    primals[2], primals[0],
+                                                    diag_size, stream()));
+  }
+  return vjps;
 }
 
 #ifdef _METAL_

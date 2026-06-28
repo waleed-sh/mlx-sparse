@@ -166,7 +166,8 @@ Conversions and structural operations
        entries.
    * - ``COOArray.todense()``
      - Done
-     - Via ``tocsr().todense()``.
+     - Native coordinate materialization (CPU and Metal). Sums duplicate
+       coordinate entries.
    * - ``ms.todense(array)``
      - Done
      - Module-level dispatch helper.
@@ -292,12 +293,16 @@ Sparse reductions
        canonicalize first when duplicates may be present so the result matches
        dense semantics. Non-``float32`` canonical norm reductions on Metal use
        native COO-to-compressed conversion plus storage-aligned reductions to
-       avoid scatter-heavy atomic accumulation.
+       avoid scatter-heavy atomic accumulation. Sparse-value JVP/VJP is
+       supported for sums, diagonal, and trace, norms are forward-only in
+       v0.0.6b0.
    * - CSR reductions
      - Done
      - Native row/column sums, row norms, diagonal, and trace. Storage-aligned
        row reductions and long diagonal segments use threadgroup reductions on
-       Metal, large traces use a staged partial-reduction path.
+       Metal, large traces use a staged partial-reduction path. Sparse-value
+       JVP/VJP is supported for sums, diagonal, and trace, norms are
+       forward-only in v0.0.6b0.
    * - CSC reductions
      - Done
      - Native row/column sums, row/column L2 norms, diagonal, and trace.
@@ -305,6 +310,8 @@ Sparse reductions
        reductions and are the fast path for CSC. Non-``float32`` row norms on
        Metal lower through native CSC-to-CSR conversion and CSR row reductions,
        long diagonal segments and large traces use staged/vector reductions.
+       Sparse-value JVP/VJP is supported for sums, diagonal, and trace, norms
+       are forward-only in v0.0.6b0.
 
 .. _gpu-supported-linalg:
 
@@ -448,8 +455,26 @@ Automatic differentiation
      - Reuses forward ``csr_matmul``. CPU and Metal GPU.
    * - VJP/JVP w.r.t. sparse values (``data``)
      - Done
-     - Fixed-output data-gradient primitives for matvec and matmul on CPU and
-       Metal GPU.
+     - Fixed-output data-gradient primitives for matvec, matmul, batched
+       sparse-dense products, ``todense``, sums, diagonal, trace, ``diags``,
+       ``kron``, and block/stack constructors on CPU and Metal GPU.
+   * - VJP/JVP through ``todense``
+     - Done
+     - COO, CSR, and CSC sample dense cotangents at stored coordinates and
+       materialize tangent sparse values with the same topology.
+   * - VJP/JVP through sums, diagonal, and trace
+     - Done
+     - COO, CSR, and CSC support sparse-value gradients for ``row_sums``,
+       ``col_sums``, ``diagonal``, and ``trace``.
+   * - VJP/JVP through row/column norms
+     - Limited
+     - Forward native norms are available, but norm gradients are deferred
+       until zero-norm and complex-norm behavior is specified.
+   * - VJP/JVP through fixed-topology constructors
+     - Done
+     - ``diags``, ``kron`` COO data products, ``block_array``, ``bmat``,
+       ``block_diag``, ``vstack``, and ``hstack`` propagate sparse-value
+       tangents/cotangents when the sparse structure is fixed.
    * - Complex autodiff
      - Done
      - ``complex64`` VJP uses Hermitian adjoints and is tested against dense
@@ -469,6 +494,11 @@ Automatic differentiation
      - Not planned for v0.1
      - Output topology is data-dependent and returned as a sparse container.
        Fixed-output sparse-dense products are the differentiable path.
+   * - VJP/JVP through dynamic topology
+     - Not planned for v0.1
+     - ``fromdense``, random structure sampling, duplicate-summing
+       canonicalization, sparse-sparse products, and ``tril`` / ``triu``
+       compaction raise explicit limitation errors under autodiff.
    * - ``vmap`` over sparse values or structure
      - Limited
      - Sparse buffers must be unmapped. Fixed-topology sparse ``data`` batches

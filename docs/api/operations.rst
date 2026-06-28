@@ -142,6 +142,10 @@ values, ``row_norms`` / ``col_norms`` return ``float32``, and ``diagonal`` /
 COO and CSC reductions are native C++/Metal paths. Norm reductions use dense
 matrix semantics, so non-canonical COO/CSC inputs are canonicalized before
 norming to ensure duplicate coordinates are summed before the square is taken.
+Sparse-value JVP/VJP is implemented for ``row_sums``, ``col_sums``,
+``diagonal``, and ``trace`` on COO, CSR, and CSC. Row/column norms are
+forward-only in v0.0.6b0 while zero-norm and complex-norm gradient behavior is
+specified.
 
 todense
 -------
@@ -257,8 +261,8 @@ canonicalization. The native COO kernel writes ``nnz_A * nnz_B`` values and
 coordinates directly on CPU or Metal without dense masks and without Python
 loops over stored entries. Sparse-value JVP/VJP is implemented for the COO data
 product when input structures are fixed. Gradients through integer structural
-buffers, dense-to-sparse extraction, and duplicate-summing canonicalization are
-unsupported.
+buffers, dense-to-sparse extraction, duplicate-summing canonicalization, and
+structural triangular compaction are unsupported.
 
 ``coo_matvec`` / ``coo_matmul`` are native coordinate scatter products. On
 Metal, ``float32`` uses atomic scatter-add over stored coordinates, other

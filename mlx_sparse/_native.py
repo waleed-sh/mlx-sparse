@@ -164,6 +164,18 @@ def csc_todense(
     return ext.csc_todense(data, indices, indptr, shape[0], shape[1])
 
 
+def coo_todense(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+) -> mx.array:
+    ext = extension()
+    if ext is None:
+        return _fallback.coo_todense(data, row, col, shape)
+    return ext.coo_todense(data, row, col, shape[0], shape[1])
+
+
 def csr_matvec(
     data: mx.array,
     indices: mx.array,

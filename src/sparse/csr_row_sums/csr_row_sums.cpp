@@ -18,11 +18,13 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/autodiff.h"
 #include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
 #include "mlx/primitives.h"
+#include "sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.h"
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
@@ -44,6 +46,15 @@ public:
                 std::vector<mx::array> &outputs) override;
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "CSRRowSums"; }
 
@@ -124,7 +135,7 @@ void validate_csr_reduction_inputs(const mx::array &data,
 void CSRRowSums::eval_cpu(const std::vector<mx::array> &inputs,
                           std::vector<mx::array> &outputs) {
   auto &data = inputs[0];
-  auto &indptr = inputs[1];
+  auto &indptr = inputs[2];
 
 #define DISPATCH_CSR_ROW_SUMS(DTYPE, TYPE)                                     \
   if (data.dtype() == DTYPE) {                                                 \
@@ -147,11 +158,47 @@ void CSRRowSums::eval_cpu(const std::vector<mx::array> &inputs,
   throw std::runtime_error("csr_row_sums unsupported value dtype.");
 }
 
+std::vector<mx::array> CSRRowSums::jvp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &tangents,
+                                       const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    require_sparse_value_autodiff_arg(argnums[i], "CSRRowSums", "JVP");
+    terms.push_back(csr_row_sums(tangents[i], primals[1], primals[2], n_rows_,
+                                 n_cols_, stream()));
+  }
+  if (terms.empty()) {
+    throw std::runtime_error("CSRRowSums JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array> CSRRowSums::vjp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &cotangents,
+                                       const std::vector<int> &argnums,
+                                       const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  auto ones = mx::ones(mx::Shape{n_cols_}, primals[0].dtype(), stream());
+  for (int argnum : argnums) {
+    require_sparse_value_autodiff_arg(argnum, "CSRRowSums", "VJP");
+    vjps.push_back(csr_matvec_data_vjp(primals[1], primals[2], ones,
+                                       cotangents[0], n_rows_, n_cols_,
+                                       stream()));
+  }
+  return vjps;
+}
+
 #ifdef _METAL_
 void CSRRowSums::eval_gpu(const std::vector<mx::array> &inputs,
                           std::vector<mx::array> &outputs) {
   auto &data = inputs[0];
-  auto &indptr = inputs[1];
+  auto &indptr = inputs[2];
   auto &out = outputs[0];
 
   out.set_data(mx::allocator::malloc(out.nbytes()));
@@ -200,11 +247,12 @@ mx::array csr_row_sums(const mx::array &data, const mx::array &indices,
 
   auto stream = mx::to_stream(s);
   auto data_contig = mx::contiguous(data, false, stream);
+  auto indices_contig = mx::contiguous(indices, false, stream);
   auto indptr_contig = mx::contiguous(indptr, false, stream);
 
   return mx::array(mx::Shape{n_rows}, data.dtype(),
                    std::make_shared<CSRRowSums>(stream, n_rows, n_cols),
-                   {data_contig, indptr_contig});
+                   {data_contig, indices_contig, indptr_contig});
 }
 
 } // namespace mlx_sparse

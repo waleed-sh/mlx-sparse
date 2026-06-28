@@ -62,6 +62,47 @@ template <typename I>
   }
 }
 
+template <typename T, typename I>
+[[kernel]] void coo_tocsr_data_vjp_kernel(
+    device const T *cotangent [[buffer(0)]], device const I *row [[buffer(1)]],
+    device const I *col [[buffer(2)]],
+    device const I *out_indices [[buffer(3)]],
+    device const I *out_indptr [[buffer(4)]], device T *out [[buffer(5)]],
+    constant int &nnz [[buffer(6)]], constant int &n_rows [[buffer(7)]],
+    uint tid [[thread_position_in_grid]]) {
+  if (tid >= static_cast<uint>(nnz)) {
+    return;
+  }
+
+  const I r = row[tid];
+  const I c = col[tid];
+  if (r < I(0) || static_cast<int>(r) >= n_rows) {
+    out[tid] = T(0);
+    return;
+  }
+
+  int duplicate_ordinal = 0;
+  for (uint q = 0; q < tid; ++q) {
+    if (row[q] == r && col[q] == c) {
+      duplicate_ordinal += 1;
+    }
+  }
+
+  int seen = 0;
+  T value = T(0);
+  for (I dst = out_indptr[r]; dst < out_indptr[r + I(1)]; ++dst) {
+    if (out_indices[dst] != c) {
+      continue;
+    }
+    if (seen == duplicate_ordinal) {
+      value = cotangent[dst];
+      break;
+    }
+    seen += 1;
+  }
+  out[tid] = value;
+}
+
 #define INSTANTIATE_COO_TOCSR_RANK(NAME, T, I)                                 \
   template [[host_name("coo_tocsr_rank_" #NAME)]] [[kernel]] void              \
   coo_tocsr_rank_kernel<T, I>(device const T *, device const I *,              \
@@ -85,3 +126,20 @@ coo_tocsr_indptr_kernel<int>(device const int *, device int *, constant int &,
 template [[host_name("coo_tocsr_indptr_int64")]] [[kernel]] void
 coo_tocsr_indptr_kernel<long>(device const long *, device long *,
                               constant int &, constant int &, uint);
+
+#define INSTANTIATE_COO_TOCSR_DATA_VJP(NAME, T, I)                             \
+  template [[host_name("coo_tocsr_data_vjp_" #NAME)]] [[kernel]] void          \
+  coo_tocsr_data_vjp_kernel<T, I>(                                             \
+      device const T *, device const I *, device const I *, device const I *,  \
+      device const I *, device T *, constant int &, constant int &, uint)
+
+INSTANTIATE_COO_TOCSR_DATA_VJP(float32_int32, float, int);
+INSTANTIATE_COO_TOCSR_DATA_VJP(float32_int64, float, long);
+INSTANTIATE_COO_TOCSR_DATA_VJP(float16_int32, half, int);
+INSTANTIATE_COO_TOCSR_DATA_VJP(float16_int64, half, long);
+INSTANTIATE_COO_TOCSR_DATA_VJP(bfloat16_int32, bfloat16_t, int);
+INSTANTIATE_COO_TOCSR_DATA_VJP(bfloat16_int64, bfloat16_t, long);
+INSTANTIATE_COO_TOCSR_DATA_VJP(complex64_int32, complex64_t, int);
+INSTANTIATE_COO_TOCSR_DATA_VJP(complex64_int64, complex64_t, long);
+
+#undef INSTANTIATE_COO_TOCSR_DATA_VJP

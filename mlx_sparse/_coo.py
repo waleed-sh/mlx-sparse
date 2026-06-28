@@ -175,14 +175,14 @@ class COOArray:
     def todense(self) -> mx.array:
         """Materialize as a dense MLX array.
 
-        Internally converts to CSR and then calls
-        :meth:`~CSRArray.todense`. Duplicate entries are summed.
+        Duplicate entries are summed at their dense coordinates by the native
+        COO materialization primitive.
 
         Returns:
             Dense array of shape ``(n_rows, n_cols)`` with the same dtype as
             ``self.data``.
         """
-        return self.tocsr(canonical=False).todense()
+        return _native.coo_todense(self.data, self.row, self.col, self.shape)
 
     def row_sums(self) -> mx.array:
         """Return the sum of stored values in each COO row."""

@@ -18,11 +18,13 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/autodiff.h"
 #include "common/cpu_parallel.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
 #include "mlx/primitives.h"
+#include "sparse/csc_matmul_data_vjp/csc_matmul_data_vjp.h"
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
@@ -44,6 +46,15 @@ public:
                 std::vector<mx::array> &outputs) override;
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &) override;
 
   const char *name() const override { return "CSCColSums"; }
 
@@ -145,6 +156,42 @@ void CSCColSums::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_CSC_COL_SUMS
 
   throw std::runtime_error("csc_col_sums unsupported value dtype.");
+}
+
+std::vector<mx::array> CSCColSums::jvp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &tangents,
+                                       const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    require_sparse_value_autodiff_arg(argnums[i], "CSCColSums", "JVP");
+    terms.push_back(csc_col_sums(tangents[i], primals[1], primals[2], n_rows_,
+                                 n_cols_, stream()));
+  }
+  if (terms.empty()) {
+    throw std::runtime_error("CSCColSums JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array> CSCColSums::vjp(const std::vector<mx::array> &primals,
+                                       const std::vector<mx::array> &cotangents,
+                                       const std::vector<int> &argnums,
+                                       const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  auto rhs = mx::reshape(cotangents[0], mx::Shape{n_cols_, 1}, stream());
+  auto ones = mx::ones(mx::Shape{n_rows_, 1}, primals[0].dtype(), stream());
+  for (int argnum : argnums) {
+    require_sparse_value_autodiff_arg(argnum, "CSCColSums", "VJP");
+    vjps.push_back(csc_matmul_data_vjp(primals[1], primals[2], rhs, ones,
+                                       n_rows_, n_cols_, stream()));
+  }
+  return vjps;
 }
 
 #ifdef _METAL_

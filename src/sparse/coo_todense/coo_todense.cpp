@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sparse/csr_todense/csr_todense.h"
+#include "sparse/coo_todense/coo_todense.h"
 
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "common/autodiff.h"
@@ -26,7 +27,6 @@
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
 #include "mlx/primitives.h"
-#include "sparse/csr_tocoo/csr_tocoo.h"
 
 #ifdef _METAL_
 #include "mlx/backend/metal/device.h"
@@ -36,14 +36,13 @@ namespace mlx_sparse {
 
 namespace {
 
-class CSRToDense : public mx::Primitive {
+class COOToDense : public mx::Primitive {
 public:
-  CSRToDense(mx::Stream stream, int n_rows, int n_cols)
+  COOToDense(mx::Stream stream, int n_rows, int n_cols)
       : Primitive(stream), n_rows_(n_rows), n_cols_(n_cols) {}
 
   void eval_cpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
-
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
 
@@ -56,10 +55,10 @@ public:
                              const std::vector<int> &argnums,
                              const std::vector<mx::array> &) override;
 
-  const char *name() const override { return "CSRToDense"; }
+  const char *name() const override { return "COOToDense"; }
 
   bool is_equivalent(const mx::Primitive &other) const override {
-    const auto &rhs = static_cast<const CSRToDense &>(other);
+    const auto &rhs = static_cast<const COOToDense &>(other);
     return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_;
   }
 
@@ -69,108 +68,129 @@ private:
 };
 
 template <typename T, typename I>
-void csr_todense_cpu_impl(const mx::array &data, const mx::array &indices,
-                          const mx::array &indptr, mx::array &out, int n_rows,
+void coo_todense_cpu_impl(const mx::array &data, const mx::array &row,
+                          const mx::array &col, mx::array &out, int n_rows,
                           int n_cols, mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
   encoder.set_input_array(data);
-  encoder.set_input_array(indices);
-  encoder.set_input_array(indptr);
+  encoder.set_input_array(row);
+  encoder.set_input_array(col);
   encoder.set_output_array(out);
 
   encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
-                    indices = mx::array::unsafe_weak_copy(indices),
-                    indptr = mx::array::unsafe_weak_copy(indptr),
+                    row = mx::array::unsafe_weak_copy(row),
+                    col = mx::array::unsafe_weak_copy(col),
                     out = mx::array::unsafe_weak_copy(out), n_rows,
                     n_cols]() mutable {
+    using AccT = typename Accumulator<T>::Type;
     const auto *data_ptr = data.data<T>();
-    const auto *indices_ptr = indices.data<I>();
-    const auto *indptr_ptr = indptr.data<I>();
+    const auto *row_ptr = row.data<I>();
+    const auto *col_ptr = col.data<I>();
     auto *out_ptr = out.data<T>();
 
     const int workers = configured_cpu_worker_count();
     if (workers > 1 &&
         out.size() <= static_cast<size_t>(std::numeric_limits<int>::max())) {
-      const auto fill_ranges =
-          equal_cpu_ranges(static_cast<int>(out.size()), workers);
-      parallel_for_cpu_ranges(fill_ranges, [&](CpuRange range) {
-        std::fill(out_ptr + range.begin, out_ptr + range.end, T{0});
-      });
+      parallel_for_cpu_ranges(
+          equal_cpu_ranges(static_cast<int>(out.size()), workers),
+          [&](CpuRange range) {
+            std::fill(out_ptr + range.begin, out_ptr + range.end, T{});
+          });
     } else {
-      std::fill(out_ptr, out_ptr + out.size(), T{0});
+      std::fill(out_ptr, out_ptr + out.size(), T{});
     }
 
-    auto fill_rows = [&](CpuRange range) {
-      for (int row = range.begin; row < range.end; ++row) {
-        for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
-          const auto col = static_cast<int>(indices_ptr[p]);
-          out_ptr[static_cast<size_t>(row) * n_cols + col] += data_ptr[p];
-        }
+    const int nnz = static_cast<int>(data.size());
+    if constexpr (std::is_same_v<AccT, T>) {
+      for (int p = 0; p < nnz; ++p) {
+        out_ptr[static_cast<size_t>(row_ptr[p]) * n_cols + col_ptr[p]] +=
+            data_ptr[p];
       }
-    };
-
-    if (workers <= 1 || n_rows <= 0) {
-      fill_rows({0, n_rows});
-      return;
+    } else {
+      std::vector<AccT> accum(out.size(), Accumulator<T>::zero());
+      auto fill_range = [&](CpuRange range) {
+        for (int p = range.begin; p < range.end; ++p) {
+          accum[static_cast<size_t>(row_ptr[p]) * n_cols + col_ptr[p]] +=
+              static_cast<AccT>(data_ptr[p]);
+        }
+      };
+      if (workers <= 1 || nnz <= 0) {
+        fill_range({0, nnz});
+      } else {
+        fill_range({0, nnz});
+      }
+      for (size_t i = 0; i < out.size(); ++i) {
+        out_ptr[i] = Accumulator<T>::cast(accum[i]);
+      }
     }
-    const auto row_ranges =
-        cpu_ranges_for_compressed_segments(indptr_ptr, n_rows, workers);
-    if (row_ranges.size() <= 1) {
-      fill_rows({0, n_rows});
-      return;
-    }
-    parallel_for_cpu_ranges(row_ranges, fill_rows);
   });
+}
+
+void validate_coo_todense_inputs(const mx::array &data, const mx::array &row,
+                                 const mx::array &col, int n_rows, int n_cols) {
+  if (n_rows < 0 || n_cols < 0) {
+    throw std::invalid_argument(
+        "coo_todense shape dimensions must be non-negative.");
+  }
+  require_rank(data, 1, "coo_todense data");
+  require_rank(row, 1, "coo_todense row");
+  require_rank(col, 1, "coo_todense col");
+  require_supported_value_dtype(data, "coo_todense data");
+  require_same_index_dtype(row, col, "coo_todense row", "coo_todense col");
+  if (row.size() != data.size() || col.size() != data.size()) {
+    throw std::invalid_argument(
+        "coo_todense data, row, and col must have equal length.");
+  }
 }
 
 } // namespace
 
-void CSRToDense::eval_cpu(const std::vector<mx::array> &inputs,
+void COOToDense::eval_cpu(const std::vector<mx::array> &inputs,
                           std::vector<mx::array> &outputs) {
   auto &data = inputs[0];
-  auto &indices = inputs[1];
-  auto &indptr = inputs[2];
+  auto &row = inputs[1];
+  auto &col = inputs[2];
   auto &out = outputs[0];
 
-  if (indices.dtype() != mx::int32 && indices.dtype() != mx::int64) {
-    throw std::runtime_error("csr_todense requires int32 or int64 indices.");
+  if (row.dtype() != mx::int32 && row.dtype() != mx::int64) {
+    throw std::runtime_error("coo_todense requires int32 or int64 indices.");
   }
 
-#define DISPATCH_CSR_TODENSE_VALUE(DTYPE, TYPE)                                \
+#define DISPATCH_COO_TODENSE(DTYPE, TYPE)                                      \
   if (data.dtype() == DTYPE) {                                                 \
-    if (indices.dtype() == mx::int32) {                                        \
-      csr_todense_cpu_impl<TYPE, int32_t>(data, indices, indptr, out, n_rows_, \
+    if (row.dtype() == mx::int32) {                                            \
+      coo_todense_cpu_impl<TYPE, int32_t>(data, row, col, out, n_rows_,        \
                                           n_cols_, stream());                  \
     } else {                                                                   \
-      csr_todense_cpu_impl<TYPE, int64_t>(data, indices, indptr, out, n_rows_, \
+      coo_todense_cpu_impl<TYPE, int64_t>(data, row, col, out, n_rows_,        \
                                           n_cols_, stream());                  \
     }                                                                          \
     return;                                                                    \
   }
 
-  DISPATCH_CSR_TODENSE_VALUE(mx::float32, float)
-  DISPATCH_CSR_TODENSE_VALUE(mx::float16, mx::float16_t)
-  DISPATCH_CSR_TODENSE_VALUE(mx::bfloat16, mx::bfloat16_t)
-  DISPATCH_CSR_TODENSE_VALUE(mx::complex64, mx::complex64_t)
-#undef DISPATCH_CSR_TODENSE_VALUE
+  DISPATCH_COO_TODENSE(mx::float32, float)
+  DISPATCH_COO_TODENSE(mx::float16, mx::float16_t)
+  DISPATCH_COO_TODENSE(mx::bfloat16, mx::bfloat16_t)
+  DISPATCH_COO_TODENSE(mx::complex64, mx::complex64_t)
+#undef DISPATCH_COO_TODENSE
 
-  throw std::runtime_error("csr_todense unsupported value dtype.");
+  throw std::runtime_error("coo_todense unsupported value dtype.");
 }
 
-std::vector<mx::array> CSRToDense::jvp(const std::vector<mx::array> &primals,
+std::vector<mx::array> COOToDense::jvp(const std::vector<mx::array> &primals,
                                        const std::vector<mx::array> &tangents,
                                        const std::vector<int> &argnums) {
   std::vector<mx::array> terms;
   terms.reserve(argnums.size());
   for (size_t i = 0; i < argnums.size(); ++i) {
-    require_sparse_value_autodiff_arg(argnums[i], "CSRToDense", "JVP");
-    terms.push_back(csr_todense(tangents[i], primals[1], primals[2], n_rows_,
+    require_sparse_value_autodiff_arg(argnums[i], "COOToDense", "JVP");
+    terms.push_back(coo_todense(tangents[i], primals[1], primals[2], n_rows_,
                                 n_cols_, stream()));
   }
   if (terms.empty()) {
-    throw std::runtime_error("CSRToDense JVP requires at least one tangent.");
+    throw std::runtime_error("COOToDense JVP requires at least one tangent.");
   }
   auto result = terms[0];
   for (size_t i = 1; i < terms.size(); ++i) {
@@ -179,28 +199,26 @@ std::vector<mx::array> CSRToDense::jvp(const std::vector<mx::array> &primals,
   return {result};
 }
 
-std::vector<mx::array> CSRToDense::vjp(const std::vector<mx::array> &primals,
+std::vector<mx::array> COOToDense::vjp(const std::vector<mx::array> &primals,
                                        const std::vector<mx::array> &cotangents,
                                        const std::vector<int> &argnums,
                                        const std::vector<mx::array> &) {
   std::vector<mx::array> vjps;
   vjps.reserve(argnums.size());
   for (int argnum : argnums) {
-    require_sparse_value_autodiff_arg(argnum, "CSRToDense", "VJP");
-    auto [_, row, col] = csr_tocoo(primals[0], primals[1], primals[2], n_rows_,
-                                   n_cols_, stream());
-    vjps.push_back(sparse_dense_cotangent_gather(cotangents[0], row, col,
-                                                 n_cols_, stream()));
+    require_sparse_value_autodiff_arg(argnum, "COOToDense", "VJP");
+    vjps.push_back(sparse_dense_cotangent_gather(
+        cotangents[0], primals[1], primals[2], n_cols_, stream()));
   }
   return vjps;
 }
 
 #ifdef _METAL_
-void CSRToDense::eval_gpu(const std::vector<mx::array> &inputs,
+void COOToDense::eval_gpu(const std::vector<mx::array> &inputs,
                           std::vector<mx::array> &outputs) {
   auto &data = inputs[0];
-  auto &indices = inputs[1];
-  auto &indptr = inputs[2];
+  auto &row = inputs[1];
+  auto &col = inputs[2];
   auto &out = outputs[0];
 
   out.set_data(mx::allocator::malloc(out.nbytes()));
@@ -209,54 +227,42 @@ void CSRToDense::eval_gpu(const std::vector<mx::array> &inputs,
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
   auto kernel_name =
-      sparse_kernel_name("csr_todense", data.dtype(), indices.dtype());
+      sparse_kernel_name("coo_todense", data.dtype(), row.dtype());
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
   encoder.set_compute_pipeline_state(kernel);
   encoder.set_input_array(data, 0);
-  encoder.set_input_array(indices, 1);
-  encoder.set_input_array(indptr, 2);
+  encoder.set_input_array(row, 1);
+  encoder.set_input_array(col, 2);
   encoder.set_output_array(out, 3);
-  encoder.set_bytes(static_cast<uint32_t>(n_rows_), 4);
-  encoder.set_bytes(static_cast<uint32_t>(n_cols_), 5);
+  encoder.set_bytes(n_rows_, 4);
+  encoder.set_bytes(n_cols_, 5);
+  auto nnz = static_cast<int>(data.size());
+  encoder.set_bytes(nnz, 6);
   encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
 }
 #else
-void CSRToDense::eval_gpu(const std::vector<mx::array> &,
+void COOToDense::eval_gpu(const std::vector<mx::array> &,
                           std::vector<mx::array> &) {
   throw std::runtime_error(
-      "csr_todense has no GPU implementation in this build.");
+      "coo_todense has no GPU implementation in this build.");
 }
 #endif
 
-mx::array csr_todense(const mx::array &data, const mx::array &indices,
-                      const mx::array &indptr, int n_rows, int n_cols,
+mx::array coo_todense(const mx::array &data, const mx::array &row,
+                      const mx::array &col, int n_rows, int n_cols,
                       mx::StreamOrDevice s) {
-  if (n_rows < 0 || n_cols < 0) {
-    throw std::invalid_argument(
-        "csr_todense shape dimensions must be non-negative.");
-  }
-  require_rank(data, 1, "csr_todense data");
-  require_rank(indices, 1, "csr_todense indices");
-  require_rank(indptr, 1, "csr_todense indptr");
-  require_supported_value_dtype(data, "csr_todense data");
-  require_same_index_dtype(indices, indptr, "csr_todense indices",
-                           "csr_todense indptr");
-  require_size(indptr, n_rows + 1, "csr_todense indptr");
-  if (indices.size() != data.size()) {
-    throw std::invalid_argument(
-        "csr_todense data and indices must have equal length.");
-  }
+  validate_coo_todense_inputs(data, row, col, n_rows, n_cols);
 
   auto stream = mx::to_stream(s);
   auto data_contig = mx::contiguous(data, false, stream);
-  auto indices_contig = mx::contiguous(indices, false, stream);
-  auto indptr_contig = mx::contiguous(indptr, false, stream);
+  auto row_contig = mx::contiguous(row, false, stream);
+  auto col_contig = mx::contiguous(col, false, stream);
 
   return mx::array(mx::Shape{n_rows, n_cols}, data.dtype(),
-                   std::make_shared<CSRToDense>(stream, n_rows, n_cols),
-                   {data_contig, indices_contig, indptr_contig});
+                   std::make_shared<COOToDense>(stream, n_rows, n_cols),
+                   {data_contig, row_contig, col_contig});
 }
 
 } // namespace mlx_sparse

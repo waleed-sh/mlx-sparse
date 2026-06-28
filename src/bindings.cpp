@@ -50,6 +50,7 @@
 #include "sparse/coo_row_sums/coo_row_sums.h"
 #include "sparse/coo_tocsc/coo_tocsc.h"
 #include "sparse/coo_tocsr/coo_tocsr.h"
+#include "sparse/coo_todense/coo_todense.h"
 #include "sparse/coo_trace/coo_trace.h"
 #include "sparse/csc_batched_matmul/csc_batched_matmul.h"
 #include "sparse/csc_col_norms/csc_col_norms.h"
@@ -538,6 +539,15 @@ NB_MODULE(_ext, m) {
       },
       "data"_a, "indices"_a, "indptr"_a, "n_rows"_a, "n_cols"_a,
       "Materialize CSR buffers as a dense MLX array.");
+
+  m.def(
+      "coo_todense",
+      [](const mlx_sparse::mx::array &data, const mlx_sparse::mx::array &row,
+         const mlx_sparse::mx::array &col, int n_rows, int n_cols) {
+        return mlx_sparse::coo_todense(data, row, col, n_rows, n_cols);
+      },
+      "data"_a, "row"_a, "col"_a, "n_rows"_a, "n_cols"_a,
+      "Materialize COO buffers as a dense MLX array.");
 
   m.def(
       "csc_todense",

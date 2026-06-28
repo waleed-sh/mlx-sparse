@@ -79,6 +79,49 @@ template <typename T, typename I>
   }
 }
 
+template <typename T, typename I>
+[[kernel]] void csc_tocsr_data_vjp_kernel(
+    device const T *cotangent [[buffer(0)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
+    device const I *out_indices [[buffer(3)]],
+    device const I *out_indptr [[buffer(4)]], device T *out [[buffer(5)]],
+    constant int &n_rows [[buffer(6)]], constant int &n_cols [[buffer(7)]],
+    uint col [[thread_position_in_grid]]) {
+  if (static_cast<int>(col) >= n_cols) {
+    return;
+  }
+
+  const I col_i = static_cast<I>(col);
+  for (I p = indptr[col]; p < indptr[col + 1]; ++p) {
+    const I row = indices[p];
+    if (row < I(0) || static_cast<int>(row) >= n_rows) {
+      out[p] = T(0);
+      continue;
+    }
+
+    int duplicate_ordinal = 0;
+    for (I q = indptr[col]; q < p; ++q) {
+      if (indices[q] == row) {
+        duplicate_ordinal += 1;
+      }
+    }
+
+    int seen = 0;
+    T value = T(0);
+    for (I dst = out_indptr[row]; dst < out_indptr[row + I(1)]; ++dst) {
+      if (out_indices[dst] != col_i) {
+        continue;
+      }
+      if (seen == duplicate_ordinal) {
+        value = cotangent[dst];
+        break;
+      }
+      seen += 1;
+    }
+    out[p] = value;
+  }
+}
+
 template [[host_name("csc_tocsr_count_int32")]] [[kernel]] void
 csc_tocsr_count_kernel<int>(device const int *, device int *, constant int &,
                             uint);
@@ -109,3 +152,20 @@ INSTANTIATE_CSC_TOCSR_FILL(complex64_int32, complex64_t, int);
 INSTANTIATE_CSC_TOCSR_FILL(complex64_int64, complex64_t, long);
 
 #undef INSTANTIATE_CSC_TOCSR_FILL
+
+#define INSTANTIATE_CSC_TOCSR_DATA_VJP(NAME, T, I)                             \
+  template [[host_name("csc_tocsr_data_vjp_" #NAME)]] [[kernel]] void          \
+  csc_tocsr_data_vjp_kernel<T, I>(                                             \
+      device const T *, device const I *, device const I *, device const I *,  \
+      device const I *, device T *, constant int &, constant int &, uint)
+
+INSTANTIATE_CSC_TOCSR_DATA_VJP(float32_int32, float, int);
+INSTANTIATE_CSC_TOCSR_DATA_VJP(float32_int64, float, long);
+INSTANTIATE_CSC_TOCSR_DATA_VJP(float16_int32, half, int);
+INSTANTIATE_CSC_TOCSR_DATA_VJP(float16_int64, half, long);
+INSTANTIATE_CSC_TOCSR_DATA_VJP(bfloat16_int32, bfloat16_t, int);
+INSTANTIATE_CSC_TOCSR_DATA_VJP(bfloat16_int64, bfloat16_t, long);
+INSTANTIATE_CSC_TOCSR_DATA_VJP(complex64_int32, complex64_t, int);
+INSTANTIATE_CSC_TOCSR_DATA_VJP(complex64_int64, complex64_t, long);
+
+#undef INSTANTIATE_CSC_TOCSR_DATA_VJP

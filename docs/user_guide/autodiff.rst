@@ -21,9 +21,15 @@ What is differentiable
   ``coo_*``, ``csr_*``, and ``csc_*`` batched matvec/matmul helpers.
 * ``mx.vmap`` over dense vector and dense matrix RHS for COO, CSR, and CSC
   sparse arrays with fixed sparse structure.
+* JVP and VJP for sparse values in ``todense`` for COO, CSR, and CSC. VJPs
+  sample the dense cotangent at stored sparse coordinates.
+* JVP and VJP for sparse values in ``row_sums``, ``col_sums``, ``diagonal``,
+  and ``trace`` for COO, CSR, and CSC.
 * JVP and VJP for sparse values in fixed-topology block and stack assembly:
   ``block_array``, ``bmat``, ``block_diag``, ``vstack``, and ``hstack`` when
   the block structures and placements are fixed.
+* JVP and VJP for sparse values in fixed-topology ``diags`` and ``kron`` value
+  assembly.
 * Real dtypes and ``complex64`` on CPU and Metal GPU.
 
 **Not implemented:**
@@ -32,12 +38,20 @@ What is differentiable
   structure, not differentiable values.
 * Gradients with respect to block shapes, ``None`` placement, row/column
   offsets, or sparse coordinate buffers in structural constructors.
+* Row/column norm gradients. Norms are kept non-differentiable in v0.0.6b0
+  because a complete contract needs an explicit zero-norm subgradient policy
+  and a documented complex norm convention. The forward reductions remain
+  native and available.
 * ``mx.vmap`` over sparse ``data`` batches. This fixed-topology sparse-data
   batch mode is a named v0.0.6b0 limitation because the current native batched
   kernels assume one shared value buffer and batch only the dense RHS.
 * Autodiff through sparse-sparse ``matmat``. Its output structure is
   data-dependent and returned as a sparse container, so the differentiable API
   is restricted to fixed-output sparse-dense products.
+* Dynamic-topology constructors and structural filters: ``fromdense``, random
+  structure sampling, duplicate-summing canonicalization, sparse-sparse
+  products, and ``tril`` / ``triu`` compaction raise clear limitation errors
+  under JVP/VJP instead of silently materializing host-side gradients.
 
 Dense-RHS VJP
 -------------
@@ -95,6 +109,28 @@ For matmul, the right-hand side has columns ``k`` and the VJP sums over them:
 The bar over ``x`` / ``X`` denotes complex conjugation. For real inputs it is a
 no-op. These are fixed-output primitives with CPU and Metal implementations.
 
+Materialization and Reductions
+------------------------------
+
+``todense`` is differentiable with respect to sparse values for COO, CSR, and
+CSC. The JVP materializes a sparse array with the same topology and tangent
+values. The VJP samples the dense cotangent at each stored coordinate:
+
+.. math::
+
+   \overline{\mathrm{data}}[p] = \overline{Y}[r_p, c_p]
+
+where ``(r_p, c_p)`` is the stored coordinate for entry ``p``. Duplicate sparse
+coordinates receive the same sampled cotangent, matching dense accumulation
+semantics.
+
+``row_sums`` and ``col_sums`` use the same fixed-topology rule over one axis:
+each stored value receives the cotangent of its row or column. ``diagonal``
+passes cotangents only to stored entries with ``row == col``, off-diagonal
+stored values receive zero. ``trace`` is the scalar version of the diagonal
+rule. These rules are implemented natively for COO, CSR, and CSC on CPU and
+Metal.
+
 Fixed-Topology Constructors
 ---------------------------
 
@@ -102,7 +138,9 @@ Block and stack constructors concatenate stored values while applying fixed
 coordinate offsets to the integer structure. When the block structures and
 placements are fixed, the value transform is just a native concatenation, so
 ``mx.jvp`` concatenates value tangents and ``mx.vjp`` splits output cotangents
-back to the corresponding input ``data`` buffers.
+back to the corresponding input ``data`` buffers. ``diags`` follows the same
+fixed-topology rule for diagonal value inputs, and ``kron`` applies the product
+rule to the fixed COO product topology.
 
 .. code-block:: python
 
@@ -121,8 +159,8 @@ back to the corresponding input ``data`` buffers.
    )
 
 Dynamic-topology operations such as ``fromdense``, random structure sampling,
-canonicalization that sums duplicates, and sparse-sparse products remain
-outside the structural autodiff contract.
+canonicalization that sums duplicates, structural triangular filters, and
+sparse-sparse products remain outside the structural autodiff contract.
 
 Dense-RHS JVP
 -------------
