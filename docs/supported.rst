@@ -333,6 +333,13 @@ For a solver-centric view of CPU, Metal GPU, and Accelerate coverage, see
      - Done
      - CPU + GPU
      - Full solver runs inside a single Metal kernel on GPU.
+   * - ``linalg.bicgstab``
+     - Done
+     - CPU + GPU
+     - Unpreconditioned and diagonal/Jacobi-preconditioned BiCGSTAB run in
+       native CPU/Metal kernels. ILU(0) and exact-factor preconditioned paths
+       use native C++ loops with native factor applications, callable
+       preconditioners use an explicit slower host fallback.
    * - ``linalg.gmres``
      - Done
      - CPU + GPU

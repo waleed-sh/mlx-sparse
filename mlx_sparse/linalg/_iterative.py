@@ -19,6 +19,9 @@ import mlx.core as mx
 import mlx_sparse._native as _native
 from mlx_sparse.linalg.utils.arrays import finite_scalar as _finite_scalar
 from mlx_sparse.linalg.utils.arrays import host_bool as _host_bool
+from mlx_sparse.linalg.utils.bicgstab import (
+    left_preconditioned_bicgstab_host as _left_pbicgstab_host,
+)
 from mlx_sparse.linalg.utils.diagnostics import finish_solver_result as _finish
 from mlx_sparse.linalg.utils.gmres import (
     left_preconditioned_gmres_host as _left_pgmres_host,
@@ -28,6 +31,9 @@ from mlx_sparse.linalg.utils.iterative import float32_array as _float32_array
 from mlx_sparse.linalg.utils.iterative import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.iterative import initial_guess as _guess
 from mlx_sparse.linalg.utils.iterative import max_iterations as _maxiter
+from mlx_sparse.linalg.utils.matrix_free import (
+    bicgstab_matrix_free_host as _mf_bicgstab,
+)
 from mlx_sparse.linalg.utils.matrix_free import cg_matrix_free_host as _mf_cg
 from mlx_sparse.linalg.utils.matrix_free import gmres_matrix_free_host as _mf_gmres
 from mlx_sparse.linalg.utils.matrix_free import is_fully_matrix_free as _is_mf
@@ -35,6 +41,29 @@ from mlx_sparse.linalg.utils.matrix_free import (
     normalize_matrix_free_inputs as _mf_inputs,
 )
 from mlx_sparse.linalg.utils.matrix_free import normalize_preconditioner as _mf_pc
+
+
+def _normalize_bicgstab_tolerances(rtol, tol, atol) -> tuple[float, float]:
+    """Normalize SciPy-compatible BiCGSTAB tolerance aliases."""
+
+    if rtol is None and tol is None:
+        rtol_value = 1e-5
+    elif rtol is None:
+        rtol_value = _finite_scalar("tol", tol)
+    else:
+        rtol_value = _finite_scalar("rtol", rtol)
+        if tol is not None:
+            tol_value = _finite_scalar("tol", tol)
+            if tol_value != rtol_value:
+                raise ValueError(
+                    "tol is a compatibility alias for rtol; do not set both."
+                )
+    atol_value = _finite_scalar("atol", atol)
+    if rtol_value < 0.0:
+        raise ValueError("rtol must be non-negative.")
+    if atol_value < 0.0:
+        raise ValueError("atol must be non-negative.")
+    return float(rtol_value), float(atol_value)
 
 
 def cg(
@@ -291,6 +320,318 @@ def cg(
         callback=callback,
         rtol=float(rtol),
         atol=float(atol),
+        maxiter=maxiter_value,
+        preconditioner=preconditioner_kind,
+    )
+
+
+def bicgstab(
+    A,
+    b,
+    x0=None,
+    *,
+    rtol: float | None = None,
+    atol: float = 0.0,
+    tol: float | None = None,
+    maxiter: int | None = None,
+    M=None,
+    callback=None,
+    return_info: bool = False,
+):
+    """Solve a sparse linear system with the BiCGSTAB method.
+
+    BIConjugate Gradient STABilized (BiCGSTAB) is a short-recurrence Krylov
+    solver for square non-symmetric systems ``A @ x = b``. It avoids the
+    transpose multiply required by BiCG and uses two sparse matrix-vector
+    products per ordinary iteration. mlx-sparse tests convergence against the
+    true residual ``||b - A @ x|| <= max(rtol * ||b||, atol)`` before reporting
+    success.
+
+    GPU note:
+        The unpreconditioned and diagonal/Jacobi-preconditioned paths execute
+        the full BiCGSTAB recurrence in native CPU/Metal primitives. ILU(0),
+        exact LU, exact Cholesky, and guarded Accelerate exact-factor
+        preconditioners use a native C++ driver that applies the stored
+        native factors during each inverse-apply step. Python callables and
+        custom inverse-apply objects use an explicit host fallback and
+        synchronize on every iteration.
+
+    Args:
+        A: Coefficient matrix. Must be a :class:`~mlx_sparse.CSRArray`,
+            :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
+            Sparse-backed :class:`LinearOperator` inputs are accepted and
+            normalized to CSR. Fully matrix-free :class:`LinearOperator`
+            inputs use the slower documented host fallback.
+        b: Right-hand side vector of shape ``(n,)``.
+        x0: Optional initial guess of shape ``(n,)``. Defaults to zeros.
+        rtol: Relative tolerance. Defaults to ``1e-5`` when neither ``rtol``
+            nor ``tol`` is supplied.
+        atol: Absolute tolerance floor. Defaults to ``0.0``.
+        tol: SciPy-compatible alias for ``rtol``. Supplying both ``tol`` and
+            ``rtol`` is allowed only when they are exactly equal.
+        maxiter: Maximum number of BiCGSTAB iterations. Defaults to ``10 * n``.
+        M: Optional inverse-apply preconditioner. ``None`` and identity use the
+            unpreconditioned native path. Diagonal/Jacobi uses a native
+            CPU/Metal path. ILU(0), exact LU, exact Cholesky, and guarded
+            Accelerate exact factors use native C++ preconditioned paths.
+            Other callable/object preconditioners use a sparse host fallback.
+        callback: Optional callable invoked once after the native solve
+            completes. Native CPU/Metal loops do not call Python inside each
+            iteration; using a callback synchronizes the final payload only.
+        return_info: If ``True``, return a :class:`SolverInfo` diagnostic
+            object instead of the SciPy-style integer status code.
+
+    Returns:
+        ``(x, info)`` by default. ``info == 0`` means convergence, ``info > 0``
+        means the iteration budget was exhausted, and ``info < 0`` indicates
+        numerical breakdown or invalid preconditioner/operator output. With
+        ``return_info=True``, ``info`` is a structured diagnostic object with
+        residual norm, iteration count, convergence reason, breakdown reason,
+        and preconditioner kind.
+
+    Raises:
+        TypeError: If ``A`` is dense or cannot be interpreted as a supported
+            sparse matrix/linear operator.
+        ValueError: If shapes, tolerances, or iteration budgets are invalid.
+    """
+
+    rtol_value, atol_value = _normalize_bicgstab_tolerances(rtol, tol, atol)
+    if _is_mf(A):
+        rhs, guess, maxiter_value = _mf_inputs(A, b, x0, maxiter)
+        pc, preconditioner_kind = _mf_pc(M, shape=A.shape)
+        x, info, residual, iterations = _mf_bicgstab(
+            A,
+            rhs,
+            guess,
+            pc,
+            rtol=rtol_value,
+            atol=atol_value,
+            maxiter=maxiter_value,
+        )
+        return _finish(
+            x,
+            info,
+            residual,
+            iterations,
+            solver="bicgstab",
+            return_info=bool(return_info),
+            callback=callback,
+            rtol=rtol_value,
+            atol=atol_value,
+            maxiter=maxiter_value,
+            preconditioner=preconditioner_kind,
+        )
+
+    csr = _float32_csr(_as_csr(A))
+    rhs = _float32_array(b)
+    guess = _guess(csr, rhs, x0)
+    maxiter_value = _maxiter(csr, maxiter)
+    preconditioner_kind = None
+    if M is not None:
+        from mlx_sparse.linalg import preconditioners
+
+        pc = preconditioners.aspreconditioner(M, csr)
+        preconditioner_kind = pc.kind
+        if isinstance(pc, preconditioners.IdentityPreconditioner):
+            pass
+        elif isinstance(pc, preconditioners.DiagonalPreconditioner):
+            x, info, residual, iterations = _native.csr_bicgstab_jacobi(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.inverse_diagonal,
+                csr.shape,
+                rtol=rtol_value,
+                atol=atol_value,
+                maxiter=maxiter_value,
+            )
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="bicgstab",
+                return_info=bool(return_info),
+                callback=callback,
+                rtol=rtol_value,
+                atol=atol_value,
+                maxiter=maxiter_value,
+                preconditioner=preconditioner_kind,
+            )
+        elif isinstance(pc, preconditioners.ExactFactorPreconditioner):
+            factor = pc.native_factorization
+            if pc.native_apply_kind == "lu" and factor is not None:
+                x, info, residual, iterations = _native.csr_bicgstab_exact_lu(
+                    csr.data,
+                    csr.indices,
+                    csr.indptr,
+                    rhs,
+                    guess,
+                    factor.perm,
+                    factor.L.data,
+                    factor.L.indices,
+                    factor.L.indptr,
+                    factor.U.data,
+                    factor.U.indices,
+                    factor.U.indptr,
+                    csr.shape,
+                    rtol=rtol_value,
+                    atol=atol_value,
+                    maxiter=maxiter_value,
+                )
+                return _finish(
+                    x,
+                    info,
+                    residual,
+                    iterations,
+                    solver="bicgstab",
+                    return_info=bool(return_info),
+                    callback=callback,
+                    rtol=rtol_value,
+                    atol=atol_value,
+                    maxiter=maxiter_value,
+                    preconditioner=preconditioner_kind,
+                )
+            if pc.native_apply_kind == "cholesky" and factor is not None:
+                upper = factor._upper()
+                x, info, residual, iterations = _native.csr_bicgstab_exact_cholesky(
+                    csr.data,
+                    csr.indices,
+                    csr.indptr,
+                    rhs,
+                    guess,
+                    factor.L.data,
+                    factor.L.indices,
+                    factor.L.indptr,
+                    upper.data,
+                    upper.indices,
+                    upper.indptr,
+                    csr.shape,
+                    rtol=rtol_value,
+                    atol=atol_value,
+                    maxiter=maxiter_value,
+                )
+                return _finish(
+                    x,
+                    info,
+                    residual,
+                    iterations,
+                    solver="bicgstab",
+                    return_info=bool(return_info),
+                    callback=callback,
+                    rtol=rtol_value,
+                    atol=atol_value,
+                    maxiter=maxiter_value,
+                    preconditioner=preconditioner_kind,
+                )
+            if pc.native_apply_kind == "accelerate" and factor is not None:
+                x, info, residual, iterations = _native.csr_bicgstab_exact_accelerate(
+                    csr.data,
+                    csr.indices,
+                    csr.indptr,
+                    rhs,
+                    guess,
+                    factor,
+                    csr.shape,
+                    rtol=rtol_value,
+                    atol=atol_value,
+                    maxiter=maxiter_value,
+                )
+                return _finish(
+                    x,
+                    info,
+                    residual,
+                    iterations,
+                    solver="bicgstab",
+                    return_info=bool(return_info),
+                    callback=callback,
+                    rtol=rtol_value,
+                    atol=atol_value,
+                    maxiter=maxiter_value,
+                    preconditioner=preconditioner_kind,
+                )
+            raise TypeError(
+                "bicgstab exact-factor preconditioners require a native LU, "
+                "native Cholesky, or guarded Accelerate factorization."
+            )
+        elif isinstance(pc, preconditioners.ILU0Preconditioner):
+            x, info, residual, iterations = _native.csr_bicgstab_ilu0(
+                csr.data,
+                csr.indices,
+                csr.indptr,
+                rhs,
+                guess,
+                pc.L.data,
+                pc.L.indices,
+                pc.L.indptr,
+                pc.U.data,
+                pc.U.indices,
+                pc.U.indptr,
+                csr.shape,
+                rtol=rtol_value,
+                atol=atol_value,
+                maxiter=maxiter_value,
+            )
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="bicgstab",
+                return_info=bool(return_info),
+                callback=callback,
+                rtol=rtol_value,
+                atol=atol_value,
+                maxiter=maxiter_value,
+                preconditioner=preconditioner_kind,
+            )
+        else:
+            x, info, residual, iterations = _left_pbicgstab_host(
+                csr,
+                rhs,
+                guess,
+                pc,
+                rtol=rtol_value,
+                atol=atol_value,
+                maxiter=maxiter_value,
+            )
+            return _finish(
+                x,
+                info,
+                residual,
+                iterations,
+                solver="bicgstab",
+                return_info=bool(return_info),
+                callback=callback,
+                rtol=rtol_value,
+                atol=atol_value,
+                maxiter=maxiter_value,
+                preconditioner=preconditioner_kind,
+            )
+
+    x, info, residual, iterations = _native.csr_bicgstab(
+        csr.data,
+        csr.indices,
+        csr.indptr,
+        rhs,
+        guess,
+        csr.shape,
+        rtol=rtol_value,
+        atol=atol_value,
+        maxiter=maxiter_value,
+    )
+    return _finish(
+        x,
+        info,
+        residual,
+        iterations,
+        solver="bicgstab",
+        return_info=bool(return_info),
+        callback=callback,
+        rtol=rtol_value,
+        atol=atol_value,
         maxiter=maxiter_value,
         preconditioner=preconditioner_kind,
     )

@@ -32,7 +32,7 @@ from mlx_sparse.linalg._factorizations import (
     spsolve,
 )
 from mlx_sparse.linalg._interface import LinearOperator, aslinearoperator
-from mlx_sparse.linalg._iterative import cg, gmres, minres
+from mlx_sparse.linalg._iterative import bicgstab, cg, gmres, minres
 from mlx_sparse.linalg._sparse_ops import dot, vdot
 from mlx_sparse.linalg._triangular import spsolve_triangular
 
@@ -42,6 +42,7 @@ __all__ = [
     "SparseCholesky",
     "SparseLU",
     "aslinearoperator",
+    "bicgstab",
     "cg",
     "cholesky",
     "dot",

@@ -43,7 +43,8 @@ CSC because Apple's sparse solver API is CSC-oriented.
 Diagnostics and callbacks
 -------------------------
 
-``cg``, ``gmres``, and ``minres`` still return ``(x, info)`` by default.
+``cg``, ``bicgstab``, ``gmres``, and ``minres`` still return ``(x, info)`` by
+default.
 ``info`` follows the sparse linalg convention used throughout this release:
 ``0`` means converged, positive values mean the iteration budget was exhausted,
 and negative values mean numerical breakdown or an invalid iterative path.
@@ -53,18 +54,20 @@ Pass ``return_info=True`` to replace the integer with a structured
 iteration count, convergence reason, breakdown reason when applicable, solver
 name, tolerance settings, restart size for GMRES, and the preconditioner kind
 when one is used. Preconditioned residual norms are reported only by native
-paths that expose them, otherwise the field is ``None``.
+paths that expose them, otherwise the field is ``None``. ``bicgstab`` accepts
+``tol`` as a SciPy-compatible alias for ``rtol``, if both are provided they
+must agree.
 
 Python callbacks are opt-in exit callbacks for the native sparse solvers. They
 are called once after the native CPU/Metal loop finishes, so the default solve
-path does not synchronize with Python inside each Krylov iteration. ``cg`` and
-``minres`` callbacks receive the final solution. ``gmres(callback_type="x")``
-receives the final solution, while ``"pr_norm"`` and ``"legacy"`` receive the
-final reported residual norm. These GMRES payload names intentionally mirror
-SciPy's callback types, but mlx-sparse does not call Python at every restart or
-inner iteration in native paths, and ``"legacy"`` does not change ``maxiter``
-accounting. Use ``return_info=True`` for solver diagnostics that do not need a
-callback.
+path does not synchronize with Python inside each Krylov iteration. ``cg``,
+``bicgstab``, and ``minres`` callbacks receive the final solution.
+``gmres(callback_type="x")`` receives the final solution, while ``"pr_norm"``
+and ``"legacy"`` receive the final reported residual norm. These GMRES payload
+names intentionally mirror SciPy's callback types, but mlx-sparse does not call
+Python at every restart or inner iteration in native paths, and ``"legacy"``
+does not change ``maxiter`` accounting. Use ``return_info=True`` for solver
+diagnostics that do not need a callback.
 
 Solver support matrix
 ---------------------
@@ -87,6 +90,17 @@ Solver support matrix
        IC(0)-preconditioned CG is a native CPU-hosted loop because the
        preconditioner apply is a pair of triangular solves. Fully matrix-free
        ``LinearOperator`` inputs use a slower host fallback.
+   * - ``linalg.bicgstab``
+     - Iterative solve for square general non-symmetric systems.
+     - Partial
+     - No
+     - Unpreconditioned and diagonal/Jacobi-preconditioned BiCGSTAB run the
+       full recurrence in native CPU/Metal kernels and check the true residual
+       before reporting success. ILU(0), exact LU, exact Cholesky, and guarded
+       Accelerate exact-factor preconditioners use a native C++ driver with
+       native factor inverse-apply routines. Custom callables and fully
+       matrix-free ``LinearOperator`` inputs use a documented slower host
+       fallback.
    * - ``linalg.gmres``
      - Iterative solve for square general systems.
      - Partial
@@ -242,6 +256,8 @@ Choosing a solver
 -----------------
 
 * Use ``cg`` for large SPD systems when an iterative method is appropriate.
+* Use ``bicgstab`` for large non-symmetric square systems when a
+  short-recurrence method is preferred over restarted GMRES.
 * Use ``gmres`` for large general square systems when LU factorization is too
   expensive or too memory-heavy.
 * Use ``minres`` for large symmetric indefinite systems.
@@ -282,6 +298,15 @@ through native permutation/triangular-solve bindings, guarded Accelerate
 factorized objects use Apple's CPU sparse solver when that support is built in.
 Custom callable/object preconditioners still use a slower host fallback because
 arbitrary Python cannot be called from native solver kernels.
+
+``linalg.bicgstab`` accepts ``identity``, ``diagonal``/``jacobi``, ``ilu0``,
+exact-factor preconditioners, and explicit inverse-apply callables or objects.
+``identity`` uses the unpreconditioned native path. Diagonal/Jacobi dispatches
+to native CPU/Metal kernels. ILU(0), exact LU, exact Cholesky, and guarded
+Accelerate exact-factor paths are driven from native C++ and use native factor
+applications. Callable/object preconditioners and fully matrix-free operators
+use the slower host fallback because arbitrary Python cannot execute inside
+native kernels.
 
 ``linalg.minres`` accepts ``identity`` plus finite strictly positive
 ``diagonal``/``jacobi`` preconditioners. This is stricter than GMRES because

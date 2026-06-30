@@ -43,6 +43,17 @@ New Features
   assembly. Triangular extraction uses native staged count/fill kernels for
   COO, CSR, and CSC inputs without Python filtering.
 
+* Added public :func:`mlx_sparse.linalg.bicgstab` with SciPy-compatible
+  ``(x, info)`` status values, ``tol`` as an ``rtol`` alias, optional
+  ``SolverInfo`` diagnostics, and true-residual convergence checks.
+  Unpreconditioned and diagonal/Jacobi-preconditioned CSR solves run in native
+  CPU/Metal primitives under ``src/linalg/bicgstab`` and
+  ``src/preconditioners/bicgstab``. ILU(0), exact LU, exact Cholesky, and
+  guarded Accelerate exact-factor preconditioners use native C++ solver paths
+  with native factor applications, while custom callable/object
+  preconditioners and fully matrix-free operators use an explicit documented
+  host fallback.
+
 Improvements
 ~~~~~~~~~~~~
 

@@ -18,6 +18,7 @@
 #include "linalg/accelerate/errors/status.h"
 #include "linalg/accelerate/factorization/factorization.h"
 #include "linalg/arnoldi/arnoldi.h"
+#include "linalg/bicgstab/bicgstab.h"
 #include "linalg/cg/cg.h"
 #include "linalg/cholesky/cholesky.h"
 #include "linalg/eigs/eigs.h"

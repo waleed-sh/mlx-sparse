@@ -20,6 +20,7 @@ Iterative solvers
 -----------------
 
 .. autofunction:: cg
+.. autofunction:: bicgstab
 .. autofunction:: gmres
 .. autofunction:: minres
 
