@@ -909,6 +909,233 @@ def csr_cg(
     )
 
 
+def csr_bicgstab(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError("csr_bicgstab requires the native mlx_sparse extension.")
+    return ext.csr_bicgstab(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def csr_bicgstab_jacobi(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    inv_diag: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_bicgstab_jacobi requires the native mlx_sparse extension."
+        )
+    return ext.csr_bicgstab_jacobi(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        inv_diag,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def csr_bicgstab_exact_lu(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    perm: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    u_data: mx.array,
+    u_indices: mx.array,
+    u_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_bicgstab_exact_lu requires the native mlx_sparse extension."
+        )
+    return ext.csr_bicgstab_exact_lu(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        perm,
+        l_data,
+        l_indices,
+        l_indptr,
+        u_data,
+        u_indices,
+        u_indptr,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def csr_bicgstab_ilu0(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    u_data: mx.array,
+    u_indices: mx.array,
+    u_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_bicgstab_ilu0 requires the native mlx_sparse extension."
+        )
+    return ext.csr_bicgstab_ilu0(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        l_data,
+        l_indices,
+        l_indptr,
+        u_data,
+        u_indices,
+        u_indptr,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def csr_bicgstab_exact_cholesky(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    l_data: mx.array,
+    l_indices: mx.array,
+    l_indptr: mx.array,
+    lt_data: mx.array,
+    lt_indices: mx.array,
+    lt_indptr: mx.array,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None:
+        raise RuntimeError(
+            "csr_bicgstab_exact_cholesky requires the native mlx_sparse extension."
+        )
+    return ext.csr_bicgstab_exact_cholesky(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        l_data,
+        l_indices,
+        l_indptr,
+        lt_data,
+        lt_indices,
+        lt_indptr,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
+def csr_bicgstab_exact_accelerate(
+    data: mx.array,
+    indices: mx.array,
+    indptr: mx.array,
+    b: mx.array,
+    x0: mx.array,
+    solver,
+    shape: Shape2D,
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: int,
+):
+    ext = extension()
+    if ext is None or not hasattr(ext, "csr_bicgstab_exact_accelerate"):
+        raise RuntimeError(
+            "csr_bicgstab_exact_accelerate requires an Accelerate-enabled "
+            "native mlx_sparse extension."
+        )
+    return ext.csr_bicgstab_exact_accelerate(
+        data,
+        indices,
+        indptr,
+        b,
+        x0,
+        solver,
+        shape[0],
+        shape[1],
+        float(rtol),
+        float(atol),
+        int(maxiter),
+    )
+
+
 def csr_pcg_jacobi(
     data: mx.array,
     indices: mx.array,

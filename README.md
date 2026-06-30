@@ -26,8 +26,9 @@ The supported format surface is COO, CSR, and CSC for 2D sparse arrays. Current
 functionality includes construction, validation, format conversions,
 canonicalization, sparse-dense products, batched dense RHS products,
 sparse-sparse products, transpose, and Hermitian transpose. `mlx-sparse` also
-supports sparse linalg solvers (`cg`, `gmres`, `minres`), reusable direct solves
-(`factorized`), sparse spectral routines (`eigsh`, `eigs`, `svds`), sparse
+supports sparse linalg solvers (`cg`, `bicgstab`, `gmres`, `minres`),
+reusable direct solves (`factorized`), sparse spectral routines (`eigsh`,
+`eigs`, `svds`), sparse
 Cholesky/LU factors, sparse triangular solves, sparse `dot`/`vdot`, and autodiff
 through sparse values and dense RHS operands, including `complex64`.
 

@@ -28,6 +28,7 @@
 #include "linalg/accelerate/factorization/factorization.h"
 #include "linalg/accelerate/solve/solve.h"
 #include "linalg/linalg.h"
+#include "preconditioners/bicgstab/bicgstab.h"
 #include "preconditioners/chebyshev/chebyshev.h"
 #include "preconditioners/diagonal/diagonal.h"
 #include "preconditioners/exact/exact.h"
@@ -1201,6 +1202,122 @@ NB_MODULE(_ext, m) {
       "lambda_min"_a, "lambda_max"_a, "rtol"_a, "atol"_a, "maxiter"_a,
       "Solve a float32 SPD CSR system with Chebyshev-polynomial "
       "preconditioned conjugate gradients.");
+
+  m.def(
+      "csr_bicgstab",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, int n_rows, int n_cols, float rtol,
+         float atol, int maxiter) {
+        return mlx_sparse::csr_bicgstab(data, indices, indptr, b, x0, n_rows,
+                                        n_cols, rtol, atol, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "n_rows"_a, "n_cols"_a,
+      "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 CSR system with native BiCGSTAB.");
+
+  m.def(
+      "csr_bicgstab_jacobi",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &inv_diag,
+         int n_rows, int n_cols, float rtol, float atol, int maxiter) {
+        return mlx_sparse::csr_bicgstab_jacobi(data, indices, indptr, b, x0,
+                                               inv_diag, n_rows, n_cols, rtol,
+                                               atol, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "inv_diag"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 CSR system with native Jacobi-preconditioned "
+      "BiCGSTAB.");
+
+  m.def(
+      "csr_bicgstab_exact_lu",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &perm,
+         const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &u_data,
+         const mlx_sparse::mx::array &u_indices,
+         const mlx_sparse::mx::array &u_indptr, int n_rows, int n_cols,
+         float rtol, float atol, int maxiter) {
+        return mlx_sparse::csr_bicgstab_exact_lu(
+            data, indices, indptr, b, x0, perm, l_data, l_indices, l_indptr,
+            u_data, u_indices, u_indptr, n_rows, n_cols, rtol, atol, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "perm"_a, "l_data"_a,
+      "l_indices"_a, "l_indptr"_a, "u_data"_a, "u_indices"_a, "u_indptr"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 CSR system with native exact-LU left-preconditioned "
+      "BiCGSTAB.");
+
+  m.def(
+      "csr_bicgstab_ilu0",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &u_data,
+         const mlx_sparse::mx::array &u_indices,
+         const mlx_sparse::mx::array &u_indptr, int n_rows, int n_cols,
+         float rtol, float atol, int maxiter) {
+        return mlx_sparse::csr_bicgstab_ilu0(
+            data, indices, indptr, b, x0, l_data, l_indices, l_indptr, u_data,
+            u_indices, u_indptr, n_rows, n_cols, rtol, atol, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "l_data"_a,
+      "l_indices"_a, "l_indptr"_a, "u_data"_a, "u_indices"_a, "u_indptr"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 CSR system with native ILU(0) left-preconditioned "
+      "BiCGSTAB.");
+
+  m.def(
+      "csr_bicgstab_exact_cholesky",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0, const mlx_sparse::mx::array &l_data,
+         const mlx_sparse::mx::array &l_indices,
+         const mlx_sparse::mx::array &l_indptr,
+         const mlx_sparse::mx::array &lt_data,
+         const mlx_sparse::mx::array &lt_indices,
+         const mlx_sparse::mx::array &lt_indptr, int n_rows, int n_cols,
+         float rtol, float atol, int maxiter) {
+        return mlx_sparse::csr_bicgstab_exact_cholesky(
+            data, indices, indptr, b, x0, l_data, l_indices, l_indptr, lt_data,
+            lt_indices, lt_indptr, n_rows, n_cols, rtol, atol, maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "l_data"_a,
+      "l_indices"_a, "l_indptr"_a, "lt_data"_a, "lt_indices"_a, "lt_indptr"_a,
+      "n_rows"_a, "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 CSR system with native exact-Cholesky "
+      "left-preconditioned BiCGSTAB.");
+
+#if defined(__APPLE__) && MLX_SPARSE_HAS_ACCELERATE_FRAMEWORK
+  m.def(
+      "csr_bicgstab_exact_accelerate",
+      [](const mlx_sparse::mx::array &data,
+         const mlx_sparse::mx::array &indices,
+         const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &b,
+         const mlx_sparse::mx::array &x0,
+         const mlx_sparse::AccelerateFloatSolve &solver, int n_rows, int n_cols,
+         float rtol, float atol, int maxiter) {
+        return mlx_sparse::csr_bicgstab_exact_accelerate(
+            data, indices, indptr, b, x0, solver, n_rows, n_cols, rtol, atol,
+            maxiter);
+      },
+      "data"_a, "indices"_a, "indptr"_a, "b"_a, "x0"_a, "solver"_a, "n_rows"_a,
+      "n_cols"_a, "rtol"_a, "atol"_a, "maxiter"_a,
+      "Solve a float32 CSR system with guarded Accelerate exact-factor "
+      "left-preconditioned BiCGSTAB.");
+#endif
 
   m.def(
       "diagonal_preconditioner_apply",

@@ -55,6 +55,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/factorization/factorization.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/accelerate/solve/solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/arnoldi/arnoldi.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/bicgstab/bicgstab.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cg/cg.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cholesky/cholesky.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/eigs/eigs.cpp
@@ -68,6 +69,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/diagonal/diagonal.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/bicgstab/bicgstab.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/chebyshev/chebyshev.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/exact/exact.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/gmres/gmres.cpp
@@ -186,6 +188,7 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
     TITLE mlx_sparse
     SOURCES
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/arnoldi/arnoldi.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/linalg/bicgstab/bicgstab.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/cg/cg.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/inner_product/inner_product.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/lanczos/lanczos.metal
@@ -194,6 +197,7 @@ if(APPLE AND MLX_BUILD_METAL AND MLX_SPARSE_BUILD_METAL AND MLX_SPARSE_METAL_FIN
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/diagonal/diagonal.metal
+      ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/bicgstab/bicgstab.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/chebyshev/chebyshev.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/gmres/gmres.metal
       ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/minres/minres.metal
