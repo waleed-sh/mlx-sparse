@@ -24,9 +24,11 @@ from mlx_sparse._ext_loader import extension_available
 from mlx_sparse.linalg import preconditioners
 from mlx_sparse.linalg._interface import LinearOperator, aslinearoperator
 from mlx_sparse.linalg.utils import arrays as array_utils
+from mlx_sparse.linalg.utils import bicgstab as bicgstab_utils
 from mlx_sparse.linalg.utils import diagnostics as diagnostics_utils
 from mlx_sparse.linalg.utils import factorization as factor_utils
 from mlx_sparse.linalg.utils import gmres as gmres_utils
+from mlx_sparse.linalg.utils import matrix_free as matrix_free_utils
 from mlx_sparse.linalg.utils import sparse as sparse_utils
 
 
@@ -392,6 +394,226 @@ def test_gmres_callable_preconditioner_rank_and_zero_output_failures(mx):
     )
     assert zero_info.status == -1
     assert zero_info.breakdown_reason == "breakdown"
+
+
+def test_host_bicgstab_identity_and_diagonal_preconditioners_are_meaningful(
+    mx, to_numpy
+):
+    dense = np.array([[4.0, 1.0], [0.0, 2.0]], dtype=np.float32)
+    csr = ms.csr_array(
+        (
+            mx.array([4.0, 1.0, 2.0], dtype=mx.float32),
+            mx.array([0, 1, 1], dtype=mx.int32),
+            mx.array([0, 2, 3], dtype=mx.int32),
+        ),
+        shape=dense.shape,
+        canonical=True,
+    )
+    rhs = mx.array([1.0, -2.0], dtype=mx.float32)
+    x0 = mx.zeros((2,), dtype=mx.float32)
+    expected = np.linalg.solve(dense, to_numpy(rhs))
+
+    for M in (
+        preconditioners.identity(csr),
+        preconditioners.diagonal(
+            mx.array([0.25, 0.5], dtype=mx.float32),
+            inverse=True,
+            shape=csr.shape,
+        ),
+    ):
+        x, info, residual, iterations = (
+            bicgstab_utils.left_preconditioned_bicgstab_host(
+                csr,
+                rhs,
+                x0,
+                M,
+                rtol=1e-7,
+                atol=1e-8,
+                maxiter=8,
+            )
+        )
+
+        assert info == 0
+        assert residual <= 1e-6
+        assert 0 < iterations <= 2
+        np.testing.assert_allclose(to_numpy(x), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_host_bicgstab_initial_success_iteration_budget_and_breakdown_paths(
+    mx, to_numpy
+):
+    csr = ms.csr_array(
+        (
+            mx.array([3.0, 2.0], dtype=mx.float32),
+            mx.array([0, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+    x0 = mx.zeros((2,), dtype=mx.float32)
+    identity = preconditioners.identity(csr)
+
+    x, info, residual, iterations = bicgstab_utils.left_preconditioned_bicgstab_host(
+        csr,
+        mx.zeros((2,), dtype=mx.float32),
+        x0,
+        identity,
+        rtol=1e-7,
+        atol=0.0,
+        maxiter=4,
+    )
+    assert info == 0
+    assert residual == pytest.approx(0.0)
+    assert iterations == 0
+    np.testing.assert_allclose(to_numpy(x), np.zeros(2, dtype=np.float32))
+
+    _, info, residual, iterations = bicgstab_utils.left_preconditioned_bicgstab_host(
+        csr,
+        mx.array([1.0, -2.0], dtype=mx.float32),
+        x0,
+        identity,
+        rtol=1e-12,
+        atol=0.0,
+        maxiter=0,
+    )
+    assert info == 1
+    assert residual > 0.0
+    assert iterations == 0
+
+    zero_csr = ms.csr_array(
+        (
+            mx.array([], dtype=mx.float32),
+            mx.array([], dtype=mx.int32),
+            mx.array([0, 0, 0], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+    _, info, residual, iterations = bicgstab_utils.left_preconditioned_bicgstab_host(
+        zero_csr,
+        mx.array([1.0, -2.0], dtype=mx.float32),
+        x0,
+        preconditioners.identity(zero_csr),
+        rtol=1e-7,
+        atol=0.0,
+        maxiter=4,
+    )
+    assert info == -1
+    assert residual > 0.0
+    assert iterations == 0
+
+
+def test_host_bicgstab_callable_preconditioner_errors_report_nonfinite(mx):
+    csr = ms.csr_array(
+        (
+            mx.array([3.0, 2.0], dtype=mx.float32),
+            mx.array([0, 1], dtype=mx.int32),
+            mx.array([0, 1, 2], dtype=mx.int32),
+        ),
+        shape=(2, 2),
+        canonical=True,
+    )
+    rhs = mx.array([1.0, -2.0], dtype=mx.float32)
+    x0 = mx.zeros((2,), dtype=mx.float32)
+    bad = preconditioners.aspreconditioner(
+        lambda r: mx.full(r.shape, mx.nan, dtype=mx.float32),
+        csr,
+    )
+
+    _, info, residual, iterations = bicgstab_utils.left_preconditioned_bicgstab_host(
+        csr,
+        rhs,
+        x0,
+        bad,
+        rtol=1e-7,
+        atol=0.0,
+        maxiter=4,
+    )
+
+    assert info == -3
+    assert residual > 0.0
+    assert iterations == 0
+
+
+def test_matrix_free_bicgstab_preconditioned_success_and_guard_paths(mx, to_numpy):
+    dense = np.array([[4.0, 1.0], [0.0, 2.0]], dtype=np.float32)
+    rhs_np = np.array([1.0, -2.0], dtype=np.float32)
+    rhs = mx.array(rhs_np, dtype=mx.float32)
+    x0 = mx.zeros((2,), dtype=mx.float32)
+    operator = LinearOperator(
+        dense.shape,
+        matvec=lambda x: mx.array(dense) @ x,
+        dtype=mx.float32,
+    )
+    jacobi = preconditioners.aspreconditioner(
+        lambda r: mx.array([0.25, 0.5], dtype=mx.float32) * r,
+        dense.shape,
+    )
+
+    x, info, residual, iterations = matrix_free_utils.bicgstab_matrix_free_host(
+        operator,
+        rhs,
+        x0,
+        jacobi,
+        rtol=1e-7,
+        atol=1e-8,
+        maxiter=8,
+    )
+    assert info == 0
+    assert residual <= 1e-6
+    assert iterations > 0
+    np.testing.assert_allclose(
+        to_numpy(x), np.linalg.solve(dense, rhs_np), rtol=1e-5, atol=1e-5
+    )
+
+    _, info, residual, iterations = matrix_free_utils.bicgstab_matrix_free_host(
+        operator,
+        rhs,
+        x0,
+        preconditioners.identity(dense.shape),
+        rtol=1e-7,
+        atol=0.0,
+        maxiter=0,
+    )
+    assert info == 1
+    assert residual > 0.0
+    assert iterations == 0
+
+    nonfinite_operator = LinearOperator(
+        dense.shape,
+        matvec=lambda x: mx.full(x.shape, mx.nan, dtype=mx.float32),
+        dtype=mx.float32,
+    )
+    _, info, residual, iterations = matrix_free_utils.bicgstab_matrix_free_host(
+        nonfinite_operator,
+        rhs,
+        x0,
+        preconditioners.identity(dense.shape),
+        rtol=1e-7,
+        atol=0.0,
+        maxiter=4,
+    )
+    assert info == -3
+    assert np.isnan(residual)
+    assert iterations == 0
+
+    bad_preconditioner = preconditioners.aspreconditioner(
+        lambda r: mx.full(r.shape, mx.nan, dtype=mx.float32),
+        dense.shape,
+    )
+    _, info, residual, iterations = matrix_free_utils.bicgstab_matrix_free_host(
+        operator,
+        rhs,
+        x0,
+        bad_preconditioner,
+        rtol=1e-7,
+        atol=0.0,
+        maxiter=4,
+    )
+    assert info == -3
+    assert residual > 0.0
+    assert iterations == 0
 
 
 def test_preconditioner_object_validation_branches(mx, to_numpy):
