@@ -101,6 +101,8 @@ def test_sparse_matrix_metadata_reports_axis_statistics(mx):
     assert metadata["shape"] == [3, 4]
     assert metadata["nnz"] == 4
     assert metadata["density"] == pytest.approx(4 / 12)
+    assert metadata["storage_nbytes"] == 48
+    assert metadata["dense_equivalent_nbytes"] == 48
     assert metadata["dtype"] == "float32"
     assert metadata["index_dtype"] == "int32"
     assert metadata["row_lengths"]["min"] == 1
