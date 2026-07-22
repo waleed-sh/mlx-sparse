@@ -4,6 +4,13 @@ Changelog
 mlx-sparse v0.0.6b0 (Unreleased)
 ---------------------------------
 
+.. note::
+
+    This release expands the sparse array surface with native random and
+    structural constructors, mixed-format algebra, native ``vmap`` dispatch,
+    fixed-topology autodiff, and BiCGSTAB. See the roadmap
+    `here <https://github.com/waleed-sh/mlx-sparse/issues/40>`_.
+
 New Features
 ~~~~~~~~~~~~
 
@@ -14,14 +21,17 @@ New Features
   and supports direct COO/CSR/CSC output without dense masks, COO conversion
   for compressed formats, or Python structural loops. Default values are MLX
   uniform ``[0, 1)`` samples, custom samplers are called once for explicit
-  custom ranges or distributions.
+  custom ranges or distributions
+  (`PR #41 <https://github.com/waleed-sh/mlx-sparse/pull/41>`_,
+  `PR #42 <https://github.com/waleed-sh/mlx-sparse/pull/42>`_).
 
 * Added sparse-sparse addition and subtraction through ``A + B``, ``A - B``,
   :func:`mlx_sparse.add`, and :func:`mlx_sparse.subtract`. COO, CSR, and CSC
   operands with equal shape and matching value dtype are canonicalized through
   native paths, merged by a native CSR CPU/Metal primitive, and returned with
   duplicate coordinates summed and exact zero cancellations removed. Nonzero
-  scalar and sparse+dense addition are rejected to avoid hidden dense outputs.
+  scalar and sparse+dense addition are rejected to avoid hidden dense outputs
+  (`PR #43 <https://github.com/waleed-sh/mlx-sparse/pull/43>`_).
 
 * Added native Kronecker products and sums through :func:`mlx_sparse.kron` and
   :func:`mlx_sparse.kronsum`. ``kron`` accepts COO/CSR/CSC or dense rank-2
@@ -30,7 +40,8 @@ New Features
   with native CPU/Metal COO kernels. COO output preserves the fixed product
   topology for sparse-value JVP/VJP, while CSR and CSC output canonicalize and
   sum duplicate products. ``kronsum`` composes native ``kron`` with native
-  sparse addition for square inputs.
+  sparse addition for square inputs
+  (`PR #44 <https://github.com/waleed-sh/mlx-sparse/pull/44>`_).
 
 * Added SciPy-compatible structural constructors
   :func:`mlx_sparse.block_array`, :func:`mlx_sparse.bmat`,
@@ -41,7 +52,8 @@ New Features
   support COO/CSR/CSC and dense rank-2 inputs, infer ``None`` zero-block sizes
   in block grids, and provide sparse-value JVP/VJP for fixed-topology
   assembly. Triangular extraction uses native staged count/fill kernels for
-  COO, CSR, and CSC inputs without Python filtering.
+  COO, CSR, and CSC inputs without Python filtering
+  (`PR #45 <https://github.com/waleed-sh/mlx-sparse/pull/45>`_).
 
 * Added public :func:`mlx_sparse.linalg.bicgstab` with SciPy-compatible
   ``(x, info)`` status values, ``tol`` as an ``rtol`` alias, optional
@@ -52,7 +64,8 @@ New Features
   guarded Accelerate exact-factor preconditioners use native C++ solver paths
   with native factor applications, while custom callable/object
   preconditioners and fully matrix-free operators use an explicit documented
-  host fallback.
+  host fallback
+  (`PR #49 <https://github.com/waleed-sh/mlx-sparse/pull/49>`_).
 
 Improvements
 ~~~~~~~~~~~~
@@ -63,7 +76,8 @@ Improvements
   so ``COO @ CSR/CSC`` and ``CSC @ CSR/COO`` no longer raise
   ``NotImplementedError``. Added pairwise format tests and a benchmark harness
   for comparing native normalization with pre-normalized same-format products
-  before adding any direct mixed-format kernels.
+  before adding any direct mixed-format kernels
+  (`PR #46 <https://github.com/waleed-sh/mlx-sparse/pull/46>`_).
 
 * Added native primitive ``vmap(...)`` methods for COO, CSR, and CSC
   sparse-dense matvec/matmul and their explicit batched helper primitives.
@@ -72,7 +86,8 @@ Improvements
   to native batched sparse-dense kernels, including nonzero dense RHS
   ``in_axes`` and MLX-managed ``out_axes``. Sparse ``data`` batching remains a
   documented v0.0.6b0 limitation because the current batched kernels share one
-  sparse value buffer and batch only dense RHS arrays.
+  sparse value buffer and batch only dense RHS arrays
+  (`PR #47 <https://github.com/waleed-sh/mlx-sparse/pull/47>`_).
 
 * Added sparse-value JVP/VJP coverage for fixed-topology materialization,
   reductions, and constructors. ``todense`` for COO/CSR/CSC samples dense
@@ -87,7 +102,8 @@ Improvements
   ``CSC -> CSR`` conversions now carry sparse-value JVP/VJP through their data
   permutation, and COO/CSR/CSC complex row and column sums use direct Metal
   component atomics or segmented kernels instead of detouring through temporary
-  format conversions.
+  format conversions
+  (`PR #48 <https://github.com/waleed-sh/mlx-sparse/pull/48>`_).
 
 * Allow for right multiply, in addition to the existing left multiply, of sparse matrices by numbers.
 
