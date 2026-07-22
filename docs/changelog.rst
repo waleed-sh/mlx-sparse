@@ -1,7 +1,7 @@
 Changelog
 =========
 
-mlx-sparse v0.0.6b0 (Unreleased)
+mlx-sparse v0.0.6b0 (22.07.2026)
 ---------------------------------
 
 .. note::
