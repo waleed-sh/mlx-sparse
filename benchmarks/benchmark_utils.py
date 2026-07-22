@@ -170,7 +170,7 @@ def scipy_speedup(*, scipy_ms: float, native_ms: float) -> float | None:
 
 
 def sparse_matrix_metadata(matrix: Any) -> dict[str, Any]:
-    """Return shape, sparsity, dtype, index dtype, and axis length stats."""
+    """Return shape, sparsity, storage size, dtype, and axis length stats."""
 
     shape = tuple(int(dim) for dim in matrix.shape)
     n_rows, n_cols = shape
@@ -202,11 +202,28 @@ def sparse_matrix_metadata(matrix: Any) -> dict[str, Any]:
         "n_cols": n_cols,
         "nnz": nnz,
         "density": density,
+        "storage_nbytes": sparse_storage_nbytes(matrix),
+        "dense_equivalent_nbytes": n_rows * n_cols * matrix.data.itemsize,
         "dtype": dtype_name(matrix.dtype),
         "index_dtype": dtype_name(matrix.index_dtype),
         "row_lengths": _length_stats(row_lengths),
         "col_lengths": _length_stats(col_lengths),
     }
+
+
+def sparse_storage_nbytes(matrix: Any) -> int:
+    """Return bytes occupied by all value and structural sparse buffers."""
+
+    if isinstance(matrix, ms.CSRArray | ms.CSCArray):
+        arrays = (matrix.data, matrix.indices, matrix.indptr)
+    elif isinstance(matrix, ms.COOArray):
+        arrays = (matrix.data, matrix.row, matrix.col)
+    else:
+        raise TypeError(
+            "sparse_storage_nbytes expects COOArray, CSRArray, or CSCArray, "
+            f"got {type(matrix).__name__}."
+        )
+    return sum(int(array.nbytes) for array in arrays)
 
 
 def cpu_runtime_metadata(*, warmup: int, iters: int) -> dict[str, Any]:

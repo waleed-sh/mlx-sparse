@@ -33,11 +33,31 @@ def test_identity_like_native_smoke(mx):
 
 
 @pytest.mark.native
-def test_structural_native_symbols_are_exported():
+def test_v006_native_symbols_are_exported():
     if not ms.is_available():
         pytest.skip("native extension is not built")
 
     import mlx_sparse._ext as ext
 
-    for name in ("coo_block", "coo_triangular", "csr_triangular", "csc_triangular"):
-        assert hasattr(ext, name)
+    required = (
+        "random_coo_indices",
+        "random_csr_indices",
+        "random_csc_indices",
+        "csr_add",
+        "coo_kron",
+        "coo_block",
+        "coo_triangular",
+        "csr_triangular",
+        "csc_triangular",
+        "csr_bicgstab",
+        "csr_bicgstab_jacobi",
+        "csr_bicgstab_ilu0",
+        "csr_bicgstab_exact_lu",
+        "csr_bicgstab_exact_cholesky",
+    )
+    missing = [name for name in required if not hasattr(ext, name)]
+    assert not missing, f"native extension is missing v0.0.6b0 symbols: {missing}"
+
+    capabilities = ext._compiled_capabilities()
+    if capabilities["accelerate"]:
+        assert hasattr(ext, "csr_bicgstab_exact_accelerate")

@@ -1,8 +1,52 @@
-Structural Constructors
-=======================
+Structural Sparse Algebra
+=========================
 
-``mlx_sparse`` includes SciPy-compatible structural constructors for assembling
-larger sparse matrices without materializing dense intermediates.
+``mlx_sparse`` includes native sparse addition, Kronecker products, and
+SciPy-compatible structural constructors for assembling larger sparse matrices
+without materializing dense intermediates.
+
+Sparse Addition and Subtraction
+-------------------------------
+
+Use ``A + B``, ``A - B``, :func:`mlx_sparse.add`, or
+:func:`mlx_sparse.subtract` for equal-shaped sparse operands. COO, CSR, and CSC
+inputs, including mixed-format pairs, are canonicalized through native format
+conversions and merged by the native CSR CPU/Metal addition primitive. Exact
+zero cancellations are removed from the canonical result. Homogeneous CSC
+inputs return CSC, other supported combinations return CSR.
+
+Sparse+dense addition and nonzero scalar addition are rejected because their
+mathematical result is generally dense. Addition and subtraction are
+dynamic-topology operations when cancellation changes ``nnz``, so sparse-value
+autodiff is intentionally unsupported.
+
+Kronecker Products and Sums
+---------------------------
+
+:func:`mlx_sparse.kron` accepts COO, CSR, CSC, or dense rank-2 operands and
+returns COO by default, or the requested ``"coo"``, ``"csr"``, or ``"csc"``
+format. Dense operands use native :func:`mlx_sparse.fromdense`, compressed
+operands use native COO expansion, and a native CPU/Metal coordinate-product
+kernel writes the output coordinates and values directly.
+
+.. code-block:: python
+
+   import mlx.core as mx
+   import mlx_sparse as ms
+
+   T = ms.diags(
+       [-mx.ones(3), 2 * mx.ones(4), -mx.ones(3)],
+       offsets=[-1, 0, 1],
+       shape=(4, 4),
+   )
+   I = ms.identity(4, format="csr")
+   laplacian_2d = ms.kron(I, T, format="csr") + ms.kron(T, I, format="csr")
+
+:func:`mlx_sparse.kronsum` provides the square-matrix shorthand
+``kron(I_n, A) + kron(B, I_m)``. Fixed-topology COO ``kron`` is
+differentiable with respect to both stored value buffers. Conversion to a
+compressed format canonicalizes duplicate coordinates and is therefore a
+dynamic-topology autodiff boundary.
 
 Block Assembly
 --------------
@@ -72,9 +116,11 @@ triangular extraction default.
 Device Support
 --------------
 
-The structural constructors are backed by native CPU kernels on every platform.
-On Apple platforms with a Metal-enabled build, block assembly and triangular
-extraction also include Metal kernels. Linux remains CPU-only in this release.
+Sparse addition, Kronecker products, block/stack assembly, and triangular
+extraction are backed by native CPU kernels on every platform. On Apple
+platforms with a Metal-enabled build, each operation also has native Metal
+kernels. Linux remains CPU-only in this release, it does not compile or load
+Metal or Accelerate code.
 
 Autodiff Boundary
 -----------------
