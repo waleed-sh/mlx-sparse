@@ -12,6 +12,11 @@ csr\_array
 
 .. autofunction:: csr_array
 
+csc\_array
+----------
+
+.. autofunction:: csc_array
+
 coo\_array
 ----------
 
