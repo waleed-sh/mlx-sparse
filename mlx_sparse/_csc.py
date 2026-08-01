@@ -60,6 +60,11 @@ class CSCArray:
         has_canonical_format: Hint that the matrix has sorted row indices and
             no duplicate row index in any column. Implies
             ``sorted_indices=True``. Defaults to ``False``.
+
+    Both hints are taken on trust: operations read them instead of inspecting
+    the buffers, so an incorrect hint produces a wrong result rather than an
+    error. Build the array through :func:`csc_array` with ``validate="full"``
+    to have the hint checked against the indices.
     """
 
     data: mx.array
@@ -441,14 +446,21 @@ def csc_array(
     indices = ensure_mx_array(indices)
     indptr = ensure_mx_array(indptr)
 
-    if mode != "none":
-        validate_csc_metadata(data, indices, indptr, shape)
-    if mode == "full":
-        validate_csc_values(indices, indptr, shape, data.shape[0])
-
     has_canonical_format = bool(canonical) if canonical is not None else False
     if has_canonical_format:
         sorted_indices = True
+
+    if mode != "none":
+        validate_csc_metadata(data, indices, indptr, shape)
+    if mode == "full":
+        validate_csc_values(
+            indices,
+            indptr,
+            shape,
+            data.shape[0],
+            sorted_indices=sorted_indices,
+            canonical=has_canonical_format,
+        )
 
     return CSCArray(
         data=data,

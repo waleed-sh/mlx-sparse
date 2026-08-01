@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from numbers import Number
 
 import mlx.core as mx
+import numpy as np
 
 from mlx_sparse._host import to_numpy
 from mlx_sparse._typing import INDEX_DTYPES, VALUE_DTYPES, Shape2D, ValidationMode
@@ -151,11 +152,45 @@ def validate_csc_metadata(
         )
 
 
+def _first_compressed_order_violation(indices_np, indptr_np, strict: bool):
+    """Locate the first pair of adjacent same-segment indices that is out of order.
+
+    ``indptr`` splits ``indices`` into segments (rows for CSR, columns for CSC).
+    A segment is sorted when its indices are nondecreasing and canonical when
+    they are strictly increasing, so both properties are decided by comparing
+    each stored index with its successor, skipping the pairs that straddle a
+    segment boundary.
+
+    Returns ``(segment, index, next_index)`` for the first violation, or
+    ``None``. Assumes ``indptr`` has already been checked for monotonicity.
+    """
+    nnz = int(indices_np.shape[0])
+    if nnz < 2:
+        return None
+
+    starts = indptr_np[:-1]
+    is_segment_start = np.zeros(nnz, dtype=bool)
+    is_segment_start[starts[starts < nnz]] = True
+
+    delta = indices_np[1:].astype(np.int64) - indices_np[:-1].astype(np.int64)
+    same_segment = ~is_segment_start[1:]
+    bad = same_segment & (delta <= 0 if strict else delta < 0)
+    if not bad.any():
+        return None
+
+    position = int(np.argmax(bad))
+    segment = int(np.searchsorted(indptr_np, position, side="right")) - 1
+    return segment, int(indices_np[position]), int(indices_np[position + 1])
+
+
 def validate_csr_values(
     indices: mx.array,
     indptr: mx.array,
     shape: Shape2D,
     nnz: int,
+    *,
+    sorted_indices: bool = False,
+    canonical: bool = False,
 ) -> None:
     indices_np = to_numpy(indices)
     indptr_np = to_numpy(indptr)
@@ -175,6 +210,22 @@ def validate_csr_values(
                 "CSRArray indices must be in bounds for n_cols="
                 f"{shape[1]}, got min={min_index}, max={max_index}."
             )
+    if canonical or sorted_indices:
+        violation = _first_compressed_order_violation(
+            indices_np, indptr_np, strict=canonical
+        )
+        if violation is not None:
+            row, current, following = violation
+            if canonical:
+                raise ValueError(
+                    "CSRArray was declared canonical, but row "
+                    f"{row} has column indices {current} then {following}; "
+                    "a canonical row has strictly increasing column indices."
+                )
+            raise ValueError(
+                "CSRArray was declared to have sorted indices, but row "
+                f"{row} has column indices {current} then {following}."
+            )
 
 
 def validate_csc_values(
@@ -182,6 +233,9 @@ def validate_csc_values(
     indptr: mx.array,
     shape: Shape2D,
     nnz: int,
+    *,
+    sorted_indices: bool = False,
+    canonical: bool = False,
 ) -> None:
     indices_np = to_numpy(indices)
     indptr_np = to_numpy(indptr)
@@ -200,6 +254,22 @@ def validate_csc_values(
             raise ValueError(
                 "CSCArray indices must be in bounds for n_rows="
                 f"{shape[0]}, got min={min_index}, max={max_index}."
+            )
+    if canonical or sorted_indices:
+        violation = _first_compressed_order_violation(
+            indices_np, indptr_np, strict=canonical
+        )
+        if violation is not None:
+            column, current, following = violation
+            if canonical:
+                raise ValueError(
+                    "CSCArray was declared canonical, but column "
+                    f"{column} has row indices {current} then {following}; "
+                    "a canonical column has strictly increasing row indices."
+                )
+            raise ValueError(
+                "CSCArray was declared to have sorted indices, but column "
+                f"{column} has row indices {current} then {following}."
             )
 
 
@@ -227,7 +297,13 @@ def validate_coo_metadata(
         )
 
 
-def validate_coo_values(row: mx.array, col: mx.array, shape: Shape2D) -> None:
+def validate_coo_values(
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+    *,
+    canonical: bool = False,
+) -> None:
     row_np = to_numpy(row)
     col_np = to_numpy(col)
     if row_np.size:
@@ -245,6 +321,20 @@ def validate_coo_values(row: mx.array, col: mx.array, shape: Shape2D) -> None:
             raise ValueError(
                 "COOArray col coordinates must be in bounds for n_cols="
                 f"{shape[1]}, got min={min_col}, max={max_col}."
+            )
+    if canonical and row_np.size > 1:
+        # Canonical COO is row-major ordered with no repeated coordinate, so a
+        # single linear key per entry must be strictly increasing. int64 keeps
+        # the product exact for every shape the index dtypes can address.
+        key = row_np.astype(np.int64) * np.int64(shape[1]) + col_np.astype(np.int64)
+        bad = key[1:] <= key[:-1]
+        if bad.any():
+            position = int(np.argmax(bad))
+            raise ValueError(
+                "COOArray was declared canonical, but coordinate "
+                f"({row_np[position]}, {col_np[position]}) is followed by "
+                f"({row_np[position + 1]}, {col_np[position + 1]}); canonical "
+                "coordinates are row-major ordered and duplicate-free."
             )
 
 

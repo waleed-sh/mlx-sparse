@@ -62,6 +62,8 @@ class COOArray:
 
     - ``0 <= row[i] < n_rows`` for all entries.
     - ``0 <= col[i] < n_cols`` for all entries.
+    - Coordinates are row-major ordered and duplicate-free when
+      ``canonical=True``.
 
     Args:
         data: Non-zero values, shape ``(nnz,)``.
@@ -69,7 +71,8 @@ class COOArray:
         col: Column coordinates, shape ``(nnz,)``.
         shape: Matrix dimensions as ``(n_rows, n_cols)``.
         has_canonical_format: Hint that coordinates are sorted and duplicate-
-            free. Defaults to ``False``.
+            free. Defaults to ``False``. The hint is taken on trust; pass
+            ``validate="full"`` to :func:`coo_array` to have it checked.
 
     Example::
 
@@ -369,12 +372,13 @@ def coo_array(
         validate: Validation level, one of:
 
             - ``"metadata"`` *(default)*: checks ranks, lengths, and dtypes.
-            - ``"full"`` / ``True``: also verifies coordinate bounds. May
-              synchronize to host.
+            - ``"full"`` / ``True``: also verifies coordinate bounds and any
+              ``canonical`` assertion made below. May synchronize to host.
             - ``False`` / ``"none"``: skips all checks.
 
         canonical: Set to ``True`` to assert the coordinates are sorted and
-            duplicate-free. Default ``None`` (not asserted).
+            duplicate-free. Default ``None`` (not asserted). The assertion is
+            taken on trust unless ``validate="full"`` is also passed.
 
     Returns:
         A :class:`COOArray` with the given buffers and shape.
@@ -421,7 +425,7 @@ def coo_array(
     if mode != "none":
         validate_coo_metadata(data, row, col, shape)
     if mode == "full":
-        validate_coo_values(row, col, shape)
+        validate_coo_values(row, col, shape, canonical=bool(canonical))
 
     return COOArray(
         data=data,

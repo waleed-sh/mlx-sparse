@@ -59,11 +59,17 @@ class CSRArray:
     - ``indptr[0] == 0``, ``indptr[-1] == nnz``.
     - ``indptr`` is monotonically nondecreasing.
     - ``0 <= indices[j] < n_cols`` for all stored values.
+    - Column indices are nondecreasing within each row when
+      ``sorted_indices=True``, and strictly increasing when
+      ``canonical=True``.
 
     ``CSRArray`` is immutable (frozen dataclass). Structural operations return
     new instances. The ``sorted_indices`` and ``has_canonical_format`` flags are
     metadata hints. Set them only when the input is already known to satisfy
-    those properties. Use ``canonicalize()`` to sort and sum duplicates.
+    those properties: operations read the flags instead of inspecting the
+    buffers, so an incorrect hint produces a wrong result rather than an error
+    unless the array was built with ``validate="full"``. Use ``canonicalize()``
+    to sort and sum duplicates.
 
     Args:
         data: Non-zero values, shape ``(nnz,)``.
@@ -674,8 +680,9 @@ def csr_array(
 
             - ``"metadata"`` *(default)*: checks ranks, lengths, and dtypes
               without reading array values. Safe to call on device arrays.
-            - ``"full"`` / ``True``: also verifies ``indptr`` monotonicity
-              and column index bounds. May synchronize to host.
+            - ``"full"`` / ``True``: also verifies ``indptr`` monotonicity,
+              column index bounds, and any ``sorted_indices`` or ``canonical``
+              assertion made below. May synchronize to host.
             - ``False`` / ``"none"``: skips all checks.
 
         sorted_indices: Set to ``True`` to assert that column indices within
@@ -683,6 +690,11 @@ def csr_array(
         canonical: Set to ``True`` to assert canonical format (sorted indices,
             no duplicate columns). Implies ``sorted_indices=True``. Default
             ``None`` (not asserted).
+
+            Both flags are taken on trust under the other validation levels:
+            operations read them instead of inspecting the buffers, so an
+            incorrect assertion yields a wrong answer rather than an error.
+            Pass ``validate="full"`` to have the assertion checked.
 
     Returns:
         A :class:`CSRArray` with the given buffers and shape.
@@ -729,14 +741,21 @@ def csr_array(
     indices = ensure_mx_array(indices)
     indptr = ensure_mx_array(indptr)
 
-    if mode != "none":
-        validate_csr_metadata(data, indices, indptr, shape)
-    if mode == "full":
-        validate_csr_values(indices, indptr, shape, data.shape[0])
-
     has_canonical_format = bool(canonical) if canonical is not None else False
     if has_canonical_format:
         sorted_indices = True
+
+    if mode != "none":
+        validate_csr_metadata(data, indices, indptr, shape)
+    if mode == "full":
+        validate_csr_values(
+            indices,
+            indptr,
+            shape,
+            data.shape[0],
+            sorted_indices=sorted_indices,
+            canonical=has_canonical_format,
+        )
 
     return CSRArray(
         data=data,
