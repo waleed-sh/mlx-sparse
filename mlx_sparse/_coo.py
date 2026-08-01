@@ -50,6 +50,11 @@ class COOArray:
     row-oriented workloads, CSR may still be preferable after construction
     because its compressed row layout avoids coordinate scatter.
 
+    Callers who keep more than one array against the same coordinates -- extra
+    value columns, a presence mask, a label per entry -- can ask
+    :meth:`tocsr` or :meth:`tocsc` for the permutation they applied and
+    reorder the rest with it, rather than repeating the sort.
+
     **Format invariants** (checked by ``validate="metadata"`` by default):
 
     - All three arrays must be rank-1 with the same length.
@@ -126,7 +131,7 @@ class COOArray:
             f"has_canonical_format={self.has_canonical_format})"
         )
 
-    def tocsr(self, *, canonical: bool = False) -> CSRArray:
+    def tocsr(self, *, canonical: bool = False, return_permutation: bool = False):
         """Convert to :class:`CSRArray`.
 
         Sorts entries by row then column and builds a ``(n_rows + 1,)`` row
@@ -136,14 +141,40 @@ class COOArray:
         Args:
             canonical: If ``True``, call :meth:`~CSRArray.canonicalize` on the
                 result to sort indices and sum duplicates. Default ``False``.
+            return_permutation: If ``True``, also return the ``(nnz,)``
+                permutation that produced the result, so that arrays parallel
+                to ``data`` can be reordered with it. Not available together
+                with ``canonical=True``, which sums entries away instead of
+                permuting them. Default ``False``.
 
         Returns:
             A :class:`CSRArray` with ``sorted_indices=True``. If
-            ``canonical=True``, also ``has_canonical_format=True``.
+            ``canonical=True``, also ``has_canonical_format=True``. If
+            ``return_permutation=True``, a ``(csr, permutation)`` tuple.
+
+        Example::
+
+            csr, order = coo.tocsr(return_permutation=True)
+            # csr.data equals mx.take(coo.data, order), and any array aligned
+            # with the COO entries follows the same way:
+            weights = mx.take(edge_weights, order)
+            present = mx.take(edge_present, order)
         """
-        data, indices, indptr = _native.coo_tocsr(
-            self.data, self.row, self.col, self.shape
+        if return_permutation and canonical:
+            raise ValueError(
+                "tocsr(canonical=True) sums duplicate entries, so the result "
+                "is not a permutation of the input and no permutation can be "
+                "returned. Convert with canonical=False and canonicalize the "
+                "result if both are needed."
+            )
+        buffers = _native.coo_tocsr(
+            self.data,
+            self.row,
+            self.col,
+            self.shape,
+            return_permutation=return_permutation,
         )
+        data, indices, indptr = buffers[:3]
         csr = CSRArray(
             data=data,
             indices=indices,
@@ -152,17 +183,43 @@ class COOArray:
             sorted_indices=True,
             has_canonical_format=False,
         )
+        if return_permutation:
+            return csr, buffers[3]
         if canonical:
             return csr.canonicalize()
         return csr
 
-    def tocsc(self, *, canonical: bool = False):
-        """Convert to :class:`~mlx_sparse.CSCArray`."""
+    def tocsc(self, *, canonical: bool = False, return_permutation: bool = False):
+        """Convert to :class:`~mlx_sparse.CSCArray`.
+
+        Args:
+            canonical: If ``True``, sort row indices within each column and sum
+                duplicates. Default ``False``.
+            return_permutation: If ``True``, also return the ``(nnz,)``
+                column-major permutation that produced the result. Not
+                available together with ``canonical=True``. Default ``False``.
+
+        Returns:
+            A :class:`~mlx_sparse.CSCArray`, or a ``(csc, permutation)`` tuple
+            when ``return_permutation=True``.
+        """
         from mlx_sparse._csc import CSCArray
 
-        data, indices, indptr = _native.coo_tocsc(
-            self.data, self.row, self.col, self.shape
+        if return_permutation and canonical:
+            raise ValueError(
+                "tocsc(canonical=True) sums duplicate entries, so the result "
+                "is not a permutation of the input and no permutation can be "
+                "returned. Convert with canonical=False and canonicalize the "
+                "result if both are needed."
+            )
+        buffers = _native.coo_tocsc(
+            self.data,
+            self.row,
+            self.col,
+            self.shape,
+            return_permutation=return_permutation,
         )
+        data, indices, indptr = buffers[:3]
         csc = CSCArray(
             data=data,
             indices=indices,
@@ -171,6 +228,8 @@ class COOArray:
             sorted_indices=True,
             has_canonical_format=False,
         )
+        if return_permutation:
+            return csc, buffers[3]
         if canonical:
             return csc.canonicalize()
         return csc

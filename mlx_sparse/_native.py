@@ -44,13 +44,22 @@ def coo_tocsr(
     row: mx.array,
     col: mx.array,
     shape: Shape2D,
+    *,
+    return_permutation: bool = False,
 ):
+    order = (
+        _convert.coo_sort_permutation(row, col, shape[1])
+        if return_permutation
+        else None
+    )
     ext = extension()
     if ext is None:
-        return _fallback.coo_to_csr(data, row, col, shape)
-    if _convert.can_use_array_ops(data, shape):
-        return _convert.coo_to_csr(data, row, col, shape)
-    return ext.coo_tocsr(data, row, col, shape[0], shape[1])
+        buffers = _fallback.coo_to_csr(data, row, col, shape)
+    elif _convert.can_use_array_ops(data, shape):
+        buffers = _convert.coo_to_csr(data, row, col, shape, order)
+    else:
+        buffers = ext.coo_tocsr(data, row, col, shape[0], shape[1])
+    return (*buffers, order) if return_permutation else buffers
 
 
 def coo_tocsc(
@@ -58,13 +67,22 @@ def coo_tocsc(
     row: mx.array,
     col: mx.array,
     shape: Shape2D,
+    *,
+    return_permutation: bool = False,
 ):
+    order = (
+        _convert.coo_sort_permutation(col, row, shape[0])
+        if return_permutation
+        else None
+    )
     ext = extension()
     if ext is None:
-        return _fallback.coo_to_csc(data, row, col, shape)
-    if _convert.can_use_array_ops(data, shape):
-        return _convert.coo_to_csc(data, row, col, shape)
-    return ext.coo_tocsc(data, row, col, shape[0], shape[1])
+        buffers = _fallback.coo_to_csc(data, row, col, shape)
+    elif _convert.can_use_array_ops(data, shape):
+        buffers = _convert.coo_to_csc(data, row, col, shape, order)
+    else:
+        buffers = ext.coo_tocsc(data, row, col, shape[0], shape[1])
+    return (*buffers, order) if return_permutation else buffers
 
 
 def coo_kron(lhs, rhs):

@@ -136,6 +136,11 @@ Conversions and structural operations
    * - ``COOArray.tocsr(canonical=True)``
      - Done
      - Sorts and sums duplicates.
+   * - ``COOArray.tocsr(return_permutation=True)``
+     - Done
+     - Also returns the ``(nnz,)`` permutation applied, so arrays parallel to
+       ``data`` can be reordered with ``mx.take``. Rejected together with
+       ``canonical=True``, which sums entries rather than permuting them.
    * - ``COOArray.tocsc()``
      - Done
      - Sorts by column then row and preserves duplicates. Takes the same two
@@ -143,6 +148,10 @@ Conversions and structural operations
    * - ``COOArray.tocsc(canonical=True)``
      - Done
      - Sorts row indices within columns and sums duplicates.
+   * - ``COOArray.tocsc(return_permutation=True)``
+     - Done
+     - Column-major counterpart of
+       ``COOArray.tocsr(return_permutation=True)``.
    * - ``CSRArray.tocsc()``
      - Done
      - Native ``csr_tocsc`` conversion with count/prefix/fill structure build.

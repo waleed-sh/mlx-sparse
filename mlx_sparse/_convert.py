@@ -87,9 +87,16 @@ def coo_sort_permutation(major: mx.array, minor: mx.array, n_minor: int) -> mx.a
     return mx.argsort(key)
 
 
-def coo_to_csr(data: mx.array, row: mx.array, col: mx.array, shape: Shape2D):
+def coo_to_csr(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+    order: mx.array | None = None,
+):
     """Convert COO buffers to CSR buffers using MLX array operations."""
-    order = coo_sort_permutation(row, col, shape[1])
+    if order is None:
+        order = coo_sort_permutation(row, col, shape[1])
     return (
         mx.take(data, order),
         mx.take(col, order),
@@ -97,9 +104,16 @@ def coo_to_csr(data: mx.array, row: mx.array, col: mx.array, shape: Shape2D):
     )
 
 
-def coo_to_csc(data: mx.array, row: mx.array, col: mx.array, shape: Shape2D):
+def coo_to_csc(
+    data: mx.array,
+    row: mx.array,
+    col: mx.array,
+    shape: Shape2D,
+    order: mx.array | None = None,
+):
     """Convert COO buffers to CSC buffers using MLX array operations."""
-    order = coo_sort_permutation(col, row, shape[0])
+    if order is None:
+        order = coo_sort_permutation(col, row, shape[0])
     return (
         mx.take(data, order),
         mx.take(row, order),
