@@ -130,15 +130,16 @@ Conversions and structural operations
      - Notes
    * - ``COOArray.tocsr()``
      - Done
-     - Native primitive (CPU and Metal). Sorts by row then column. Preserves
-       duplicates.
+     - Sorts by row then column and preserves duplicates. CPU runs the native
+       counting sort; GPU sorts the row-major keys with MLX array operations
+       and falls back to the native primitive for ``complex64``.
    * - ``COOArray.tocsr(canonical=True)``
      - Done
      - Sorts and sums duplicates.
    * - ``COOArray.tocsc()``
      - Done
-     - Native ``coo_tocsc`` primitive (CPU and Metal). Sorts by column then
-       row. Preserves duplicates.
+     - Sorts by column then row and preserves duplicates. Takes the same two
+       paths as ``COOArray.tocsr()``.
    * - ``COOArray.tocsc(canonical=True)``
      - Done
      - Sorts row indices within columns and sums duplicates.
@@ -592,11 +593,16 @@ compact buffers.
      - All value and index dtypes
      - Fixed-output materialization kernel
    * - ``coo_tocsr``
-     - All value and index dtypes
-     - Rank-based stable sort plus indptr build
+     - ``complex64`` only
+     - Rank-based stable sort plus indptr build. The rank is quadratic in
+       ``nnz``, so other value dtypes take the array-op path instead: a stable
+       sort of the row-major keys, two gathers and a histogram scan.
+       ``complex64`` stays here because the gather's VJP is a scatter and the
+       Metal scatter has no ``complex64`` support.
    * - ``coo_tocsc``
-     - All value and index dtypes
-     - Rank-based stable column-major sort plus indptr build
+     - ``complex64`` only
+     - Rank-based stable column-major sort plus indptr build, kept for the
+       same reason as ``coo_tocsr``.
    * - ``csr_transpose``
      - All value and index dtypes
      - Parallel count/prefix plus deterministic fill

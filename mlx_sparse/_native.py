@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import mlx.core as mx
 
+import mlx_sparse._convert as _convert
 import mlx_sparse._fallback as _fallback
 from mlx_sparse._ext_loader import extension
 from mlx_sparse._typing import Shape2D
@@ -47,6 +48,8 @@ def coo_tocsr(
     ext = extension()
     if ext is None:
         return _fallback.coo_to_csr(data, row, col, shape)
+    if _convert.can_use_array_ops(data, shape):
+        return _convert.coo_to_csr(data, row, col, shape)
     return ext.coo_tocsr(data, row, col, shape[0], shape[1])
 
 
@@ -59,6 +62,8 @@ def coo_tocsc(
     ext = extension()
     if ext is None:
         return _fallback.coo_to_csc(data, row, col, shape)
+    if _convert.can_use_array_ops(data, shape):
+        return _convert.coo_to_csc(data, row, col, shape)
     return ext.coo_tocsc(data, row, col, shape[0], shape[1])
 
 
