@@ -499,6 +499,24 @@ class CSRArray:
             lhs.shape,
         )
 
+    def matvec_transpose(self, x) -> mx.array:
+        """Multiply this matrix's transpose by a rank-1 dense vector.
+
+        Dispatches to :func:`~mlx_sparse.csr_matvec_transpose`, which computes
+        ``self.T @ x`` against the CSR layout. :attr:`T` rebuilds the matrix in CSR
+        form on every access, so prefer this method wherever the transposed product
+        is taken repeatedly.
+
+        Args:
+            x: Dense rank-1 array of length ``self.shape[0]``.
+
+        Returns:
+            A dense rank-1 array of length ``self.shape[1]``.
+        """
+        from mlx_sparse._ops import csr_matvec_transpose
+
+        return csr_matvec_transpose(self, x)
+
     def __matmul__(self, rhs):
         """Matrix multiplication via the ``@`` operator.
 

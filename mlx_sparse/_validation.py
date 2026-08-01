@@ -265,6 +265,28 @@ def validate_csr_matvec_inputs(data, indices, indptr, x, shape: Shape2D) -> None
         )
 
 
+def validate_csr_matvec_transpose_inputs(
+    data, indices, indptr, x, shape: Shape2D
+) -> None:
+    validate_csr_metadata(data, indices, indptr, shape)
+    if x.ndim != 1:
+        raise ValueError(
+            f"csr_matvec_transpose expects a rank-1 RHS, got shape={x.shape}."
+        )
+    if x.shape[0] != shape[0]:
+        raise ValueError(
+            "csr_matvec_transpose RHS has length "
+            f"{x.shape[0]}, but sparse n_rows={shape[0]}."
+        )
+    check_value_dtype("csr_matvec_transpose data", data)
+    check_value_dtype("csr_matvec_transpose RHS", x)
+    if data.dtype != x.dtype:
+        raise TypeError(
+            "csr_matvec_transpose requires sparse data and RHS to have the same dtype, "
+            f"got {data.dtype} and {x.dtype}."
+        )
+
+
 def validate_csc_matvec_inputs(data, indices, indptr, x, shape: Shape2D) -> None:
     validate_csc_metadata(data, indices, indptr, shape)
     if x.ndim != 1:

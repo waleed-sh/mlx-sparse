@@ -216,10 +216,13 @@ Sparse-dense arithmetic
    * - Feature
      - Status
      - Notes
-   * - ``csr_matvec`` (all value dtypes, int32 and int64)
+   * - ``csr_matvec`` / ``csr_matvec_transpose``
+       (all value dtypes, int32 and int64)
      - Done
      - CPU and Metal GPU. Scalar row kernel plus vector-reduction kernel for
-       long rows on Metal.
+       long rows on Metal. The transpose matvec computes ``A.T @ x`` against the
+       CSR layout; non-``float32`` GPU data lowers through ``csr_transpose``
+       plus ``csr_matvec``.
    * - ``csc_matvec`` / ``csc_matvec_transpose``
      - Done
      - Native CSC kernels. Forward matvec is column scatter-add, transpose

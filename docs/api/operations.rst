@@ -38,6 +38,11 @@ csr\_matvec
 
 .. autofunction:: csr_matvec
 
+csr\_matvec\_transpose
+----------------------
+
+.. autofunction:: csr_matvec_transpose
+
 coo\_matvec
 -----------
 

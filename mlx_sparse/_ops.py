@@ -34,6 +34,7 @@ from mlx_sparse._validation import (
     validate_csc_matvec_transpose_inputs,
     validate_csr_matmul_inputs,
     validate_csr_matvec_inputs,
+    validate_csr_matvec_transpose_inputs,
     validate_csr_metadata,
 )
 
@@ -715,6 +716,23 @@ def coo_matvec(a: COOArray, x) -> mx.array:
     x = ensure_mx_array(x)
     validate_coo_matvec_inputs(a.data, a.row, a.col, x, a.shape)
     return _native.coo_matvec(a.data, a.row, a.col, x, a.shape)
+
+
+def csr_matvec_transpose(a: CSRArray, x) -> mx.array:
+    """Multiply the transpose of a CSR sparse matrix by a dense vector.
+
+    Computes ``A.T @ x`` for a CSR ``A`` of shape ``(m, n)`` and a dense ``x`` of
+    length ``m``, returning a dense vector of length ``n``.
+
+    On CPU, and on GPU for ``float32`` data, this runs against the CSR layout
+    directly and never assembles the transpose; other GPU value dtypes lower
+    through ``csr_transpose`` plus ``csr_matvec``. Either way it avoids the
+    ``CSRArray`` rebuild that ``a.T @ x`` performs on every call.
+    """
+    a = _ensure_csr_array("csr_matvec_transpose", a)
+    x = ensure_mx_array(x)
+    validate_csr_matvec_transpose_inputs(a.data, a.indices, a.indptr, x, a.shape)
+    return _native.csr_matvec_transpose(a.data, a.indices, a.indptr, x, a.shape)
 
 
 def csc_matvec_transpose(a: CSCArray, x) -> mx.array:
