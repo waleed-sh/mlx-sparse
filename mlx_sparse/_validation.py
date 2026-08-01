@@ -55,10 +55,10 @@ def normalize_validation_mode(validate: ValidationMode) -> str:
         return "full"
     if validate is False:
         return "none"
-    if validate not in {"metadata", "full"}:
+    if validate not in {"none", "metadata", "full"}:
         raise ValueError(
-            "validate must be one of False, True, 'metadata', or 'full', "
-            f"got {validate!r}."
+            "validate must be one of False, True, 'none', 'metadata', or "
+            f"'full', got {validate!r}."
         )
     return validate
 
