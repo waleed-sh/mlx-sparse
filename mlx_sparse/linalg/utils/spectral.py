@@ -49,12 +49,33 @@ def normalize_ncv(n: int, k: int, ncv: int | None) -> int:
     return min(n, max(k + 1, 2 * k + 1 if ncv is None else int(ncv)))
 
 
+#: Fixed key for the default Krylov start vector, which is ``ones + pseudo-random``.
+#:
+#: The random term is what makes the start vector usable at all on structured input.
+#: A constant vector is an exact eigenvector of any matrix with constant row sums, so
+#: for a graph Laplacian (``L @ 1 == 0``) or a row-stochastic matrix (``P @ 1 == 1``)
+#: the Krylov space built from a pure ``ones`` start is one-dimensional. Every solver
+#: here then returns ``k`` copies of that single eigenpair, whatever ``which`` asked
+#: for. Any component off the constant direction removes the degeneracy.
+#:
+#: The ones term is what keeps ``which="SM"`` cheap on a Laplacian, whose smallest
+#: eigenvector is the constant vector: the sum keeps a constant-direction overlap of
+#: ``1/sqrt(2)`` at every ``n``, where a pure random start would dilute it to
+#: ``~1/sqrt(n)`` and need far more iterations to recover it.
+#:
+#: The key is fixed rather than drawn from the global stream, so ``v0=None`` is
+#: reproducible across calls and processes and does not consume user random state.
+_DEFAULT_START_KEY = mx.random.key(0)
+
+
 def start_vector(v0, *, n: int, name: str = "v0") -> mx.array:
     """Return a finite float32 start vector for a Krylov spectral routine.
 
     Args:
-        v0: Optional user-provided start vector.  ``None`` maps to the current
-            deterministic all-ones vector.
+        v0: Optional user-provided start vector.  ``None`` maps to a deterministic
+            ``ones + pseudo-random`` vector, seeded from a fixed key so that repeated
+            calls agree and the global random stream is left alone.  See
+            ``_DEFAULT_START_KEY`` for why neither term can be dropped.
         n: Required vector length.
         name: Name used in validation errors.
 
@@ -67,7 +88,10 @@ def start_vector(v0, *, n: int, name: str = "v0") -> mx.array:
     """
 
     if v0 is None:
-        return mx.ones((int(n),), dtype=mx.float32)
+        length = int(n)
+        return mx.ones((length,), dtype=mx.float32) + mx.random.normal(
+            shape=(length,), dtype=mx.float32, key=_DEFAULT_START_KEY
+        )
     vector = ensure_float32_vector(name, v0, require_finite=True)
     if vector.shape[0] != n:
         raise ValueError(f"{name} has length {vector.shape[0]}, expected {n}.")

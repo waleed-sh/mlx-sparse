@@ -56,8 +56,10 @@ def lanczos(
             :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
             Float16 and bfloat16 inputs are promoted to float32.
         k: Number of Lanczos steps.  Must satisfy ``0 < k <= A.shape[0]``.
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses a
+            deterministic ``ones + pseudo-random`` start vector; a plain
+            constant vector cannot be used, because it is an exact eigenvector
+            of any matrix with constant row sums.
         reorthogonalize: Whether to apply full reorthogonalisation at each
             step to suppress numerical loss of orthogonality.  Defaults to
             ``True``.
@@ -131,8 +133,10 @@ def eigsh(
             * ``"LA"``: Largest Algebraic (largest values)
             * ``"SA"``: Smallest Algebraic (smallest values)
 
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses a
+            deterministic ``ones + pseudo-random`` start vector; a plain
+            constant vector cannot be used, because it is an exact eigenvector
+            of any matrix with constant row sums.
         ncv: Number of Lanczos basis vectors to build before extracting
             Ritz pairs.  A larger value improves accuracy at the cost of
             more memory.  Defaults to ``max(2*k+1, k+1)``.
@@ -219,8 +223,10 @@ def eigs(
             * ``"LR"``: Largest Real part
             * ``"SR"``: Smallest Real part
 
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses a
+            deterministic ``ones + pseudo-random`` start vector; a plain
+            constant vector cannot be used, because it is an exact eigenvector
+            of any matrix with constant row sums.
         ncv: Dimension of the Arnoldi factorization before restart.
             Defaults to ``max(2*k+1, k+1)``.
         maxiter: Not yet supported because the current implementation performs
@@ -304,8 +310,10 @@ def svds(
             * ``"SM"``: Smallest in Magnitude
 
         v0: Optional starting vector for the right singular-vector Krylov
-            basis, with shape ``(A.shape[1],)``.  ``None`` uses the
-            deterministic all-ones vector.
+            basis, with shape ``(A.shape[1],)``.  ``None`` uses a deterministic
+            ``ones + pseudo-random`` start vector; a plain constant vector
+            cannot be used, because it is an exact singular vector of any
+            matrix with constant row sums.
         ncv: Number of Lanczos basis vectors to build.  Defaults to
             ``max(2*k+1, k+1)``.
         maxiter: Not yet supported because the current implementation performs
