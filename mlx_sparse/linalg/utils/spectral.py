@@ -125,3 +125,35 @@ def reject_iteration_controls(
             f"{routine} tol requires an implicitly restarted convergence loop; "
             "the current implementation performs one ncv-bounded Ritz extraction."
         )
+
+
+def normalize_which(which, *, routine: str, accepted: tuple[str, ...]) -> str:
+    """Return the upper-cased Ritz selector, rejecting anything unrecognized.
+
+    The native Ritz selection sorts descending whenever the selector is not one of
+    the small-end names, so an unrecognized selector silently produces the
+    largest-algebraic pairs instead of failing.  That turns a typo, or a selector
+    this routine does not implement, into a wrong answer rather than an error.
+
+    Args:
+        which: Selector as passed by the caller.  Matching is case-insensitive.
+        routine: Name used in the error message.
+        accepted: Selectors this routine implements, upper-cased.
+
+    Returns:
+        The upper-cased selector.
+
+    Raises:
+        ValueError: If ``which`` is not one of ``accepted``.
+    """
+
+    if not isinstance(which, str):
+        raise ValueError(
+            f"{routine} which must be a string, got {type(which).__name__}."
+        )
+    normalized = which.upper()
+    if normalized not in accepted:
+        raise ValueError(
+            f"{routine} which must be one of {', '.join(accepted)}, got {which!r}."
+        )
+    return normalized

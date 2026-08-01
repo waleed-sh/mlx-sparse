@@ -20,6 +20,7 @@ import mlx_sparse._native as _native
 from mlx_sparse.linalg.utils.spectral import as_csr as _as_csr
 from mlx_sparse.linalg.utils.spectral import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.spectral import normalize_ncv as _ncv
+from mlx_sparse.linalg.utils.spectral import normalize_which as _normalize_which
 from mlx_sparse.linalg.utils.spectral import (
     reject_iteration_controls as _reject_controls,
 )
@@ -158,10 +159,12 @@ def eigsh(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``A`` is not square.
+        ValueError: If ``k`` is out of range, ``A`` is not square, or
+            ``which`` is not one of the accepted selectors.
     """
 
     _reject_controls(routine="eigsh", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="eigsh", accepted=("LM", "SM", "LA", "SA"))
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
@@ -176,7 +179,7 @@ def eigsh(
         csr.shape,
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     return (values, vectors) if return_eigenvectors else values
 
@@ -247,10 +250,12 @@ def eigs(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``A`` is not square.
+        ValueError: If ``k`` is out of range, ``A`` is not square, or
+            ``which`` is not one of the accepted selectors.
     """
 
     _reject_controls(routine="eigs", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="eigs", accepted=("LM", "SM", "LR", "SR"))
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
@@ -265,7 +270,7 @@ def eigs(
         csr.shape,
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     return (values, vectors) if return_eigenvectors else values
 
@@ -336,11 +341,13 @@ def svds(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``return_singular_vectors``
-            is not a recognised value.
+        ValueError: If ``k`` is out of range, ``which`` is not one of the
+            accepted selectors, or ``return_singular_vectors`` is not a
+            recognised value.
     """
 
     _reject_controls(routine="svds", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="svds", accepted=("LM", "SM"))
     if return_singular_vectors not in {True, False, "u", "vh"}:
         raise ValueError("return_singular_vectors must be True, False, 'u', or 'vh'.")
     csr = _float32_csr(_as_csr(A))
@@ -355,7 +362,7 @@ def svds(
         csr.shape,
         k=int(k),
         ncv=_ncv(csr.shape[1], int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     if return_singular_vectors is False:
         return singular
