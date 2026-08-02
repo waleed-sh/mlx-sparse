@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import mlx.core as mx
 
 from mlx_sparse._csr import CSRArray
@@ -125,6 +127,94 @@ def reject_iteration_controls(
             f"{routine} tol requires an implicitly restarted convergence loop; "
             "the current implementation performs one ncv-bounded Ritz extraction."
         )
+
+
+# A Ritz pair extracted from a converged basis lands near float32 round-off,
+# and one extracted from a basis that is too small lands orders of magnitude
+# above it. Measured on a graph Laplacian, converged extractions sit at 1e-6 to
+# 3e-6 and unconverged ones at 3e-3 and worse, so the boundary is placed in the
+# middle of that gap rather than at a value any particular matrix argues for.
+RITZ_BACKWARD_ERROR_TOLERANCE = 1e-4
+
+
+def matrix_inf_norm(csr: CSRArray) -> mx.array:
+    """Return ``max_i sum_j |A[i, j]|``, the induced infinity norm.
+
+    Used to make a residual relative. It bounds the spectral norm, needs one
+    pass over the stored values, and unlike the eigenvalue itself it does not
+    vanish for the near-zero end of a Laplacian spectrum.
+    """
+    magnitudes = CSRArray(
+        data=mx.abs(csr.data),
+        indices=csr.indices,
+        indptr=csr.indptr,
+        shape=csr.shape,
+        sorted_indices=csr.sorted_indices,
+        has_canonical_format=csr.has_canonical_format,
+    )
+    if csr.shape[0] == 0 or csr.nnz == 0:
+        return mx.array(1.0, dtype=mx.float32)
+    return mx.max(magnitudes.row_sums())
+
+
+def ritz_backward_error(csr: CSRArray, values: mx.array, vectors: mx.array) -> mx.array:
+    """Return the largest relative backward error over the returned pairs.
+
+    For each pair this is ``||A v - lam v|| / (||A||_inf ||v||)``. It is the
+    quantity a caller would compute to decide whether to trust the answer, and
+    it needs one sparse product against the ``(n, k)`` block of vectors.
+    """
+    residual = csr @ vectors - vectors * values.reshape(1, -1)
+    residual_norms = mx.sqrt(mx.sum(mx.square(residual), axis=0))
+    vector_norms = mx.sqrt(mx.sum(mx.square(vectors), axis=0))
+    scale = matrix_inf_norm(csr)
+    scale = mx.where(scale > 0, scale, mx.array(1.0, dtype=scale.dtype))
+    vector_norms = mx.where(vector_norms > 0, vector_norms, mx.ones_like(vector_norms))
+    return mx.max(residual_norms / (vector_norms * scale))
+
+
+class UnconvergedRitzWarning(RuntimeWarning):
+    """The returned Ritz pairs did not meet the accepted backward error."""
+
+
+def warn_if_ritz_unconverged(
+    csr: CSRArray,
+    values: mx.array,
+    vectors: mx.array,
+    *,
+    routine: str,
+    ncv: int,
+) -> None:
+    """Warn when the extracted Ritz pairs carry a large backward error.
+
+    One ``ncv``-bounded extraction is not a convergence loop, so the basis can
+    simply be too small for the requested pairs, and the Ritz values are then
+    wrong by an amount nothing in the result reports. Measuring the residual
+    costs one sparse product against the returned block and turns that silence
+    into a statement the caller can act on.
+
+    This warns rather than raises. Accuracy here is governed entirely by
+    ``ncv`` and degrades continuously with it, so there is no backward error
+    that separates "converged" from "not converged" for every matrix, and a
+    caller who has chosen an ``ncv`` and accepted the resulting error is
+    entitled to their answer. Callers who want a hard bound can measure it
+    directly with :func:`ritz_backward_error` and decide for themselves.
+    """
+    if values.size == 0:
+        return
+    error = float(ritz_backward_error(csr, values, vectors))
+    if error <= RITZ_BACKWARD_ERROR_TOLERANCE:
+        return
+    warnings.warn(
+        f"{routine} returned pairs with a relative backward error of "
+        f"{error:.3e}, above {RITZ_BACKWARD_ERROR_TOLERANCE:.0e}, so the "
+        f"eigenvalues are not accurate to float32 round-off. This is one "
+        f"ncv-bounded Ritz extraction rather than a restarted loop, so "
+        f"accuracy is governed entirely by ncv; ncv={ncv} was used here and a "
+        f"larger value tightens the result.",
+        UnconvergedRitzWarning,
+        stacklevel=3,
+    )
 
 
 def normalize_which(which, *, routine: str, accepted: tuple[str, ...]) -> str:

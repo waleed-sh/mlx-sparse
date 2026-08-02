@@ -25,6 +25,9 @@ from mlx_sparse.linalg.utils.spectral import (
     reject_iteration_controls as _reject_controls,
 )
 from mlx_sparse.linalg.utils.spectral import start_vector as _start_vector
+from mlx_sparse.linalg.utils.spectral import (
+    warn_if_ritz_unconverged as _warn_if_unconverged,
+)
 
 
 def lanczos(
@@ -141,11 +144,25 @@ def eigsh(
         ncv: Number of Lanczos basis vectors to build before extracting
             Ritz pairs.  A larger value improves accuracy at the cost of
             more memory.  Defaults to ``max(2*k+1, k+1)``.
+
+            Because this is a single ``ncv``-bounded extraction rather than a
+            restarted loop, ``ncv`` is the *only* control over accuracy, and
+            the default is frequently too small.  On a 200-node
+            Barabasi-Albert graph Laplacian the default returns a largest
+            eigenvalue of 32.48 where the true value is 38.36, and a Fiedler
+            value of 3.00 where the true value is 1.30; ``ncv=20`` brings both
+            to six digits.  The returned pairs are therefore measured before
+            being returned, and an
+            :class:`~mlx_sparse.linalg.utils.spectral.UnconvergedRitzWarning`
+            reports the backward error when it is large.
         maxiter: Not yet supported because the current implementation performs
             one ``ncv``-bounded Ritz extraction, not an implicitly restarted
             convergence loop.  Pass ``None`` (the default).
         tol: Not yet supported for the same reason.  Pass ``0.0`` (the
-            default).
+            default).  Note in particular that it is not the threshold the
+            accuracy warning uses, which is a fixed
+            ``spectral.RITZ_BACKWARD_ERROR_TOLERANCE`` and is not something
+            the routine can iterate towards.
         return_eigenvectors: When ``True`` (the default), return both
             eigenvalues and eigenvectors.  When ``False``, return only the
             eigenvalues.
@@ -161,6 +178,11 @@ def eigsh(
             values.
         ValueError: If ``k`` is out of range, ``A`` is not square, or
             ``which`` is not one of the accepted selectors.
+
+    Warns:
+        UnconvergedRitzWarning: If the extracted pairs carry a relative
+            backward error above ``RITZ_BACKWARD_ERROR_TOLERANCE``, which
+            means ``ncv`` was too small for this matrix.
     """
 
     _reject_controls(routine="eigsh", tol=float(tol), maxiter=maxiter)
@@ -171,6 +193,7 @@ def eigsh(
         raise ValueError(f"eigsh requires a square matrix, got {csr.shape}.")
     if k <= 0 or k >= n:
         raise ValueError("k must satisfy 0 < k < A.shape[0].")
+    resolved_ncv = _ncv(n, int(k), ncv)
     values, vectors = _native.csr_eigsh(
         csr.data,
         csr.indices,
@@ -178,9 +201,10 @@ def eigsh(
         _start_vector(v0, n=n),
         csr.shape,
         k=int(k),
-        ncv=_ncv(n, int(k), ncv),
+        ncv=resolved_ncv,
         which=which,
     )
+    _warn_if_unconverged(csr, values, vectors, routine="eigsh", ncv=resolved_ncv)
     return (values, vectors) if return_eigenvectors else values
 
 
