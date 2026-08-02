@@ -96,6 +96,10 @@ void csr_col_sums_cpu_impl(const mx::array &data, const mx::array &indices,
         std::fill(out_ptr, out_ptr + n_cols, T{});
         for (int row = 0; row < n_rows; ++row) {
           for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            // The Metal kernel checks this, but only after narrowing to int.
+            if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+              continue;
+            }
             out_ptr[indices_ptr[p]] += data_ptr[p];
           }
         }
@@ -104,6 +108,9 @@ void csr_col_sums_cpu_impl(const mx::array &data, const mx::array &indices,
                                 Accumulator<T>::zero());
         for (int row = 0; row < n_rows; ++row) {
           for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+              continue;
+            }
             accum[static_cast<size_t>(indices_ptr[p])] +=
                 static_cast<AccT>(data_ptr[p]);
           }
@@ -133,6 +140,9 @@ void csr_col_sums_cpu_impl(const mx::array &data, const mx::array &indices,
       auto *accum = partial.data() + worker * stride;
       for (int row = range.begin; row < range.end; ++row) {
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            continue;
+          }
           accum[static_cast<size_t>(indices_ptr[p])] +=
               static_cast<AccT>(data_ptr[p]);
         }

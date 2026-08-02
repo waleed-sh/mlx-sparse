@@ -169,7 +169,9 @@ def csr_col_sums(
     for row in range(shape[0]):
         start = int(indptr_np[row])
         end = int(indptr_np[row + 1])
-        np.add.at(out, indices_np[start:end], data_np[start:end])
+        cols = indices_np[start:end]
+        keep = _in_range(cols, shape[1])
+        np.add.at(out, cols[keep], data_np[start:end][keep])
     return to_mx(out, dtype=data.dtype)
 
 
@@ -233,18 +235,32 @@ def csr_trace(
     return to_mx(total, dtype=data.dtype)
 
 
+def _in_range(index_np, bound: int):
+    """An index outside the declared shape contributes nothing.
+
+    The kernels drop such an entry rather than write outside their buffers, so
+    the extension-less path has to drop it too or the two disagree.
+    """
+    return (index_np >= 0) & (index_np < bound)
+
+
+def _coo_entry_in_range(row_np, col_np, shape: Shape2D):
+    return _in_range(row_np, shape[0]) & _in_range(col_np, shape[1])
+
+
 def coo_row_sums(
     data: mx.array,
     row: mx.array,
     col: mx.array,
     shape: Shape2D,
 ) -> mx.array:
-    del col
     data_np = to_numpy(data)
     row_np = to_numpy(row)
+    col_np = to_numpy(col)
+    keep = _coo_entry_in_range(row_np, col_np, shape)
     accum_dtype = _reduction_accum_dtype(data, data_np)
     out = np.zeros(shape[0], dtype=accum_dtype)
-    np.add.at(out, row_np, data_np)
+    np.add.at(out, row_np[keep], data_np[keep])
     return to_mx(out, dtype=data.dtype)
 
 
@@ -254,12 +270,13 @@ def coo_col_sums(
     col: mx.array,
     shape: Shape2D,
 ) -> mx.array:
-    del row
     data_np = to_numpy(data)
+    row_np = to_numpy(row)
     col_np = to_numpy(col)
+    keep = _coo_entry_in_range(row_np, col_np, shape)
     accum_dtype = _reduction_accum_dtype(data, data_np)
     out = np.zeros(shape[1], dtype=accum_dtype)
-    np.add.at(out, col_np, data_np)
+    np.add.at(out, col_np[keep], data_np[keep])
     return to_mx(out, dtype=data.dtype)
 
 
@@ -280,8 +297,12 @@ def coo_row_norms(
     data_np = to_numpy(data)
     row_np = to_numpy(row)
     col_np = to_numpy(col)
+    keep = _coo_entry_in_range(row_np, col_np, shape)
     out = np.zeros(shape[0], dtype=np.float32)
-    for (r, _), value in _coo_coordinate_accumulator(data_np, row_np, col_np).items():
+    accumulator = _coo_coordinate_accumulator(
+        data_np[keep], row_np[keep], col_np[keep]
+    )
+    for (r, _), value in accumulator.items():
         out[r] += np.abs(value) ** 2
     return to_mx(np.sqrt(out).astype(np.float32, copy=False), dtype=mx.float32)
 
@@ -295,8 +316,12 @@ def coo_col_norms(
     data_np = to_numpy(data)
     row_np = to_numpy(row)
     col_np = to_numpy(col)
+    keep = _coo_entry_in_range(row_np, col_np, shape)
     out = np.zeros(shape[1], dtype=np.float32)
-    for (_, c), value in _coo_coordinate_accumulator(data_np, row_np, col_np).items():
+    accumulator = _coo_coordinate_accumulator(
+        data_np[keep], row_np[keep], col_np[keep]
+    )
+    for (_, c), value in accumulator.items():
         out[c] += np.abs(value) ** 2
     return to_mx(np.sqrt(out).astype(np.float32, copy=False), dtype=mx.float32)
 
@@ -366,7 +391,9 @@ def csc_row_sums(
     for col in range(shape[1]):
         start = int(indptr_np[col])
         end = int(indptr_np[col + 1])
-        np.add.at(out, indices_np[start:end], data_np[start:end])
+        rows = indices_np[start:end]
+        keep = _in_range(rows, shape[0])
+        np.add.at(out, rows[keep], data_np[start:end][keep])
     return to_mx(out, dtype=data.dtype)
 
 
@@ -401,6 +428,8 @@ def csc_row_norms(
     accum = {}
     for col in range(shape[1]):
         for p in range(int(indptr_np[col]), int(indptr_np[col + 1])):
+            if not _in_range(indices_np[p], shape[0]):
+                continue
             key = (int(indices_np[p]), col)
             accum[key] = accum.get(key, 0) + data_np[p]
     out = np.zeros(shape[0], dtype=np.float32)

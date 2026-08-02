@@ -94,6 +94,10 @@ void csc_row_norms_cpu_impl(const mx::array &data, const mx::array &indices,
       std::vector<double> accum(static_cast<size_t>(n_rows), 0.0);
       for (int col = 0; col < n_cols; ++col) {
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          // The Metal kernel checks this, but only after narrowing to int.
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           accum[static_cast<size_t>(indices_ptr[p])] +=
               norm_square<T>(data_ptr[p]);
         }
@@ -124,6 +128,9 @@ void csc_row_norms_cpu_impl(const mx::array &data, const mx::array &indices,
       auto *accum = partial.data() + worker * stride;
       for (int col = range.begin; col < range.end; ++col) {
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           accum[static_cast<size_t>(indices_ptr[p])] +=
               norm_square<T>(data_ptr[p]);
         }

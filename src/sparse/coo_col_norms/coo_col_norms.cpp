@@ -70,25 +70,39 @@ template <typename T> double norm_square(T value) {
 }
 
 template <typename T, typename I>
-void coo_col_norms_cpu_impl(const mx::array &data, const mx::array &col,
-                            mx::array &out, int n_cols, mx::Stream stream) {
+void coo_col_norms_cpu_impl(const mx::array &data, const mx::array &row,
+                            const mx::array &col, mx::array &out, int n_rows,
+                            int n_cols, mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
   encoder.set_input_array(data);
+  encoder.set_input_array(row);
   encoder.set_input_array(col);
   encoder.set_output_array(out);
 
   encoder.dispatch([data = mx::array::unsafe_weak_copy(data),
+                    row = mx::array::unsafe_weak_copy(row),
                     col = mx::array::unsafe_weak_copy(col),
-                    out = mx::array::unsafe_weak_copy(out), n_cols]() mutable {
+                    out = mx::array::unsafe_weak_copy(out), n_rows,
+                    n_cols]() mutable {
     const auto *data_ptr = data.data<T>();
+    const auto *row_ptr = row.data<I>();
     const auto *col_ptr = col.data<I>();
     auto *out_ptr = out.data<float>();
+    // Both axes, because the conversion detour this operation takes off
+    // float32 drops an entry whose other coordinate is out of range and the
+    // kernel must agree with it. That coordinate is already an input.
+    auto keeps = [&](size_t p) {
+      return coo_entry_in_range(row_ptr[p], col_ptr[p], n_rows, n_cols);
+    };
     const int nnz = static_cast<int>(data.size());
     auto run_serial = [&]() {
       std::vector<double> accum(static_cast<size_t>(n_cols), 0.0);
       for (size_t p = 0; p < data.size(); ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         accum[static_cast<size_t>(col_ptr[p])] += norm_square<T>(data_ptr[p]);
       }
       for (int c = 0; c < n_cols; ++c) {
@@ -114,6 +128,9 @@ void coo_col_norms_cpu_impl(const mx::array &data, const mx::array &col,
     parallel_for_cpu_ranges_indexed(ranges, [&](size_t worker, CpuRange range) {
       auto *accum = partial.data() + worker * stride;
       for (int p = range.begin; p < range.end; ++p) {
+        if (!keeps(static_cast<size_t>(p))) {
+          continue;
+        }
         accum[static_cast<size_t>(col_ptr[p])] += norm_square<T>(data_ptr[p]);
       }
     });
@@ -159,16 +176,17 @@ void validate_coo_reduction_inputs(const mx::array &data, const mx::array &row,
 void COOColNorms::eval_cpu(const std::vector<mx::array> &inputs,
                            std::vector<mx::array> &outputs) {
   auto &data = inputs[0];
+  auto &row = inputs[1];
   auto &col = inputs[2];
 
 #define DISPATCH_COO_COL_NORMS(DTYPE, TYPE)                                    \
   if (data.dtype() == DTYPE) {                                                 \
     if (col.dtype() == mx::int32) {                                            \
-      coo_col_norms_cpu_impl<TYPE, int32_t>(data, col, outputs[0], n_cols_,    \
-                                            stream());                         \
+      coo_col_norms_cpu_impl<TYPE, int32_t>(data, row, col, outputs[0],        \
+                                            n_rows_, n_cols_, stream());       \
     } else {                                                                   \
-      coo_col_norms_cpu_impl<TYPE, int64_t>(data, col, outputs[0], n_cols_,    \
-                                            stream());                         \
+      coo_col_norms_cpu_impl<TYPE, int64_t>(data, row, col, outputs[0],        \
+                                            n_rows_, n_cols_, stream());       \
     }                                                                          \
     return;                                                                    \
   }
@@ -186,6 +204,7 @@ void COOColNorms::eval_cpu(const std::vector<mx::array> &inputs,
 void COOColNorms::eval_gpu(const std::vector<mx::array> &inputs,
                            std::vector<mx::array> &outputs) {
   auto &data = inputs[0];
+  auto &row = inputs[1];
   auto &col = inputs[2];
   auto &out = outputs[0];
 
@@ -212,10 +231,12 @@ void COOColNorms::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_compute_pipeline_state(kernel);
   encoder.set_input_array(data, 0);
   encoder.set_input_array(col, 1);
+  encoder.set_input_array(row, 5);
   encoder.set_output_array(out, 2);
   auto nnz = static_cast<int>(data.size());
   encoder.set_bytes(nnz, 3);
   encoder.set_bytes(n_cols_, 4);
+  encoder.set_bytes(n_rows_, 6);
   auto threads = std::max<size_t>(data.size(), 1);
   auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
   encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
