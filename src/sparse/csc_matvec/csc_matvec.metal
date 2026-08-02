@@ -39,8 +39,10 @@ template <typename I>
       reinterpret_cast<device atomic_float *>(out);
   const float x_value = x[col];
   for (I p = indptr[col]; p < indptr[col + 1]; ++p) {
-    const int row = static_cast<int>(indices[p]);
-    if (row >= 0 && row < n_rows) {
+    // Compared in the index type: casting to int first folds an index above
+    // INT_MAX back into range, so the check passed and the write did not.
+    if (sparse_index_in_range(indices[p], n_rows)) {
+      const int row = static_cast<int>(indices[p]);
       atomic_fetch_add_explicit(&atomic_out[row], data[p] * x_value,
                                 memory_order_relaxed);
     }
@@ -63,6 +65,10 @@ template <typename T, typename I>
   for (int col = 0; col < n_cols; ++col) {
     const T x_value = x[col];
     for (I p = indptr[col]; p < indptr[col + 1]; ++p) {
+      // The atomic kernel above already checks this; the serial one did not.
+      if (!sparse_index_in_range(indices[p], n_rows)) {
+        continue;
+      }
       const int row = static_cast<int>(indices[p]);
       typedef typename sparse_accumulator<T>::type acc_t;
       const acc_t updated =

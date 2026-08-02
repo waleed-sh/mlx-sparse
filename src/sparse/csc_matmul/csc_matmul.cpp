@@ -96,6 +96,10 @@ void csc_matmul_cpu_impl(const mx::array &data, const mx::array &indices,
       for (int col = 0; col < n_cols; ++col) {
         const auto rhs_offset = static_cast<size_t>(col) * rhs_cols;
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          // The Metal kernel already checks the row; this path did not.
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto out_offset =
               static_cast<size_t>(indices_ptr[p]) * rhs_cols;
           const T value = data_ptr[p];
@@ -109,6 +113,9 @@ void csc_matmul_cpu_impl(const mx::array &data, const mx::array &indices,
       for (int col = 0; col < n_cols; ++col) {
         const auto rhs_offset = static_cast<size_t>(col) * rhs_cols;
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto out_offset =
               static_cast<size_t>(indices_ptr[p]) * rhs_cols;
           const T value = data_ptr[p];

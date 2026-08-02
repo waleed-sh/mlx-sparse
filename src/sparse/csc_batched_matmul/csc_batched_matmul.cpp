@@ -68,9 +68,9 @@ private:
 template <typename T, typename I>
 void csc_batched_matmul_generic_loop(const T *data_ptr, const I *indices_ptr,
                                      const I *indptr_ptr, const T *rhs_ptr,
-                                     T *out_ptr, int n_cols, int batch_begin,
-                                     int batch_end, int rhs_cols,
-                                     size_t per_batch_out,
+                                     T *out_ptr, int n_rows, int n_cols,
+                                     int batch_begin, int batch_end,
+                                     int rhs_cols, size_t per_batch_out,
                                      size_t per_batch_rhs) {
   using AccT = typename Accumulator<T>::Type;
 
@@ -84,6 +84,11 @@ void csc_batched_matmul_generic_loop(const T *data_ptr, const I *indices_ptr,
       for (int col = 0; col < n_cols; ++col) {
         const auto rhs_offset = rhs_batch + static_cast<size_t>(col) * rhs_cols;
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          // The atomic Metal kernel already checks the row; this path and the
+          // serial Metal kernel did not.
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto out_offset =
               out_batch + static_cast<size_t>(indices_ptr[p]) * rhs_cols;
           const T value = data_ptr[p];
@@ -103,6 +108,9 @@ void csc_batched_matmul_generic_loop(const T *data_ptr, const I *indices_ptr,
       for (int col = 0; col < n_cols; ++col) {
         const auto rhs_offset = rhs_batch + static_cast<size_t>(col) * rhs_cols;
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto out_offset =
               out_batch + static_cast<size_t>(indices_ptr[p]) * rhs_cols;
           const T value = data_ptr[p];
@@ -122,8 +130,9 @@ void csc_batched_matmul_generic_loop(const T *data_ptr, const I *indices_ptr,
 template <typename T, typename I, int RHSCols>
 void csc_batched_matmul_small_rhs_loop(const T *data_ptr, const I *indices_ptr,
                                        const I *indptr_ptr, const T *rhs_ptr,
-                                       T *out_ptr, int n_cols, int batch_begin,
-                                       int batch_end, size_t per_batch_out,
+                                       T *out_ptr, int n_rows, int n_cols,
+                                       int batch_begin, int batch_end,
+                                       size_t per_batch_out,
                                        size_t per_batch_rhs) {
   using AccT = typename Accumulator<T>::Type;
 
@@ -137,6 +146,9 @@ void csc_batched_matmul_small_rhs_loop(const T *data_ptr, const I *indices_ptr,
       for (int col = 0; col < n_cols; ++col) {
         const auto rhs_offset = rhs_batch + static_cast<size_t>(col) * RHSCols;
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto out_offset =
               out_batch + static_cast<size_t>(indices_ptr[p]) * RHSCols;
           const T value = data_ptr[p];
@@ -156,6 +168,9 @@ void csc_batched_matmul_small_rhs_loop(const T *data_ptr, const I *indices_ptr,
       for (int col = 0; col < n_cols; ++col) {
         const auto rhs_offset = rhs_batch + static_cast<size_t>(col) * RHSCols;
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto out_offset =
               out_batch + static_cast<size_t>(indices_ptr[p]) * RHSCols;
           const T value = data_ptr[p];
@@ -175,18 +190,19 @@ void csc_batched_matmul_small_rhs_loop(const T *data_ptr, const I *indices_ptr,
 template <typename T, typename I>
 void csc_batched_matmul_run_range(const T *data_ptr, const I *indices_ptr,
                                   const I *indptr_ptr, const T *rhs_ptr,
-                                  T *out_ptr, int n_cols, int rhs_cols,
-                                  size_t per_batch_out, size_t per_batch_rhs,
+                                  T *out_ptr, int n_rows, int n_cols,
+                                  int rhs_cols, size_t per_batch_out,
+                                  size_t per_batch_rhs,
                                   CpuRange batch_range) {
   switch (rhs_cols) {
   case 1:
     csc_batched_matmul_small_rhs_loop<T, I, 1>(
-        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_cols,
+        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
         batch_range.begin, batch_range.end, per_batch_out, per_batch_rhs);
     break;
   default:
     csc_batched_matmul_generic_loop<T, I>(
-        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_cols,
+        data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
         batch_range.begin, batch_range.end, rhs_cols, per_batch_out,
         per_batch_rhs);
     break;
@@ -226,16 +242,17 @@ void csc_batched_matmul_cpu_impl(const mx::array &data,
     const int workers = configured_cpu_worker_count();
     if (workers <= 1 || batch_size <= 1) {
       csc_batched_matmul_run_range<T, I>(
-          data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_cols, rhs_cols,
-          per_batch_out, per_batch_rhs, {0, batch_size});
+          data_ptr, indices_ptr, indptr_ptr, rhs_ptr, out_ptr, n_rows, n_cols,
+          rhs_cols, per_batch_out, per_batch_rhs, {0, batch_size});
       return;
     }
 
     const auto ranges = equal_cpu_ranges(batch_size, workers);
     parallel_for_cpu_ranges(ranges, [&](CpuRange range) {
       csc_batched_matmul_run_range<T, I>(data_ptr, indices_ptr, indptr_ptr,
-                                         rhs_ptr, out_ptr, n_cols, rhs_cols,
-                                         per_batch_out, per_batch_rhs, range);
+                                         rhs_ptr, out_ptr, n_rows, n_cols,
+                                         rhs_cols, per_batch_out, per_batch_rhs,
+                                         range);
     });
   });
 }

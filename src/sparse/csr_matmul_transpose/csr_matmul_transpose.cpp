@@ -97,6 +97,12 @@ void csr_matmul_transpose_cpu_impl(const mx::array &data,
       for (int row = 0; row < n_rows; ++row) {
         const auto rhs_offset = static_cast<size_t>(row) * rhs_cols;
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          // The Metal kernel for this operation already checks the column;
+          // this path did not, so an out-of-range column scattered outside the
+          // output and the two backends disagreed on the same input.
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            continue;
+          }
           const auto col = static_cast<size_t>(indices_ptr[p]);
           const auto out_offset = col * static_cast<size_t>(rhs_cols);
           const auto data_value = data_ptr[p];
@@ -130,6 +136,9 @@ void csr_matmul_transpose_cpu_impl(const mx::array &data,
       for (int row = range.begin; row < range.end; ++row) {
         const auto rhs_offset = static_cast<size_t>(row) * rhs_cols;
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            continue;
+          }
           const auto col = static_cast<size_t>(indices_ptr[p]);
           const auto out_offset = col * static_cast<size_t>(rhs_cols);
           const auto data_value = data_ptr[p];

@@ -45,8 +45,10 @@ template <typename I>
       reinterpret_cast<device atomic_float *>(out);
 
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
-    const int col = static_cast<int>(indices[p]);
-    if (col >= 0 && col < n_cols) {
+    // Compared in the index type: casting to int first folds an index above
+    // INT_MAX back into range, so the check passed and the write did not.
+    if (sparse_index_in_range(indices[p], n_cols)) {
+      const int col = static_cast<int>(indices[p]);
       const int out_offset = col * rhs_cols + rhs_col;
       atomic_fetch_add_explicit(&atomic_out[out_offset], data[p] * rhs_value,
                                 memory_order_relaxed);

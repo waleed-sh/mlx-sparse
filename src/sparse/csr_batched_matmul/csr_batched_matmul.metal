@@ -35,6 +35,9 @@ template <typename T, typename I>
   const int rhs_batch = batch * n_cols * rhs_cols;
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      continue;
+    }
     acc += sparse_multiply<T>(
         data[p],
         rhs[rhs_batch + static_cast<int>(indices[p]) * rhs_cols + rhs_col]);
@@ -67,6 +70,9 @@ template <typename T, typename I>
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row] + static_cast<I>(lane); p < indptr[row + 1];
        p += 128) {
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      continue;
+    }
     acc += sparse_multiply<T>(
         data[p],
         rhs[rhs_batch + static_cast<int>(indices[p]) * rhs_cols + rhs_col]);

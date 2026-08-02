@@ -19,6 +19,7 @@ template <typename T, typename I>
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device const T *x [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_cols [[buffer(5)]],
+    constant int &n_rows [[buffer(6)]],
     uint col [[thread_position_in_grid]]) {
   if (static_cast<int>(col) >= n_cols) {
     return;
@@ -28,7 +29,11 @@ template <typename T, typename I>
   const I start = indptr[col];
   const I end = indptr[col + 1];
   for (I p = start; p < end; ++p) {
-    acc += sparse_multiply<T>(data[p], x[indices[p]]);
+    // The stored index addresses x, and x is n_rows long. A select rather
+    // than a branch, so the loop keeps its shape.
+    acc += sparse_multiply<T>(
+        data[p], sparse_index_in_range(indices[p], n_rows) ? x[indices[p]]
+                                                           : T(0));
   }
   out[col] = sparse_accumulator<T>::cast(acc);
 }
@@ -37,7 +42,8 @@ template <typename T, typename I>
   template [[host_name("csc_matvec_transpose_" #NAME)]] [[kernel]] void        \
   csc_matvec_transpose_kernel<T, I>(device const T *, device const I *,        \
                                     device const I *, device const T *,        \
-                                    device T *, constant int &, uint)
+                                    device T *, constant int &,                \
+                                    constant int &, uint)
 
 INSTANTIATE_CSC_MATVEC_T(float32_int32, float, int);
 INSTANTIATE_CSC_MATVEC_T(float32_int64, float, long);
@@ -55,6 +61,7 @@ template <typename T, typename I>
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device const T *x [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_cols [[buffer(5)]],
+    constant int &n_rows [[buffer(6)]],
     uint col [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
   threadgroup typename sparse_accumulator<T>::type partial[128];
@@ -67,7 +74,9 @@ template <typename T, typename I>
   const I start = indptr[col];
   const I end = indptr[col + 1];
   for (I p = start + static_cast<I>(lane); p < end; p += 128) {
-    acc += sparse_multiply<T>(data[p], x[indices[p]]);
+    acc += sparse_multiply<T>(
+        data[p], sparse_index_in_range(indices[p], n_rows) ? x[indices[p]]
+                                                           : T(0));
   }
   partial[lane] = acc;
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -88,7 +97,7 @@ template <typename T, typename I>
   template [[host_name("csc_matvec_transpose_vector_" #NAME)]] [[kernel]]      \
   void csc_matvec_transpose_vector_kernel<T, I>(                               \
       device const T *, device const I *, device const I *, device const T *,  \
-      device T *, constant int &, uint, uint)
+      device T *, constant int &, constant int &, uint, uint)
 
 INSTANTIATE_CSC_MATVEC_T_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSC_MATVEC_T_VECTOR(float32_int64, float, long);

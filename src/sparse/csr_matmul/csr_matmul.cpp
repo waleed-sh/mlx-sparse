@@ -83,12 +83,18 @@ private:
 template <typename T, typename I, int RHSCols>
 void csr_matmul_small_rhs_cpu_impl(const T *data_ptr, const I *indices_ptr,
                                    const I *indptr_ptr, const T *rhs_ptr,
-                                   T *out_ptr, int row_begin, int row_end) {
+                                   T *out_ptr, int row_begin, int row_end,
+                                   int n_cols) {
   using AccT = typename Accumulator<T>::Type;
 
   for (int row = row_begin; row < row_end; ++row) {
     std::array<AccT, RHSCols> acc{};
     for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+      // The stored index selects a row of the dense operand, so an index
+      // outside the shape reads outside it.
+      if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+        continue;
+      }
       const auto rhs_offset =
           static_cast<size_t>(indices_ptr[p]) * static_cast<size_t>(RHSCols);
       const auto value = data_ptr[p];
@@ -109,13 +115,16 @@ template <typename T, typename I>
 void csr_matmul_generic_cpu_impl(const T *data_ptr, const I *indices_ptr,
                                  const I *indptr_ptr, const T *rhs_ptr,
                                  T *out_ptr, int row_begin, int row_end,
-                                 int rhs_cols) {
+                                 int rhs_cols, int n_cols) {
   using AccT = typename Accumulator<T>::Type;
   std::vector<AccT> row_acc(static_cast<size_t>(rhs_cols));
 
   for (int row = row_begin; row < row_end; ++row) {
     std::fill(row_acc.begin(), row_acc.end(), Accumulator<T>::zero());
     for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+      if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+        continue;
+      }
       const auto col = static_cast<size_t>(indices_ptr[p]);
       const auto data_value = data_ptr[p];
       const auto rhs_offset = col * static_cast<size_t>(rhs_cols);
@@ -135,37 +144,38 @@ void csr_matmul_generic_cpu_impl(const T *data_ptr, const I *indices_ptr,
 template <typename T, typename I>
 void csr_matmul_rows_cpu_impl(const T *data_ptr, const I *indices_ptr,
                               const I *indptr_ptr, const T *rhs_ptr, T *out_ptr,
-                              int row_begin, int row_end, int rhs_cols) {
+                              int row_begin, int row_end, int rhs_cols,
+                              int n_cols) {
   switch (rhs_cols) {
   case 1:
     csr_matmul_small_rhs_cpu_impl<T, I, 1>(data_ptr, indices_ptr, indptr_ptr,
                                            rhs_ptr, out_ptr, row_begin,
-                                           row_end);
+                                           row_end, n_cols);
     return;
   case 2:
     csr_matmul_small_rhs_cpu_impl<T, I, 2>(data_ptr, indices_ptr, indptr_ptr,
                                            rhs_ptr, out_ptr, row_begin,
-                                           row_end);
+                                           row_end, n_cols);
     return;
   case 4:
     csr_matmul_small_rhs_cpu_impl<T, I, 4>(data_ptr, indices_ptr, indptr_ptr,
                                            rhs_ptr, out_ptr, row_begin,
-                                           row_end);
+                                           row_end, n_cols);
     return;
   case 8:
     csr_matmul_small_rhs_cpu_impl<T, I, 8>(data_ptr, indices_ptr, indptr_ptr,
                                            rhs_ptr, out_ptr, row_begin,
-                                           row_end);
+                                           row_end, n_cols);
     return;
   case 16:
     csr_matmul_small_rhs_cpu_impl<T, I, 16>(data_ptr, indices_ptr, indptr_ptr,
                                             rhs_ptr, out_ptr, row_begin,
-                                            row_end);
+                                            row_end, n_cols);
     return;
   default:
     csr_matmul_generic_cpu_impl<T, I>(data_ptr, indices_ptr, indptr_ptr,
                                       rhs_ptr, out_ptr, row_begin, row_end,
-                                      rhs_cols);
+                                      rhs_cols, n_cols);
   }
 }
 
@@ -196,9 +206,15 @@ void csr_matmul_cpu_impl(const mx::array &data, const mx::array &indices,
     const auto *rhs_ptr = rhs.data<T>();
     auto *out_ptr = out.data<T>();
 
+    // The stored index addresses a row of the dense operand, so that
+    // operand's own leading dimension is the bound; nothing new is threaded
+    // in from the host.
+    const int n_cols = rhs.shape(0);
+
     auto compute_rows = [&](CpuRange range) {
       csr_matmul_rows_cpu_impl<T, I>(data_ptr, indices_ptr, indptr_ptr, rhs_ptr,
-                                     out_ptr, range.begin, range.end, rhs_cols);
+                                     out_ptr, range.begin, range.end, rhs_cols,
+                                     n_cols);
     };
 
     if (requested_workers <= 1 || n_rows <= 0) {
@@ -287,6 +303,7 @@ void CSRMatMul::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(out, 4);
   encoder.set_bytes(n_rows_, 5);
   encoder.set_bytes(rhs_cols_, 6);
+  encoder.set_bytes(n_cols_, 7);
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_rows_) * rhs_cols_;

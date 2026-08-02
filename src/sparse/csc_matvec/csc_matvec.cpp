@@ -105,6 +105,10 @@ void csc_matvec_cpu_impl(const mx::array &data, const mx::array &indices,
       for (int col = 0; col < n_cols; ++col) {
         const T x_value = x_ptr[col];
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          // The Metal kernel already checks the row; this path did not.
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           out_ptr[indices_ptr[p]] += data_ptr[p] * x_value;
         }
       }
@@ -114,6 +118,9 @@ void csc_matvec_cpu_impl(const mx::array &data, const mx::array &indices,
       for (int col = 0; col < n_cols; ++col) {
         const T x_value = x_ptr[col];
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           accum[static_cast<size_t>(indices_ptr[p])] +=
               multiply_accumulate<T>(data_ptr[p], x_value);
         }

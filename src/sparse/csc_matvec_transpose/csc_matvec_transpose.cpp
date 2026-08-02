@@ -96,12 +96,18 @@ void csc_matvec_transpose_cpu_impl(const mx::array &data,
     const auto *indptr_ptr = indptr.data<I>();
     const auto *x_ptr = x.data<T>();
     auto *out_ptr = out.data<T>();
+    // The stored index addresses x, so x's own length is the bound and no
+    // extra dimension has to be threaded in.
+    const int n_rows = static_cast<int>(x.size());
 
     auto compute_cols = [&](CpuRange range) {
       for (int col = range.begin; col < range.end; ++col) {
         auto acc = Accumulator<T>::zero();
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
-          acc += multiply_accumulate<T>(data_ptr[p], x_ptr[indices_ptr[p]]);
+          const I row = indices_ptr[p];
+          acc += multiply_accumulate<T>(
+              data_ptr[p],
+              sparse_index_in_range(row, n_rows) ? x_ptr[row] : T(0));
         }
         out_ptr[col] = Accumulator<T>::cast(static_cast<AccT>(acc));
       }
@@ -252,6 +258,7 @@ void CSCMatVecTranspose::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_input_array(x, 3);
   encoder.set_output_array(out, 4);
   encoder.set_bytes(n_cols_, 5);
+  encoder.set_bytes(n_rows_, 6);
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_cols_);

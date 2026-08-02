@@ -101,6 +101,12 @@ void csr_matvec_transpose_cpu_impl(const mx::array &data,
         std::fill(out_ptr, out_ptr + n_cols, T{});
         for (int row = 0; row < n_rows; ++row) {
           for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            // The Metal kernel for this operation already checks the column;
+            // this path did not, so an out-of-range column scattered outside
+            // the output and the two backends disagreed on the same input.
+            if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+              continue;
+            }
             out_ptr[indices_ptr[p]] += data_ptr[p] * x_ptr[row];
           }
         }
@@ -109,6 +115,9 @@ void csr_matvec_transpose_cpu_impl(const mx::array &data,
                                 Accumulator<T>::zero());
         for (int row = 0; row < n_rows; ++row) {
           for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+              continue;
+            }
             accum[static_cast<size_t>(indices_ptr[p])] +=
                 multiply_accumulate<T>(data_ptr[p], x_ptr[row]);
           }
@@ -139,6 +148,9 @@ void csr_matvec_transpose_cpu_impl(const mx::array &data,
       for (int row = range.begin; row < range.end; ++row) {
         const T x_value = x_ptr[row];
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            continue;
+          }
           accum[static_cast<size_t>(indices_ptr[p])] +=
               multiply_accumulate<T>(data_ptr[p], x_value);
         }
