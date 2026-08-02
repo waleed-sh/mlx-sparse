@@ -31,6 +31,9 @@ template <typename T, typename I>
   }
   for (int row = 0; row < n_rows; ++row) {
     for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
+      if (!sparse_index_in_range(indices[p], n_cols)) {
+        continue;
+      }
       const int offset = row * n_cols + static_cast<int>(indices[p]);
       out[offset] = sparse_add_storage<T>(out[offset], data[p]);
     }

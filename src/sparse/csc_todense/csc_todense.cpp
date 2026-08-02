@@ -105,6 +105,11 @@ void csc_todense_cpu_impl(const mx::array &data, const mx::array &indices,
     auto fill_cols = [&](CpuRange range) {
       for (int col = range.begin; col < range.end; ++col) {
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          // The Metal kernel for this operation already checks the row; this
+          // path did not, so the two backends disagreed on the same input.
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto row = static_cast<int>(indices_ptr[p]);
           out_ptr[static_cast<size_t>(row) * n_cols + col] += data_ptr[p];
         }

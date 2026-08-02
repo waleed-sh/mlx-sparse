@@ -26,8 +26,12 @@ template <typename I>
 [[kernel]] void csr_tocsc_count_kernel(device const I *indices [[buffer(0)]],
                                        device int *offsets [[buffer(1)]],
                                        constant int &nnz [[buffer(2)]],
+                                       constant int &n_cols [[buffer(3)]],
                                        uint tid [[thread_position_in_grid]]) {
   if (tid >= static_cast<uint>(nnz)) {
+    return;
+  }
+  if (!sparse_index_in_range(indices[tid], n_cols)) {
     return;
   }
   const int col = static_cast<int>(indices[tid]);
@@ -41,7 +45,6 @@ template <typename I>
                                         device int *next [[buffer(1)]],
                                         device I *out_indptr [[buffer(2)]],
                                         constant int &n_cols [[buffer(3)]],
-                                        constant int &nnz [[buffer(4)]],
                                         uint tid [[thread_position_in_grid]]) {
   if (tid != 0) {
     return;
@@ -54,8 +57,11 @@ template <typename I>
     out_indptr[col] = static_cast<I>(running);
     running += count;
   }
+  // The counts exclude any entry whose column is outside the shape, so the
+  // running total is what will actually be placed. Writing nnz here would claim
+  // entries the fill kernel never wrote.
   next[n_cols] = running;
-  out_indptr[n_cols] = static_cast<I>(nnz);
+  out_indptr[n_cols] = static_cast<I>(running);
 }
 
 template <typename T, typename I>
@@ -63,7 +69,8 @@ template <typename T, typename I>
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device int *offsets [[buffer(3)]],
     device T *out_data [[buffer(4)]], device I *out_indices [[buffer(5)]],
-    constant int &n_rows [[buffer(6)]], uint row [[thread_position_in_grid]]) {
+    constant int &n_rows [[buffer(6)]], constant int &n_cols [[buffer(7)]],
+    uint row [[thread_position_in_grid]]) {
   if (static_cast<int>(row) >= n_rows) {
     return;
   }
@@ -71,6 +78,15 @@ template <typename T, typename I>
   device atomic_int *atomic_offsets =
       reinterpret_cast<device atomic_int *>(offsets);
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      // Not placed in any column. It still takes a slot past the last one the
+      // pointer array reaches, which offsets[n_cols] was left holding.
+      const int tail = atomic_fetch_add_explicit(&atomic_offsets[n_cols], 1,
+                                                 memory_order_relaxed);
+      out_data[tail] = T(0);
+      out_indices[tail] = I(0);
+      continue;
+    }
     const int col = static_cast<int>(indices[p]);
     const int dst = atomic_fetch_add_explicit(&atomic_offsets[col], 1,
                                               memory_order_relaxed);
@@ -81,23 +97,24 @@ template <typename T, typename I>
 
 template [[host_name("csr_tocsc_count_int32")]] [[kernel]] void
 csr_tocsc_count_kernel<int>(device const int *, device int *, constant int &,
-                            uint);
+                            constant int &, uint);
 template [[host_name("csr_tocsc_count_int64")]] [[kernel]] void
 csr_tocsc_count_kernel<long>(device const long *, device int *, constant int &,
-                             uint);
+                             constant int &, uint);
 
 template [[host_name("csr_tocsc_prefix_int32")]] [[kernel]] void
 csr_tocsc_prefix_kernel<int>(device const int *, device int *, device int *,
-                             constant int &, constant int &, uint);
+                             constant int &, uint);
 template [[host_name("csr_tocsc_prefix_int64")]] [[kernel]] void
 csr_tocsc_prefix_kernel<long>(device const int *, device int *, device long *,
-                              constant int &, constant int &, uint);
+                              constant int &, uint);
 
 #define INSTANTIATE_CSR_TOCSC_FILL(NAME, T, I)                                 \
   template [[host_name("csr_tocsc_fill_" #NAME)]] [[kernel]] void              \
   csr_tocsc_fill_kernel<T, I>(device const T *, device const I *,              \
                               device const I *, device int *, device T *,      \
-                              device I *, constant int &, uint)
+                              device I *, constant int &, constant int &,      \
+                              uint)
 
 INSTANTIATE_CSR_TOCSC_FILL(float32_int32, float, int);
 INSTANTIATE_CSR_TOCSC_FILL(float32_int64, float, long);
