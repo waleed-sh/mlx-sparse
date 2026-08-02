@@ -9,8 +9,17 @@ template <typename T, typename I>
     device const I *row [[buffer(0)]], device const I *col [[buffer(1)]],
     device const T *rhs [[buffer(2)]], device const T *cotangent [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &rhs_cols [[buffer(5)]],
-    constant int &nnz [[buffer(6)]], uint p [[thread_position_in_grid]]) {
+    constant int &nnz [[buffer(6)]], constant int &n_rows [[buffer(7)]],
+    constant int &n_cols [[buffer(8)]],
+    uint p [[thread_position_in_grid]]) {
   if (static_cast<int>(p) >= nnz) {
+    return;
+  }
+  // The forward pass drops this entry, so the output does not depend on its
+  // value and the gradient is zero. Written rather than skipped: out has one
+  // slot per stored entry.
+  if (!coo_entry_in_range(row[p], col[p], n_rows, n_cols)) {
+    out[p] = T(0);
     return;
   }
   const int rhs_offset = static_cast<int>(col[p]) * rhs_cols;
@@ -26,7 +35,8 @@ template <typename T, typename I>
   template [[host_name("coo_matmul_data_vjp_" #NAME)]] [[kernel]] void         \
   coo_matmul_data_vjp_kernel<T, I>(                                            \
       device const I *, device const I *, device const T *, device const T *,  \
-      device T *, constant int &, constant int &, uint)
+      device T *, constant int &, constant int &, constant int &,              \
+      constant int &, uint)
 
 INSTANTIATE_COO_MATMUL_DATA_VJP(float32_int32, float, int);
 INSTANTIATE_COO_MATMUL_DATA_VJP(float32_int64, float, long);

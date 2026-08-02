@@ -80,10 +80,18 @@ void csr_matvec_data_vjp_cpu_impl(const mx::array &indices,
     const auto *x_ptr = x.data<T>();
     const auto *cotangent_ptr = cotangent.data<T>();
     auto *out_ptr = out.data<T>();
+    const int n_cols = static_cast<int>(x.size());
 
     auto compute_rows = [&](CpuRange range) {
       for (int row = range.begin; row < range.end; ++row) {
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          // The forward pass drops this entry, so the output does not
+          // depend on its value and the gradient is zero. Written
+          // rather than skipped: out has one slot per stored entry.
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            out_ptr[p] = T(0);
+            continue;
+          }
           out_ptr[p] = Accumulator<T>::cast(multiply_accumulate<T>(
               cotangent_ptr[row], x_ptr[indices_ptr[p]]));
         }
@@ -167,6 +175,7 @@ void CSRMatVecDataVJP::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_input_array(cotangent, 3);
   encoder.set_output_array(out, 4);
   encoder.set_bytes(n_rows_, 5);
+  encoder.set_bytes(n_cols_, 6);
   auto threads = static_cast<size_t>(std::max(n_rows_, 1));
   auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
   encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
