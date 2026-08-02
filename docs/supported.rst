@@ -693,6 +693,17 @@ Known limitations
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.
 * Full validation (``validate="full"``) may trigger host synchronization.
+* CSR selection (``A[rows]``, ``A[:, s:e]``, ``A[rows, s:e]``) synchronizes one
+  count, because the number of stored entries in the result depends on how full
+  the selected rows are. A row index outside the shape **raises**
+  ``IndexError``, as it does in SciPy: the index is an operand the caller
+  supplies rather than stored structure, and the operation already reads that
+  count back to the host, so checking it costs nothing further. Negative ids
+  count from the end. A bare integer (``A[i]``) is refused because the result
+  would be one-dimensional and this package has no such container; use
+  ``A[[i]]``. Column slices with a negative step are refused because they would
+  reverse the column order within every row. Arbitrary column *sets* are not
+  supported, only ranges.
 * COO coordinates outside the declared shape are ignored. ``validate="full"``
   rejects them with a message naming the offending bound, but it is not the
   default and it reads the coordinates back to the host, so it cannot be used

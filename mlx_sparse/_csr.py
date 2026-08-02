@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import mlx.core as mx
 
+import mlx_sparse._index as _index
 import mlx_sparse._native as _native
 from mlx_sparse._typing import Shape2D, ValidationMode
 from mlx_sparse._validation import (
@@ -28,6 +29,31 @@ from mlx_sparse._validation import (
     validate_csr_metadata,
     validate_csr_values,
 )
+
+
+def _split_index_key(key):
+    """Separate a getitem key into a row selection and a column slice.
+
+    A two-element tuple is ``(rows, columns)``. ``slice(None)`` on either axis
+    means that axis is untouched, which is what makes ``A[:, s:e]`` a column
+    slice and nothing else.
+    """
+    if isinstance(key, tuple) and len(key) != 2:
+        raise IndexError(
+            f"CSRArray takes at most a row and a column index, got {len(key)}."
+        )
+    rows_key, column_key = key if isinstance(key, tuple) else (key, slice(None))
+
+    if not isinstance(column_key, slice):
+        raise IndexError(
+            "CSRArray column selection must be a slice; only contiguous or "
+            "strided column ranges are supported, not arbitrary column sets."
+        )
+
+    untouched = slice(None)
+    rows = None if isinstance(rows_key, slice) and rows_key == untouched else rows_key
+    columns = None if column_key == untouched else column_key
+    return rows, columns
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +130,73 @@ class CSRArray:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "shape", normalize_shape(self.shape))
+
+    def __getitem__(self, key) -> "CSRArray":
+        """Select rows, columns, or both, as a new :class:`CSRArray`.
+
+        Supported keys, following SciPy where this package has the container
+        to express the answer:
+
+        - ``A[rows]`` where *rows* is a sequence, a NumPy or MLX integer array,
+          or a boolean mask with one entry per row. Negative ids count from the
+          end, repeats are allowed and produce repeated rows, and an empty
+          selection gives a ``0 x n_cols`` matrix.
+        - ``A[i:j]`` and ``A[i:j:k]`` for a row slice.
+        - ``A[:, s:e]`` and ``A[:, s:e:k]`` for a column slice.
+        - ``A[rows, s:e]`` for both at once.
+
+        Rows are gathered whole, so nothing is reordered inside a row and the
+        ``sorted_indices`` and ``has_canonical_format`` flags carry over to the
+        result rather than being dropped.
+
+        Args:
+            key: A row selection, or a ``(rows, columns)`` pair.
+
+        Returns:
+            A new ``CSRArray``. It always has two dimensions: ``A[i]`` with a
+            bare integer would be one-dimensional in SciPy and is refused here,
+            because this package has no one-dimensional sparse container.
+
+        Raises:
+            IndexError: If an index is out of range for the shape, if a bare
+                integer is used, or if a column slice has a negative step.
+
+        Note:
+            This reads one count back to the host, because the number of stored
+            entries in the result depends on how full the selected rows are.
+
+        Example::
+
+            import mlx_sparse as ms
+
+            A = ms.random.random_array((100, 100), density=0.05)
+            ball = A[[3, 17, 42]]        # a 3 x 100 induced selection
+            window = A[:, 10:20]         # every row, ten columns
+        """
+        rows_key, column_slice = _split_index_key(key)
+
+        data, indices, indptr = self.data, self.indices, self.indptr
+        shape = self.shape
+        if rows_key is not None:
+            rows = _index.normalize_row_selection(rows_key, shape[0])
+            data, indices, indptr, shape = _index.select_rows(
+                data, indices, indptr, rows, shape
+            )
+        if column_slice is not None:
+            data, indices, indptr, shape = _index.select_column_range(
+                data, indices, indptr, column_slice, shape
+            )
+
+        return CSRArray(
+            data=data,
+            indices=indices,
+            indptr=indptr,
+            shape=shape,
+            # Whole rows moved, and within a row nothing was reordered or
+            # merged, so whatever was true of the source is still true.
+            sorted_indices=self.sorted_indices,
+            has_canonical_format=self.has_canonical_format,
+        )
 
     @property
     def nnz(self) -> int:
