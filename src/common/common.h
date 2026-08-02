@@ -74,10 +74,13 @@ template <> struct Accumulator<mx::bfloat16_t> {
 // comparisons stay in the index type: casting to size_t first turns a negative
 // coordinate into a huge positive one, and casting to int folds a 64-bit
 // coordinate above INT_MAX onto a small value that passes a naive check.
+template <typename I> inline bool sparse_index_in_range(I i, int n) {
+  return i >= I{0} && i < static_cast<I>(n);
+}
+
 template <typename I>
 inline bool coo_entry_in_range(I r, I c, int n_rows, int n_cols) {
-  return r >= I{0} && r < static_cast<I>(n_rows) && c >= I{0} &&
-         c < static_cast<I>(n_cols);
+  return sparse_index_in_range(r, n_rows) && sparse_index_in_range(c, n_cols);
 }
 
 template <typename T>

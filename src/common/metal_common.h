@@ -64,7 +64,11 @@ template <typename T> inline T sparse_add_storage(T lhs, T rhs) {
 // the end of the allocation. The comparisons stay in the index type because a
 // cast to int would fold a 64-bit coordinate above INT_MAX onto a small value
 // and let it through.
+template <typename I> inline bool sparse_index_in_range(I i, int n) {
+  return i >= I(0) && i < I(n);
+}
+
 template <typename I>
 inline bool coo_entry_in_range(I r, I c, int n_rows, int n_cols) {
-  return r >= I(0) && r < I(n_rows) && c >= I(0) && c < I(n_cols);
+  return sparse_index_in_range(r, n_rows) && sparse_index_in_range(c, n_cols);
 }

@@ -122,9 +122,25 @@ void csc_tocsr_cpu_impl(const mx::array &data, const mx::array &indices,
     auto *out_indptr_ptr = out_indptr.data<I>();
     const auto nnz = data.size();
 
+    // An entry whose row is outside the declared shape is not placed in any
+    // row, so the slots past the last one the pointer array reaches are filled
+    // rather than left as whatever the allocation came with.
+    auto keeps = [&](size_t p) {
+      return sparse_index_in_range(indices_ptr[p], n_rows);
+    };
+    auto fill_tail = [&](size_t from) {
+      for (size_t p = from; p < nnz; ++p) {
+        out_data_ptr[p] = T(0);
+        out_indices_ptr[p] = I{0};
+      }
+    };
+
     auto run_serial = [&]() {
       std::fill(out_indptr_ptr, out_indptr_ptr + n_rows + 1, I{0});
       for (size_t p = 0; p < nnz; ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         out_indptr_ptr[static_cast<size_t>(indices_ptr[p]) + 1] += I{1};
       }
       for (int row = 0; row < n_rows; ++row) {
@@ -134,12 +150,16 @@ void csc_tocsr_cpu_impl(const mx::array &data, const mx::array &indices,
       std::vector<I> next(out_indptr_ptr, out_indptr_ptr + n_rows);
       for (int col = 0; col < n_cols; ++col) {
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!keeps(static_cast<size_t>(p))) {
+            continue;
+          }
           const auto row = static_cast<size_t>(indices_ptr[p]);
           const auto dst = static_cast<size_t>(next[row]++);
           out_data_ptr[dst] = data_ptr[p];
           out_indices_ptr[dst] = static_cast<I>(col);
         }
       }
+      fill_tail(static_cast<size_t>(out_indptr_ptr[n_rows]));
     };
 
     const int workers = configured_cpu_worker_count();
@@ -162,6 +182,9 @@ void csc_tocsr_cpu_impl(const mx::array &data, const mx::array &indices,
       auto *counts = local_counts.data() + worker * counts_stride;
       for (int col = range.begin; col < range.end; ++col) {
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!keeps(static_cast<size_t>(p))) {
+            continue;
+          }
           counts[static_cast<size_t>(indices_ptr[p])] += I{1};
         }
       }
@@ -190,6 +213,9 @@ void csc_tocsr_cpu_impl(const mx::array &data, const mx::array &indices,
       auto *worker_next = next.data() + worker * counts_stride;
       for (int col = range.begin; col < range.end; ++col) {
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!keeps(static_cast<size_t>(p))) {
+            continue;
+          }
           const auto row = static_cast<size_t>(indices_ptr[p]);
           const auto dst = static_cast<size_t>(worker_next[row]++);
           out_data_ptr[dst] = data_ptr[p];
@@ -197,6 +223,8 @@ void csc_tocsr_cpu_impl(const mx::array &data, const mx::array &indices,
         }
       }
     });
+
+    fill_tail(static_cast<size_t>(out_indptr_ptr[n_rows]));
   });
 }
 
@@ -237,7 +265,9 @@ void csc_tocsr_data_vjp_cpu_impl(const mx::array &cotangent,
         const auto end_p = static_cast<size_t>(indptr_ptr[col + 1]);
         for (size_t p = start_p; p < end_p; ++p) {
           const auto row = indices_ptr[p];
-          if (row < I{0} || static_cast<int>(row) >= n_rows) {
+          // Same predicate as the conversion, compared at full width: casting
+          // to int first folds a 64-bit row above INT_MAX onto a small value.
+          if (!sparse_index_in_range(row, n_rows)) {
             out_ptr[p] = T(0);
             continue;
           }
@@ -438,6 +468,7 @@ void CSCToCSR::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_input_array(indices, 0);
   encoder.set_output_array(counts, 1);
   encoder.set_bytes(static_cast<int>(data.size()), 2);
+  encoder.set_bytes(n_rows_, 3);
   auto count_threads = std::max<size_t>(data.size(), 1);
   auto count_group =
       std::min(count_threads, count_kernel->maxTotalThreadsPerThreadgroup());
@@ -452,7 +483,6 @@ void CSCToCSR::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(next, 1);
   encoder.set_output_array(out_indptr, 2);
   encoder.set_bytes(n_rows_, 3);
-  encoder.set_bytes(static_cast<int>(data.size()), 4);
   encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
 
   auto fill_kernel_name =
@@ -466,6 +496,7 @@ void CSCToCSR::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(out_data, 4);
   encoder.set_output_array(out_indices, 5);
   encoder.set_bytes(n_cols_, 6);
+  encoder.set_bytes(n_rows_, 7);
   auto fill_threads = static_cast<size_t>(std::max(n_cols_, 1));
   auto fill_group =
       std::min(fill_threads, fill_kernel->maxTotalThreadsPerThreadgroup());

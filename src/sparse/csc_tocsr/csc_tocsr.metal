@@ -26,8 +26,12 @@ template <typename I>
 [[kernel]] void csc_tocsr_count_kernel(device const I *indices [[buffer(0)]],
                                        device int *offsets [[buffer(1)]],
                                        constant int &nnz [[buffer(2)]],
+                                       constant int &n_rows [[buffer(3)]],
                                        uint tid [[thread_position_in_grid]]) {
   if (tid >= static_cast<uint>(nnz)) {
+    return;
+  }
+  if (!sparse_index_in_range(indices[tid], n_rows)) {
     return;
   }
   const int row = static_cast<int>(indices[tid]);
@@ -41,7 +45,6 @@ template <typename I>
                                         device int *next [[buffer(1)]],
                                         device I *out_indptr [[buffer(2)]],
                                         constant int &n_rows [[buffer(3)]],
-                                        constant int &nnz [[buffer(4)]],
                                         uint tid [[thread_position_in_grid]]) {
   if (tid != 0) {
     return;
@@ -54,8 +57,13 @@ template <typename I>
     out_indptr[row] = static_cast<I>(running);
     running += count;
   }
+  // The counts already exclude any entry whose row is outside the shape, so the
+  // running total is the number of entries that will be placed. The last
+  // pointer has to be that total rather than nnz: writing nnz here would claim
+  // entries the fill kernel never wrote, which is a wrong structure even on the
+  // runs where the old unguarded write happened not to fault.
   next[n_rows] = running;
-  out_indptr[n_rows] = static_cast<I>(nnz);
+  out_indptr[n_rows] = static_cast<I>(running);
 }
 
 template <typename T, typename I>
@@ -63,7 +71,8 @@ template <typename T, typename I>
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device int *offsets [[buffer(3)]],
     device T *out_data [[buffer(4)]], device I *out_indices [[buffer(5)]],
-    constant int &n_cols [[buffer(6)]], uint col [[thread_position_in_grid]]) {
+    constant int &n_cols [[buffer(6)]], constant int &n_rows [[buffer(7)]],
+    uint col [[thread_position_in_grid]]) {
   if (static_cast<int>(col) >= n_cols) {
     return;
   }
@@ -71,6 +80,17 @@ template <typename T, typename I>
   device atomic_int *atomic_offsets =
       reinterpret_cast<device atomic_int *>(offsets);
   for (I p = indptr[col]; p < indptr[col + 1]; ++p) {
+    if (!sparse_index_in_range(indices[p], n_rows)) {
+      // Not placed in any row. It still takes a slot past the last one the
+      // pointer array reaches -- offsets[n_rows] was left holding that total --
+      // so every slot is written and none is left holding whatever the
+      // allocation came with.
+      const int tail = atomic_fetch_add_explicit(&atomic_offsets[n_rows], 1,
+                                                 memory_order_relaxed);
+      out_data[tail] = T(0);
+      out_indices[tail] = I(0);
+      continue;
+    }
     const int row = static_cast<int>(indices[p]);
     const int dst = atomic_fetch_add_explicit(&atomic_offsets[row], 1,
                                               memory_order_relaxed);
@@ -94,7 +114,10 @@ template <typename T, typename I>
   const I col_i = static_cast<I>(col);
   for (I p = indptr[col]; p < indptr[col + 1]; ++p) {
     const I row = indices[p];
-    if (row < I(0) || static_cast<int>(row) >= n_rows) {
+    // Same predicate as the conversion. It has to compare at full width: the
+    // earlier form cast the row to int first, which folds a 64-bit row above
+    // INT_MAX onto a small value and then indexes the pointer array with it.
+    if (!sparse_index_in_range(row, n_rows)) {
       out[p] = T(0);
       continue;
     }
@@ -124,23 +147,24 @@ template <typename T, typename I>
 
 template [[host_name("csc_tocsr_count_int32")]] [[kernel]] void
 csc_tocsr_count_kernel<int>(device const int *, device int *, constant int &,
-                            uint);
+                            constant int &, uint);
 template [[host_name("csc_tocsr_count_int64")]] [[kernel]] void
 csc_tocsr_count_kernel<long>(device const long *, device int *, constant int &,
-                             uint);
+                             constant int &, uint);
 
 template [[host_name("csc_tocsr_prefix_int32")]] [[kernel]] void
 csc_tocsr_prefix_kernel<int>(device const int *, device int *, device int *,
-                             constant int &, constant int &, uint);
+                             constant int &, uint);
 template [[host_name("csc_tocsr_prefix_int64")]] [[kernel]] void
 csc_tocsr_prefix_kernel<long>(device const int *, device int *, device long *,
-                              constant int &, constant int &, uint);
+                              constant int &, uint);
 
 #define INSTANTIATE_CSC_TOCSR_FILL(NAME, T, I)                                 \
   template [[host_name("csc_tocsr_fill_" #NAME)]] [[kernel]] void              \
   csc_tocsr_fill_kernel<T, I>(device const T *, device const I *,              \
                               device const I *, device int *, device T *,      \
-                              device I *, constant int &, uint)
+                              device I *, constant int &, constant int &,      \
+                              uint)
 
 INSTANTIATE_CSC_TOCSR_FILL(float32_int32, float, int);
 INSTANTIATE_CSC_TOCSR_FILL(float32_int64, float, long);
