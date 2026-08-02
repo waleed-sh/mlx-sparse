@@ -693,3 +693,14 @@ Known limitations
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.
 * Full validation (``validate="full"``) may trigger host synchronization.
+* COO coordinates outside the declared shape are ignored. ``validate="full"``
+  rejects them with a message naming the offending bound, but it is not the
+  default and it reads the coordinates back to the host, so it cannot be used
+  inside ``mx.compile``. The kernels therefore apply the same bound themselves:
+  an entry whose row is outside ``[0, n_rows)`` or whose column is outside
+  ``[0, n_cols)`` contributes nothing, on either backend, and the result is the
+  result of converting the remaining entries. For the compressed conversions
+  that leaves ``indptr[-1]`` short of ``nnz``, and the value and index slots
+  past it are zero. Out-of-range coordinates are a caller error and
+  ``validate="full"`` is how to be told about them; the guarantee here is only
+  that they cannot reach past the end of a buffer.

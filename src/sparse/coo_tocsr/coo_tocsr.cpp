@@ -70,8 +70,8 @@ private:
 
 class COOToCSRDataVJP : public mx::Primitive {
 public:
-  COOToCSRDataVJP(mx::Stream stream, int n_rows)
-      : Primitive(stream), n_rows_(n_rows) {}
+  COOToCSRDataVJP(mx::Stream stream, int n_rows, int n_cols)
+      : Primitive(stream), n_rows_(n_rows), n_cols_(n_cols) {}
 
   void eval_cpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
@@ -83,18 +83,19 @@ public:
 
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const COOToCSRDataVJP &>(other);
-    return n_rows_ == rhs.n_rows_;
+    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_;
   }
 
 private:
   int n_rows_;
+  int n_cols_;
 };
 
 template <typename T, typename I>
 void coo_tocsr_cpu_impl(const mx::array &data, const mx::array &row,
                         const mx::array &col, mx::array &out_data,
                         mx::array &out_indices, mx::array &out_indptr,
-                        int n_rows, mx::Stream stream) {
+                        int n_rows, int n_cols, mx::Stream stream) {
   out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
   out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
   out_indptr.set_data(mx::allocator::malloc(out_indptr.nbytes()));
@@ -113,7 +114,7 @@ void coo_tocsr_cpu_impl(const mx::array &data, const mx::array &row,
                     out_data = mx::array::unsafe_weak_copy(out_data),
                     out_indices = mx::array::unsafe_weak_copy(out_indices),
                     out_indptr = mx::array::unsafe_weak_copy(out_indptr),
-                    n_rows]() mutable {
+                    n_rows, n_cols]() mutable {
     const auto *data_ptr = data.data<T>();
     const auto *row_ptr = row.data<I>();
     const auto *col_ptr = col.data<I>();
@@ -121,6 +122,19 @@ void coo_tocsr_cpu_impl(const mx::array &data, const mx::array &row,
     auto *out_indices_ptr = out_indices.data<I>();
     auto *out_indptr_ptr = out_indptr.data<I>();
     const auto nnz = data.size();
+
+    // Entries addressing a position outside the declared shape are not placed
+    // anywhere, so the slots past the last one a row points at are filled
+    // rather than left as whatever the allocation came with.
+    auto keeps = [&](size_t p) {
+      return coo_entry_in_range(row_ptr[p], col_ptr[p], n_rows, n_cols);
+    };
+    auto fill_tail = [&](size_t from) {
+      for (size_t p = from; p < nnz; ++p) {
+        out_data_ptr[p] = T(0);
+        out_indices_ptr[p] = I{0};
+      }
+    };
 
     auto sort_rows = [&](CpuRange range) {
       std::vector<size_t> order;
@@ -156,6 +170,9 @@ void coo_tocsr_cpu_impl(const mx::array &data, const mx::array &row,
     auto run_serial = [&]() {
       std::fill(out_indptr_ptr, out_indptr_ptr + n_rows + 1, I{0});
       for (size_t p = 0; p < nnz; ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         out_indptr_ptr[static_cast<size_t>(row_ptr[p]) + 1] += I{1};
       }
       for (int row_idx = 0; row_idx < n_rows; ++row_idx) {
@@ -164,11 +181,15 @@ void coo_tocsr_cpu_impl(const mx::array &data, const mx::array &row,
 
       std::vector<I> next(out_indptr_ptr, out_indptr_ptr + n_rows);
       for (size_t p = 0; p < nnz; ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         const auto row_idx = static_cast<size_t>(row_ptr[p]);
         const auto dst = static_cast<size_t>(next[row_idx]++);
         out_data_ptr[dst] = data_ptr[p];
         out_indices_ptr[dst] = col_ptr[p];
       }
+      fill_tail(static_cast<size_t>(out_indptr_ptr[n_rows]));
       sort_rows({0, n_rows});
     };
 
@@ -191,6 +212,9 @@ void coo_tocsr_cpu_impl(const mx::array &data, const mx::array &row,
         source_ranges, [&](size_t worker, CpuRange range) {
           auto *counts = local_counts.data() + worker * counts_stride;
           for (int p = range.begin; p < range.end; ++p) {
+            if (!keeps(static_cast<size_t>(p))) {
+              continue;
+            }
             counts[static_cast<size_t>(row_ptr[p])] += I{1};
           }
         });
@@ -218,12 +242,17 @@ void coo_tocsr_cpu_impl(const mx::array &data, const mx::array &row,
         source_ranges, [&](size_t worker, CpuRange range) {
           auto *worker_next = next.data() + worker * counts_stride;
           for (int p = range.begin; p < range.end; ++p) {
+            if (!keeps(static_cast<size_t>(p))) {
+              continue;
+            }
             const auto row_idx = static_cast<size_t>(row_ptr[p]);
             const auto dst = static_cast<size_t>(worker_next[row_idx]++);
             out_data_ptr[dst] = data_ptr[p];
             out_indices_ptr[dst] = col_ptr[p];
           }
         });
+
+    fill_tail(static_cast<size_t>(out_indptr_ptr[n_rows]));
 
     const auto row_ranges = cpu_ranges_for_output_work(
         compressed_segment_work(out_indptr_ptr, n_rows), workers);
@@ -240,7 +269,7 @@ void coo_tocsr_data_vjp_cpu_impl(const mx::array &cotangent,
                                  const mx::array &row, const mx::array &col,
                                  const mx::array &out_indices,
                                  const mx::array &out_indptr, mx::array &out,
-                                 int n_rows, mx::Stream stream) {
+                                 int n_rows, int n_cols, mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
 
   auto &encoder = mx::cpu::get_command_encoder(stream);
@@ -256,7 +285,8 @@ void coo_tocsr_data_vjp_cpu_impl(const mx::array &cotangent,
                     col = mx::array::unsafe_weak_copy(col),
                     out_indices = mx::array::unsafe_weak_copy(out_indices),
                     out_indptr = mx::array::unsafe_weak_copy(out_indptr),
-                    out = mx::array::unsafe_weak_copy(out), n_rows]() mutable {
+                    out = mx::array::unsafe_weak_copy(out), n_rows,
+                    n_cols]() mutable {
     const auto *cotangent_ptr = cotangent.data<T>();
     const auto *row_ptr = row.data<I>();
     const auto *col_ptr = col.data<I>();
@@ -269,7 +299,9 @@ void coo_tocsr_data_vjp_cpu_impl(const mx::array &cotangent,
       for (int p = range.begin; p < range.end; ++p) {
         const auto r = row_ptr[p];
         const auto c = col_ptr[p];
-        if (r < I{0} || static_cast<int>(r) >= n_rows) {
+        // Same predicate as the conversion: an entry it drops cannot influence
+        // the output, so its gradient is zero.
+        if (!coo_entry_in_range(r, c, n_rows, n_cols)) {
           out_ptr[p] = T(0);
           continue;
         }
@@ -327,11 +359,11 @@ void COOToCSR::eval_cpu(const std::vector<mx::array> &inputs,
     if (row.dtype() == mx::int32) {                                            \
       coo_tocsr_cpu_impl<TYPE, int32_t>(data, row, col, outputs[0],            \
                                         outputs[1], outputs[2], n_rows_,       \
-                                        stream());                             \
+                                        n_cols_, stream());                    \
     } else {                                                                   \
       coo_tocsr_cpu_impl<TYPE, int64_t>(data, row, col, outputs[0],            \
                                         outputs[1], outputs[2], n_rows_,       \
-                                        stream());                             \
+                                        n_cols_, stream());                    \
     }                                                                          \
     return;                                                                    \
   }
@@ -381,7 +413,7 @@ std::vector<mx::array> COOToCSR::vjp(const std::vector<mx::array> &primals,
     require_sparse_value_autodiff_arg(argnum, "COOToCSR", "VJP");
     vjps.push_back(mx::array(
         mx::Shape{static_cast<int>(primals[0].size())}, primals[0].dtype(),
-        std::make_shared<COOToCSRDataVJP>(stream(), n_rows_),
+        std::make_shared<COOToCSRDataVJP>(stream(), n_rows_, n_cols_),
         {mx::contiguous(cotangents[0], false, stream()),
          mx::contiguous(primals[1], false, stream()),
          mx::contiguous(primals[2], false, stream()),
@@ -409,11 +441,11 @@ void COOToCSRDataVJP::eval_cpu(const std::vector<mx::array> &inputs,
     if (row.dtype() == mx::int32) {                                            \
       coo_tocsr_data_vjp_cpu_impl<TYPE, int32_t>(                              \
           cotangent, row, col, out_indices, out_indptr, outputs[0], n_rows_,   \
-          stream());                                                           \
+          n_cols_, stream());                                                  \
     } else {                                                                   \
       coo_tocsr_data_vjp_cpu_impl<TYPE, int64_t>(                              \
           cotangent, row, col, out_indices, out_indptr, outputs[0], n_rows_,   \
-          stream());                                                           \
+          n_cols_, stream());                                                  \
     }                                                                          \
     return;                                                                    \
   }
@@ -456,6 +488,8 @@ void COOToCSR::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(out_data, 3);
   encoder.set_output_array(out_indices, 4);
   encoder.set_bytes(static_cast<uint32_t>(data.size()), 5);
+  encoder.set_bytes(static_cast<uint32_t>(n_rows_), 6);
+  encoder.set_bytes(static_cast<uint32_t>(n_cols_), 7);
 
   auto rank_threads = std::max<size_t>(data.size(), 1);
   auto rank_group =
@@ -468,9 +502,11 @@ void COOToCSR::eval_gpu(const std::vector<mx::array> &inputs,
   auto *indptr_kernel = device.get_kernel(indptr_kernel_name, lib);
   encoder.set_compute_pipeline_state(indptr_kernel);
   encoder.set_input_array(row, 0);
-  encoder.set_output_array(out_indptr, 1);
-  encoder.set_bytes(static_cast<uint32_t>(data.size()), 2);
-  encoder.set_bytes(static_cast<uint32_t>(n_rows_), 3);
+  encoder.set_input_array(col, 1);
+  encoder.set_output_array(out_indptr, 2);
+  encoder.set_bytes(static_cast<uint32_t>(data.size()), 3);
+  encoder.set_bytes(static_cast<uint32_t>(n_rows_), 4);
+  encoder.set_bytes(static_cast<uint32_t>(n_cols_), 5);
   encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
 }
 
@@ -502,6 +538,7 @@ void COOToCSRDataVJP::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(out, 5);
   encoder.set_bytes(static_cast<int>(row.size()), 6);
   encoder.set_bytes(n_rows_, 7);
+  encoder.set_bytes(n_cols_, 8);
 
   auto threads = std::max<size_t>(row.size(), 1);
   auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());

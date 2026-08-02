@@ -47,16 +47,23 @@ def coo_tocsr(
     *,
     return_permutation: bool = False,
 ):
+    ext = extension()
+    array_ops = ext is not None and _convert.can_use_array_ops(data, shape)
+    # Only the paths that consult it pay for it; the kernels do their own check.
+    keep = (
+        _convert.entries_in_range(row, col, shape)
+        if return_permutation or array_ops
+        else None
+    )
     order = (
-        _convert.coo_sort_permutation(row, col, shape[1])
+        _convert.coo_sort_permutation(row, col, shape[1], keep)
         if return_permutation
         else None
     )
-    ext = extension()
     if ext is None:
         buffers = _fallback.coo_to_csr(data, row, col, shape)
-    elif _convert.can_use_array_ops(data, shape):
-        buffers = _convert.coo_to_csr(data, row, col, shape, order)
+    elif array_ops:
+        buffers = _convert.coo_to_csr(data, row, col, shape, order, keep)
     else:
         buffers = ext.coo_tocsr(data, row, col, shape[0], shape[1])
     return (*buffers, order) if return_permutation else buffers
@@ -70,16 +77,22 @@ def coo_tocsc(
     *,
     return_permutation: bool = False,
 ):
+    ext = extension()
+    array_ops = ext is not None and _convert.can_use_array_ops(data, shape)
+    keep = (
+        _convert.entries_in_range(row, col, shape)
+        if return_permutation or array_ops
+        else None
+    )
     order = (
-        _convert.coo_sort_permutation(col, row, shape[0])
+        _convert.coo_sort_permutation(col, row, shape[0], keep)
         if return_permutation
         else None
     )
-    ext = extension()
     if ext is None:
         buffers = _fallback.coo_to_csc(data, row, col, shape)
-    elif _convert.can_use_array_ops(data, shape):
-        buffers = _convert.coo_to_csc(data, row, col, shape, order)
+    elif array_ops:
+        buffers = _convert.coo_to_csc(data, row, col, shape, order, keep)
     else:
         buffers = ext.coo_tocsc(data, row, col, shape[0], shape[1])
     return (*buffers, order) if return_permutation else buffers

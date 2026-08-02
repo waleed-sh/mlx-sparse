@@ -103,8 +103,17 @@ void coo_todense_cpu_impl(const mx::array &data, const mx::array &row,
     }
 
     const int nnz = static_cast<int>(data.size());
+    // An entry addressing a position outside the declared shape has nowhere to
+    // land, so it is not placed at all rather than folded onto whatever address
+    // its coordinates happen to compute.
+    auto keeps = [&](int p) {
+      return coo_entry_in_range(row_ptr[p], col_ptr[p], n_rows, n_cols);
+    };
     if constexpr (std::is_same_v<AccT, T>) {
       for (int p = 0; p < nnz; ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         out_ptr[static_cast<size_t>(row_ptr[p]) * n_cols + col_ptr[p]] +=
             data_ptr[p];
       }
@@ -112,6 +121,9 @@ void coo_todense_cpu_impl(const mx::array &data, const mx::array &row,
       std::vector<AccT> accum(out.size(), Accumulator<T>::zero());
       auto fill_range = [&](CpuRange range) {
         for (int p = range.begin; p < range.end; ++p) {
+          if (!keeps(p)) {
+            continue;
+          }
           accum[static_cast<size_t>(row_ptr[p]) * n_cols + col_ptr[p]] +=
               static_cast<AccT>(data_ptr[p]);
         }

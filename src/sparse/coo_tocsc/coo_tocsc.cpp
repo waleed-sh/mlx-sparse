@@ -61,7 +61,7 @@ template <typename T, typename I>
 void coo_tocsc_cpu_impl(const mx::array &data, const mx::array &row,
                         const mx::array &col, mx::array &out_data,
                         mx::array &out_indices, mx::array &out_indptr,
-                        int n_cols, mx::Stream stream) {
+                        int n_rows, int n_cols, mx::Stream stream) {
   out_data.set_data(mx::allocator::malloc(out_data.nbytes()));
   out_indices.set_data(mx::allocator::malloc(out_indices.nbytes()));
   out_indptr.set_data(mx::allocator::malloc(out_indptr.nbytes()));
@@ -80,7 +80,7 @@ void coo_tocsc_cpu_impl(const mx::array &data, const mx::array &row,
                     out_data = mx::array::unsafe_weak_copy(out_data),
                     out_indices = mx::array::unsafe_weak_copy(out_indices),
                     out_indptr = mx::array::unsafe_weak_copy(out_indptr),
-                    n_cols]() mutable {
+                    n_rows, n_cols]() mutable {
     const auto *data_ptr = data.data<T>();
     const auto *row_ptr = row.data<I>();
     const auto *col_ptr = col.data<I>();
@@ -88,6 +88,19 @@ void coo_tocsc_cpu_impl(const mx::array &data, const mx::array &row,
     auto *out_indices_ptr = out_indices.data<I>();
     auto *out_indptr_ptr = out_indptr.data<I>();
     const auto nnz = data.size();
+
+    // Entries addressing a position outside the declared shape are not placed
+    // anywhere, so the slots past the last one a column points at are filled
+    // rather than left as whatever the allocation came with.
+    auto keeps = [&](size_t p) {
+      return coo_entry_in_range(row_ptr[p], col_ptr[p], n_rows, n_cols);
+    };
+    auto fill_tail = [&](size_t from) {
+      for (size_t p = from; p < nnz; ++p) {
+        out_data_ptr[p] = T(0);
+        out_indices_ptr[p] = I{0};
+      }
+    };
 
     auto sort_cols = [&](CpuRange range) {
       std::vector<size_t> order;
@@ -123,6 +136,9 @@ void coo_tocsc_cpu_impl(const mx::array &data, const mx::array &row,
     auto run_serial = [&]() {
       std::fill(out_indptr_ptr, out_indptr_ptr + n_cols + 1, I{0});
       for (size_t p = 0; p < nnz; ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         out_indptr_ptr[static_cast<size_t>(col_ptr[p]) + 1] += I{1};
       }
       for (int col_idx = 0; col_idx < n_cols; ++col_idx) {
@@ -131,11 +147,15 @@ void coo_tocsc_cpu_impl(const mx::array &data, const mx::array &row,
 
       std::vector<I> next(out_indptr_ptr, out_indptr_ptr + n_cols);
       for (size_t p = 0; p < nnz; ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         const auto col_idx = static_cast<size_t>(col_ptr[p]);
         const auto dst = static_cast<size_t>(next[col_idx]++);
         out_data_ptr[dst] = data_ptr[p];
         out_indices_ptr[dst] = row_ptr[p];
       }
+      fill_tail(static_cast<size_t>(out_indptr_ptr[n_cols]));
       sort_cols({0, n_cols});
     };
 
@@ -158,6 +178,9 @@ void coo_tocsc_cpu_impl(const mx::array &data, const mx::array &row,
         source_ranges, [&](size_t worker, CpuRange range) {
           auto *counts = local_counts.data() + worker * counts_stride;
           for (int p = range.begin; p < range.end; ++p) {
+            if (!keeps(static_cast<size_t>(p))) {
+              continue;
+            }
             counts[static_cast<size_t>(col_ptr[p])] += I{1};
           }
         });
@@ -185,12 +208,17 @@ void coo_tocsc_cpu_impl(const mx::array &data, const mx::array &row,
         source_ranges, [&](size_t worker, CpuRange range) {
           auto *worker_next = next.data() + worker * counts_stride;
           for (int p = range.begin; p < range.end; ++p) {
+            if (!keeps(static_cast<size_t>(p))) {
+              continue;
+            }
             const auto col_idx = static_cast<size_t>(col_ptr[p]);
             const auto dst = static_cast<size_t>(worker_next[col_idx]++);
             out_data_ptr[dst] = data_ptr[p];
             out_indices_ptr[dst] = row_ptr[p];
           }
         });
+
+    fill_tail(static_cast<size_t>(out_indptr_ptr[n_cols]));
 
     const auto col_ranges = cpu_ranges_for_output_work(
         compressed_segment_work(out_indptr_ptr, n_cols), workers);
@@ -218,11 +246,13 @@ void COOToCSC::eval_cpu(const std::vector<mx::array> &inputs,
   if (data.dtype() == DTYPE) {                                                 \
     if (row.dtype() == mx::int32) {                                            \
       coo_tocsc_cpu_impl<TYPE, int32_t>(data, row, col, outputs[0],            \
-                                        outputs[1], outputs[2], n_cols_,       \
+                                        outputs[1], outputs[2], n_rows_,       \
+                                        n_cols_,                               \
                                         stream());                             \
     } else {                                                                   \
       coo_tocsc_cpu_impl<TYPE, int64_t>(data, row, col, outputs[0],            \
-                                        outputs[1], outputs[2], n_cols_,       \
+                                        outputs[1], outputs[2], n_rows_,       \
+                                        n_cols_,                               \
                                         stream());                             \
     }                                                                          \
     return;                                                                    \
@@ -266,6 +296,8 @@ void COOToCSC::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(out_data, 3);
   encoder.set_output_array(out_indices, 4);
   encoder.set_bytes(static_cast<uint32_t>(data.size()), 5);
+  encoder.set_bytes(static_cast<uint32_t>(n_rows_), 6);
+  encoder.set_bytes(static_cast<uint32_t>(n_cols_), 7);
 
   auto rank_threads = std::max<size_t>(data.size(), 1);
   auto rank_group =
@@ -277,10 +309,12 @@ void COOToCSC::eval_gpu(const std::vector<mx::array> &inputs,
       std::string("coo_tocsc_indptr_") + index_kernel_suffix(row.dtype());
   auto *indptr_kernel = device.get_kernel(indptr_kernel_name, lib);
   encoder.set_compute_pipeline_state(indptr_kernel);
-  encoder.set_input_array(col, 0);
-  encoder.set_output_array(out_indptr, 1);
-  encoder.set_bytes(static_cast<uint32_t>(data.size()), 2);
-  encoder.set_bytes(static_cast<uint32_t>(n_cols_), 3);
+  encoder.set_input_array(row, 0);
+  encoder.set_input_array(col, 1);
+  encoder.set_output_array(out_indptr, 2);
+  encoder.set_bytes(static_cast<uint32_t>(data.size()), 3);
+  encoder.set_bytes(static_cast<uint32_t>(n_rows_), 4);
+  encoder.set_bytes(static_cast<uint32_t>(n_cols_), 5);
   encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
 }
 #else

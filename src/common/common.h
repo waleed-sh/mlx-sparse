@@ -67,6 +67,19 @@ template <> struct Accumulator<mx::bfloat16_t> {
   static mx::bfloat16_t cast(Type value) { return mx::bfloat16_t(value); }
 };
 
+// Whether a COO entry addresses a position inside the declared shape.
+//
+// The CPU counting sorts and scatters index their output by a coordinate, so a
+// coordinate outside the shape writes past the end of the allocation. The
+// comparisons stay in the index type: casting to size_t first turns a negative
+// coordinate into a huge positive one, and casting to int folds a 64-bit
+// coordinate above INT_MAX onto a small value that passes a naive check.
+template <typename I>
+inline bool coo_entry_in_range(I r, I c, int n_rows, int n_cols) {
+  return r >= I{0} && r < static_cast<I>(n_rows) && c >= I{0} &&
+         c < static_cast<I>(n_cols);
+}
+
 template <typename T>
 typename Accumulator<T>::Type multiply_accumulate(T lhs, T rhs) {
   using AccT = typename Accumulator<T>::Type;

@@ -21,19 +21,33 @@ from mlx_sparse._host import to_mx, to_numpy
 from mlx_sparse._typing import Shape2D
 
 
+def _entries_in_range(row_np, col_np, shape):
+    """The entries addressing a position inside the declared shape.
+
+    Same predicate as the kernels use, so that a build without the extension
+    answers the same thing as a build with it.
+    """
+    return (row_np >= 0) & (row_np < shape[0]) & (col_np >= 0) & (col_np < shape[1])
+
+
 def coo_to_csr(data: mx.array, row: mx.array, col: mx.array, shape: Shape2D):
     data_np = to_numpy(data)
     row_np = to_numpy(row)
     col_np = to_numpy(col)
 
-    order = np.lexsort((np.arange(row_np.size), col_np, row_np))
-    sorted_row = row_np[order]
-    sorted_col = col_np[order]
-    sorted_data = data_np[order]
+    keep = _entries_in_range(row_np, col_np, shape)
+    # Out-of-range entries sort past the ones that stay and carry a zero, which
+    # leaves them in the slots the pointer array never reaches.
+    order = np.lexsort((np.arange(row_np.size), col_np, row_np, ~keep))
+    sorted_row = np.where(keep, row_np, 0)[order]
+    sorted_col = np.where(keep, col_np, 0)[order]
+    sorted_data = np.where(keep, data_np, 0)[order]
 
     indptr = np.zeros(shape[0] + 1, dtype=row_np.dtype)
-    if sorted_row.size:
-        counts = np.bincount(sorted_row.astype(np.int64), minlength=shape[0])
+    if keep.any():
+        counts = np.bincount(
+            sorted_row[keep[order]].astype(np.int64), minlength=shape[0]
+        )
         indptr[1:] = np.cumsum(counts, dtype=indptr.dtype)
 
     return (
@@ -48,14 +62,17 @@ def coo_to_csc(data: mx.array, row: mx.array, col: mx.array, shape: Shape2D):
     row_np = to_numpy(row)
     col_np = to_numpy(col)
 
-    order = np.lexsort((np.arange(col_np.size), row_np, col_np))
-    sorted_col = col_np[order]
-    sorted_row = row_np[order]
-    sorted_data = data_np[order]
+    keep = _entries_in_range(row_np, col_np, shape)
+    order = np.lexsort((np.arange(col_np.size), row_np, col_np, ~keep))
+    sorted_col = np.where(keep, col_np, 0)[order]
+    sorted_row = np.where(keep, row_np, 0)[order]
+    sorted_data = np.where(keep, data_np, 0)[order]
 
     indptr = np.zeros(shape[1] + 1, dtype=col_np.dtype)
-    if sorted_col.size:
-        counts = np.bincount(sorted_col.astype(np.int64), minlength=shape[1])
+    if keep.any():
+        counts = np.bincount(
+            sorted_col[keep[order]].astype(np.int64), minlength=shape[1]
+        )
         indptr[1:] = np.cumsum(counts, dtype=indptr.dtype)
 
     return (
@@ -109,7 +126,8 @@ def coo_todense(
     row_np = to_numpy(row)
     col_np = to_numpy(col)
     dense = np.zeros(shape, dtype=data_np.dtype)
-    np.add.at(dense, (row_np, col_np), data_np)
+    keep = _entries_in_range(row_np, col_np, shape)
+    np.add.at(dense, (row_np[keep], col_np[keep]), data_np[keep])
     return to_mx(dense, dtype=data.dtype)
 
 
@@ -483,7 +501,8 @@ def coo_matvec(
     col_np = to_numpy(col)
     x_np = to_numpy(x)
     out = np.zeros(shape[0], dtype=np.result_type(data_np.dtype, x_np.dtype))
-    np.add.at(out, row_np, data_np * x_np[col_np])
+    keep = _entries_in_range(row_np, col_np, shape)
+    np.add.at(out, row_np[keep], data_np[keep] * x_np[col_np[keep]])
     return to_mx(out, dtype=data.dtype)
 
 
@@ -586,7 +605,10 @@ def coo_matmul(
         (shape[0], rhs_np.shape[1]),
         dtype=np.result_type(data_np.dtype, rhs_np.dtype),
     )
+    keep = _entries_in_range(row_np, col_np, shape)
     for p, (r, c) in enumerate(zip(row_np, col_np, strict=True)):
+        if not keep[p]:
+            continue
         out[r] += data_np[p] * rhs_np[c]
     return to_mx(out, dtype=data.dtype)
 

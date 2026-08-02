@@ -55,3 +55,16 @@ template <typename T> inline T sparse_add_storage(T lhs, T rhs) {
   typedef typename sparse_accumulator<T>::type acc_t;
   return sparse_accumulator<T>::cast(acc_t(lhs) + acc_t(rhs));
 }
+
+// Whether a COO entry addresses a position inside the declared shape.
+//
+// A kernel that indexes an output by a coordinate has to ask this first: the
+// coordinates are ordinary buffer contents, nothing on the device path checks
+// them, and a coordinate outside the shape otherwise turns into a write past
+// the end of the allocation. The comparisons stay in the index type because a
+// cast to int would fold a 64-bit coordinate above INT_MAX onto a small value
+// and let it through.
+template <typename I>
+inline bool coo_entry_in_range(I r, I c, int n_rows, int n_cols) {
+  return r >= I(0) && r < I(n_rows) && c >= I(0) && c < I(n_cols);
+}
