@@ -222,7 +222,10 @@ void CSRBatchedMatVec::eval_gpu(const std::vector<mx::array> &inputs,
 
   const auto outputs_count = static_cast<size_t>(batch_size_) * n_rows_;
   if (use_vector_kernel) {
-    encoder.dispatch_threads(MTL::Size(outputs_count * kVectorThreads, 1, 1),
+    // Down the grid's second dimension. A flat x-dimension of
+    // <threadgroups> * kVectorThreads threads wraps at 2^32, silently: the
+    // threadgroups past the wrap never run and their outputs stay zero.
+    encoder.dispatch_threads(MTL::Size(kVectorThreads, outputs_count, 1),
                              MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = std::max<size_t>(outputs_count, 1);

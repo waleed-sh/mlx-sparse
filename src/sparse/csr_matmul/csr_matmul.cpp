@@ -41,6 +41,7 @@ namespace {
 constexpr size_t kVectorThreads = 128;
 constexpr size_t kVectorMinAverageNnz = 32;
 
+
 class CSRMatMul : public mx::Primitive {
 public:
   CSRMatMul(mx::Stream stream, int n_rows, int n_cols, int rhs_cols)
@@ -307,7 +308,11 @@ void CSRMatMul::eval_gpu(const std::vector<mx::array> &inputs,
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_rows_) * rhs_cols_;
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
+    // Down the grid's second dimension: a flat x-dimension of
+    // threadgroups * kVectorThreads threads wraps at 2^32, and the wrap is
+    // silent -- the threadgroups past it never run and their outputs stay
+    // zero. Splitting the grid keeps each dimension far from the limit.
+    encoder.dispatch_threads(MTL::Size(kVectorThreads, threadgroups, 1),
                              MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = static_cast<size_t>(std::max(n_rows_ * rhs_cols_, 1));

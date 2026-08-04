@@ -62,8 +62,11 @@ template <typename T, typename I>
     device const I *indptr [[buffer(2)]], device const T *x [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_cols [[buffer(5)]],
     constant int &n_rows [[buffer(6)]],
-    uint col [[threadgroup_position_in_grid]],
+    uint2 col_group [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
+  // One threadgroup per output, indexed down the grid's second
+  // dimension; see the dispatch for why it is not a flat grid.
+  const uint col = col_group.y;
   threadgroup typename sparse_accumulator<T>::type partial[128];
 
   if (static_cast<int>(col) >= n_cols) {
@@ -97,7 +100,7 @@ template <typename T, typename I>
   template [[host_name("csc_matvec_transpose_vector_" #NAME)]] [[kernel]]      \
   void csc_matvec_transpose_vector_kernel<T, I>(                               \
       device const T *, device const I *, device const I *, device const T *,  \
-      device T *, constant int &, constant int &, uint, uint)
+      device T *, constant int &, constant int &, uint2, uint)
 
 INSTANTIATE_CSC_MATVEC_T_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSC_MATVEC_T_VECTOR(float32_int64, float, long);

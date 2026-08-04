@@ -94,10 +94,15 @@ template <typename T, typename I>
     device const I *indptr [[buffer(2)]], device const T *rhs [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
     constant int &rhs_cols [[buffer(6)]], constant int &n_cols [[buffer(7)]],
-    uint out_id [[threadgroup_position_in_grid]],
+    uint2 group_pos [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
   threadgroup typename sparse_accumulator<T>::type partial[128];
 
+  // One threadgroup per (row, rhs column), indexed down the grid's SECOND
+  // dimension. A flat grid would need n_rows * rhs_cols * 128 threads in one
+  // dimension, which wraps at 2^32 and silently drops every threadgroup past
+  // it -- so a large enough product returned zeros for the tail.
+  const uint out_id = group_pos.y;
   const int row = static_cast<int>(out_id) / rhs_cols;
   const int rhs_col = static_cast<int>(out_id) - row * rhs_cols;
   if (row >= n_rows) {
@@ -132,7 +137,7 @@ template <typename T, typename I>
   template [[host_name("csr_matmul_vector_" #NAME)]] [[kernel]] void           \
   csr_matmul_vector_kernel<T, I>(                                              \
       device const T *, device const I *, device const I *, device const T *,  \
-      device T *, constant int &, constant int &, constant int &, uint,       \
+      device T *, constant int &, constant int &, constant int &, uint2,      \
       uint)
 
 INSTANTIATE_CSR_MATMUL_VECTOR(float32_int32, float, int);

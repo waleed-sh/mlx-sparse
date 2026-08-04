@@ -41,8 +41,11 @@ template <typename T, typename I>
 [[kernel]] void csc_col_sums_vector_kernel(
     device const T *data [[buffer(0)]], device const I *indptr [[buffer(1)]],
     device T *out [[buffer(2)]], constant int &n_cols [[buffer(3)]],
-    uint col [[threadgroup_position_in_grid]],
+    uint2 col_group [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
+  // One threadgroup per output, indexed down the grid's second
+  // dimension; see the dispatch for why it is not a flat grid.
+  const uint col = col_group.y;
   threadgroup typename sparse_accumulator<T>::type partial[128];
 
   if (static_cast<int>(col) >= n_cols) {
@@ -74,7 +77,7 @@ template <typename T, typename I>
 #define INSTANTIATE_CSC_COL_SUMS_VECTOR(NAME, T, I)                            \
   template [[host_name("csc_col_sums_vector_" #NAME)]] [[kernel]] void         \
   csc_col_sums_vector_kernel<T, I>(device const T *, device const I *,         \
-                                   device T *, constant int &, uint, uint)
+                                   device T *, constant int &, uint2, uint)
 
 INSTANTIATE_CSC_COL_SUMS_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSC_COL_SUMS_VECTOR(float32_int64, float, long);

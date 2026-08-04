@@ -91,8 +91,11 @@ template <typename T, typename I>
     device const I *indptr [[buffer(2)]], device const T *x [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
     constant int &n_cols [[buffer(6)]],
-    uint row [[threadgroup_position_in_grid]],
+    uint2 row_group [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
+  // One threadgroup per output, indexed down the grid's second
+  // dimension; see the dispatch for why it is not a flat grid.
+  const uint row = row_group.y;
   threadgroup typename sparse_accumulator<T>::type partial[128];
 
   if (static_cast<int>(row) >= n_rows) {
@@ -127,7 +130,7 @@ template <typename T, typename I>
   csr_matvec_vector_kernel<T, I>(device const T *, device const I *,           \
                                  device const I *, device const T *,           \
                                  device T *, constant int &, constant int &,   \
-                                 uint, uint)
+                                 uint2, uint)
 
 INSTANTIATE_CSR_MATVEC_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSR_MATVEC_VECTOR(float32_int64, float, long);
