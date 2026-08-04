@@ -287,8 +287,15 @@ void CSRMatMul::eval_gpu(const std::vector<mx::array> &inputs,
   auto &s = stream();
   auto &device = mx::metal::device(s.device);
   auto *lib = device.get_library("mlx_sparse", current_binary_dir());
+  // The cooperative kernel gives a whole 128-thread threadgroup to one output,
+  // which pays only when there is nothing else to fill the machine with. A
+  // second right-hand column is already something else: the scalar kernel gets
+  // n_rows * rhs_cols independent threads and reuses each row's indices across
+  // the columns, while the cooperative one re-reads them per column and adds a
+  // tree reduction on top. So the width decides this, and until now nothing
+  // here looked at it.
   const bool use_vector_kernel =
-      n_rows_ > 0 &&
+      n_rows_ > 0 && rhs_cols_ == 1 &&
       data.size() >= static_cast<size_t>(n_rows_) * kVectorMinAverageNnz;
   auto kernel_name =
       sparse_kernel_name(use_vector_kernel ? "csr_matmul_vector" : "csr_matmul",
