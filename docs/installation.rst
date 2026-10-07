@@ -56,7 +56,7 @@ Requirements
        Sparse BLAS backends.
    * - Python ≥ 3.10
      - Tested under Python 3.12 in CI.
-   * - MLX ≥ 0.31
+   * - MLX ≥ 0.32.3
      - Installed automatically by ``pip install mlx-sparse``. Source builds use
        ``python -m mlx --cmake-dir`` to locate the MLX package.
    * - NumPy ≥ 1.26
@@ -64,8 +64,9 @@ Requirements
        sparse kernels.
    * - CMake ≥ 3.27
      - Required only when building from source.
-   * - nanobind ≥ 2.0
-     - Python/C++ binding layer used by source builds.
+   * - nanobind ≥ 3.0.1, < 3.1
+     - Python/C++ binding layer used by source builds. The version range matches
+       the binding ABI used by MLX 0.32.3.
 
 
 Local install

@@ -1,6 +1,55 @@
 Changelog
 =========
 
+mlx-sparse v0.0.6b1 (Unreleased)
+---------------------------------
+
+New Features
+~~~~~~~~~~~~
+
+* None.
+
+Improvements
+~~~~~~~~~~~~
+
+* Bump minimum supported MLX version to 0.32.3 and nanobind to >=3.0.1,<3.1.
+
+Packaging
+~~~~~~~~~
+
+* None.
+
+Backwards incompatible changes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* None.
+
+Deprecations
+~~~~~~~~~~~~
+
+* None.
+
+Bug fixes
+~~~~~~~~~
+
+* None.
+
+Tests
+~~~~~
+
+* None.
+
+Benchmarks
+~~~~~~~~~~
+
+* None.
+
+Documentation
+~~~~~~~~~~~~~
+
+* None.
+
+
 mlx-sparse v0.0.6b0 (22.07.2026)
 ---------------------------------
 

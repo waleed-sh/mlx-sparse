@@ -2,9 +2,29 @@ import os
 import platform
 import subprocess
 import sys
+from pathlib import Path
 
 from mlx import extension
 from setuptools import setup
+from setuptools.command.build_ext import build_ext
+
+
+class SparseCMakeBuild(extension.CMakeBuild):
+    def run(self):
+        # MLX's helper copies the entire build directory back for inplace builds.
+        # Copy only native artifacts so stale build_py output cannot replace source.
+        build_ext.run(self)
+        if self.inplace:
+            build_py = self.get_finalized_command("build_py")
+            for ext in self.extensions:
+                if not isinstance(ext, extension.CMakeExtension):
+                    continue
+                inplace_file, regular_file = self._get_inplace_equivalent(build_py, ext)
+                destination = Path(inplace_file).parent
+                for artifact in Path(regular_file).parent.iterdir():
+                    if artifact.suffix in {".so", ".dylib", ".metallib"}:
+                        self.copy_file(str(artifact), str(destination / artifact.name))
+
 
 if __name__ == "__main__":
     cmake_args = os.environ.get("CMAKE_ARGS", "")
@@ -22,9 +42,7 @@ if __name__ == "__main__":
     cmake_platform_args: list[str] = []
     if platform.system() == "Darwin":
         deployment_target = os.environ.setdefault("MACOSX_DEPLOYMENT_TARGET", "14.0")
-        cmake_platform_args.append(
-            f"-DCMAKE_OSX_DEPLOYMENT_TARGET={deployment_target}"
-        )
+        cmake_platform_args.append(f"-DCMAKE_OSX_DEPLOYMENT_TARGET={deployment_target}")
     os.environ["CMAKE_ARGS"] = " ".join(
         part
         for part in (
@@ -44,7 +62,7 @@ if __name__ == "__main__":
 
     setup(
         ext_modules=[extension.CMakeExtension("mlx_sparse._ext")],
-        cmdclass={"build_ext": extension.CMakeBuild},
+        cmdclass={"build_ext": SparseCMakeBuild},
         package_data={"mlx_sparse": ["*.so", "*.dylib", "*.metallib"]},
         zip_safe=False,
     )
