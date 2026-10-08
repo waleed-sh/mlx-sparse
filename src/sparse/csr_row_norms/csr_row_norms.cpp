@@ -188,7 +188,10 @@ void CSRRowNorms::eval_gpu(const std::vector<mx::array> &inputs,
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_rows_);
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
+    // Down the grid's second dimension. A flat x-dimension of
+    // <threadgroups> * kVectorThreads threads wraps at 2^32, silently: the
+    // threadgroups past the wrap never run and their outputs stay zero.
+    encoder.dispatch_threads(MTL::Size(kVectorThreads, threadgroups, 1),
                              MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = static_cast<size_t>(std::max(n_rows_, 1));

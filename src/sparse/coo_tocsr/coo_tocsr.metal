@@ -21,13 +21,34 @@ template <typename T, typename I>
                                       device T *out_data [[buffer(3)]],
                                       device I *out_indices [[buffer(4)]],
                                       constant int &nnz [[buffer(5)]],
+                                      constant int &n_rows [[buffer(6)]],
+                                      constant int &n_cols [[buffer(7)]],
                                       uint tid [[thread_position_in_grid]]) {
   if (tid >= static_cast<uint>(nnz)) {
     return;
   }
 
+  const bool keep = coo_entry_in_range(row[tid], col[tid], n_rows, n_cols);
+
+  // Ranks are taken among the entries that survive, so that they agree with the
+  // pointer array the companion kernel builds from the same predicate. Entries
+  // that do not survive take a slot past the last one any row points at, in
+  // input order, so every slot is written exactly once and no slot is left
+  // holding whatever the allocation came with.
   int rank = 0;
+  int kept_total = 0;
+  int dropped_before = 0;
   for (int j = 0; j < nnz; ++j) {
+    if (!coo_entry_in_range(row[j], col[j], n_rows, n_cols)) {
+      if (j < static_cast<int>(tid)) {
+        dropped_before += 1;
+      }
+      continue;
+    }
+    kept_total += 1;
+    if (!keep) {
+      continue;
+    }
     const bool less = row[j] < row[tid] ||
                       (row[j] == row[tid] &&
                        (col[j] < col[tid] ||
@@ -37,15 +58,22 @@ template <typename T, typename I>
     }
   }
 
-  out_data[rank] = data[tid];
-  out_indices[rank] = col[tid];
+  if (keep) {
+    out_data[rank] = data[tid];
+    out_indices[rank] = col[tid];
+  } else {
+    out_data[kept_total + dropped_before] = T(0);
+    out_indices[kept_total + dropped_before] = I(0);
+  }
 }
 
 template <typename I>
 [[kernel]] void coo_tocsr_indptr_kernel(device const I *row [[buffer(0)]],
-                                        device I *out_indptr [[buffer(1)]],
-                                        constant int &nnz [[buffer(2)]],
-                                        constant int &n_rows [[buffer(3)]],
+                                        device const I *col [[buffer(1)]],
+                                        device I *out_indptr [[buffer(2)]],
+                                        constant int &nnz [[buffer(3)]],
+                                        constant int &n_rows [[buffer(4)]],
+                                        constant int &n_cols [[buffer(5)]],
                                         uint tid [[thread_position_in_grid]]) {
   if (tid != 0) {
     return;
@@ -55,6 +83,9 @@ template <typename I>
     out_indptr[r] = I(0);
   }
   for (int p = 0; p < nnz; ++p) {
+    if (!coo_entry_in_range(row[p], col[p], n_rows, n_cols)) {
+      continue;
+    }
     out_indptr[static_cast<int>(row[p]) + 1] += I(1);
   }
   for (int r = 0; r < n_rows; ++r) {
@@ -69,6 +100,7 @@ template <typename T, typename I>
     device const I *out_indices [[buffer(3)]],
     device const I *out_indptr [[buffer(4)]], device T *out [[buffer(5)]],
     constant int &nnz [[buffer(6)]], constant int &n_rows [[buffer(7)]],
+    constant int &n_cols [[buffer(8)]],
     uint tid [[thread_position_in_grid]]) {
   if (tid >= static_cast<uint>(nnz)) {
     return;
@@ -76,7 +108,11 @@ template <typename T, typename I>
 
   const I r = row[tid];
   const I c = col[tid];
-  if (r < I(0) || static_cast<int>(r) >= n_rows) {
+  // An entry the conversion drops cannot influence the output, so its gradient
+  // is zero. This has to use the same predicate as the conversion, on both
+  // coordinates: the earlier form cast the row to int, which let a 64-bit row
+  // above INT_MAX past the check and then indexed the pointer array with it.
+  if (!coo_entry_in_range(r, c, n_rows, n_cols)) {
     out[tid] = T(0);
     return;
   }
@@ -107,7 +143,8 @@ template <typename T, typename I>
   template [[host_name("coo_tocsr_rank_" #NAME)]] [[kernel]] void              \
   coo_tocsr_rank_kernel<T, I>(device const T *, device const I *,              \
                               device const I *, device T *, device I *,        \
-                              constant int &, uint)
+                              constant int &, constant int &, constant int &,  \
+                              uint)
 
 INSTANTIATE_COO_TOCSR_RANK(float32_int32, float, int);
 INSTANTIATE_COO_TOCSR_RANK(float32_int64, float, long);
@@ -121,17 +158,20 @@ INSTANTIATE_COO_TOCSR_RANK(complex64_int64, complex64_t, long);
 #undef INSTANTIATE_COO_TOCSR_RANK
 
 template [[host_name("coo_tocsr_indptr_int32")]] [[kernel]] void
-coo_tocsr_indptr_kernel<int>(device const int *, device int *, constant int &,
+coo_tocsr_indptr_kernel<int>(device const int *, device const int *,
+                             device int *, constant int &, constant int &,
                              constant int &, uint);
 template [[host_name("coo_tocsr_indptr_int64")]] [[kernel]] void
-coo_tocsr_indptr_kernel<long>(device const long *, device long *,
-                              constant int &, constant int &, uint);
+coo_tocsr_indptr_kernel<long>(device const long *, device const long *,
+                              device long *, constant int &, constant int &,
+                              constant int &, uint);
 
 #define INSTANTIATE_COO_TOCSR_DATA_VJP(NAME, T, I)                             \
   template [[host_name("coo_tocsr_data_vjp_" #NAME)]] [[kernel]] void          \
   coo_tocsr_data_vjp_kernel<T, I>(                                             \
       device const T *, device const I *, device const I *, device const I *,  \
-      device const I *, device T *, constant int &, constant int &, uint)
+      device const I *, device T *, constant int &, constant int &,            \
+      constant int &, uint)
 
 INSTANTIATE_COO_TOCSR_DATA_VJP(float32_int32, float, int);
 INSTANTIATE_COO_TOCSR_DATA_VJP(float32_int64, float, long);

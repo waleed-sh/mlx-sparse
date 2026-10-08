@@ -99,6 +99,11 @@ void csr_batched_matmul_small_rhs_cpu_impl(const T *data_ptr,
         static_cast<size_t>(batch) * static_cast<size_t>(n_rows) * RHSCols;
     std::array<AccT, RHSCols> acc{};
     for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+      // The stored index selects a row of this batch's dense operand, and the
+      // column count is already a parameter here.
+      if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+        continue;
+      }
       const auto rhs_offset =
           rhs_batch + static_cast<size_t>(indices_ptr[p]) * RHSCols;
       const auto value = data_ptr[p];
@@ -134,6 +139,9 @@ void csr_batched_matmul_generic_cpu_impl(const T *data_ptr,
         static_cast<size_t>(batch) * static_cast<size_t>(n_rows) * rhs_cols;
     std::fill(row_acc.begin(), row_acc.end(), Accumulator<T>::zero());
     for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+      if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+        continue;
+      }
       const auto col = static_cast<size_t>(indices_ptr[p]);
       const auto rhs_offset = rhs_batch + col * rhs_cols;
       const auto value = data_ptr[p];
@@ -322,7 +330,10 @@ void CSRBatchedMatMul::eval_gpu(const std::vector<mx::array> &inputs,
   const auto outputs_count =
       static_cast<size_t>(batch_size_) * n_rows_ * rhs_cols_;
   if (use_vector_kernel) {
-    encoder.dispatch_threads(MTL::Size(outputs_count * kVectorThreads, 1, 1),
+    // Down the grid's second dimension. A flat x-dimension of
+    // <threadgroups> * kVectorThreads threads wraps at 2^32, silently: the
+    // threadgroups past the wrap never run and their outputs stay zero.
+    encoder.dispatch_threads(MTL::Size(kVectorThreads, outputs_count, 1),
                              MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = std::max<size_t>(outputs_count, 1);

@@ -14,8 +14,16 @@ CSRArray
 .. autoclass:: CSRArray
    :members:
    :undoc-members: False
-   :special-members: __matmul__
+   :special-members: __matmul__, __getitem__
    :show-inheritance:
+
+   .. rubric:: Selection
+
+   ``A[rows]`` selects rows, ``A[:, s:e]`` selects a column range, and
+   ``A[rows, s:e]`` does both, each returning a new :class:`CSRArray`. Rows are
+   gathered whole, so the ``sorted_indices`` and ``has_canonical_format`` flags
+   carry over rather than being dropped. See :meth:`CSRArray.__getitem__` for
+   the supported keys and for what an out-of-range index does.
 
    .. rubric:: Properties
 
@@ -32,6 +40,7 @@ CSRArray
 
    .. autosummary::
 
+      ~CSRArray.__getitem__
       ~CSRArray.todense
       ~CSRArray.tocsc
       ~CSRArray.sort_indices

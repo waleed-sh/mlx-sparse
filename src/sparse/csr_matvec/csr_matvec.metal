@@ -21,6 +21,7 @@ template <typename T, typename I>
                                   device const T *x [[buffer(3)]],
                                   device T *out [[buffer(4)]],
                                   constant int &n_rows [[buffer(5)]],
+                                  constant int &n_cols [[buffer(6)]],
                                   uint row [[thread_position_in_grid]]) {
   if (static_cast<int>(row) >= n_rows) {
     return;
@@ -30,7 +31,11 @@ template <typename T, typename I>
   const I start = indptr[row];
   const I end = indptr[row + 1];
   for (I p = start; p < end; ++p) {
-    acc += sparse_multiply<T>(data[p], x[indices[p]]);
+    // The stored index addresses x, and x is n_cols long. A select rather
+    // than a branch, so the loop keeps its shape.
+    acc += sparse_multiply<T>(
+        data[p], sparse_index_in_range(indices[p], n_cols) ? x[indices[p]]
+                                                           : T(0));
   }
   out[row] = sparse_accumulator<T>::cast(acc);
 }
@@ -38,48 +43,59 @@ template <typename T, typename I>
 template [[host_name("csr_matvec_float32_int32")]] [[kernel]] void
 csr_matvec_kernel<float, int>(device const float *, device const int *,
                               device const int *, device const float *,
-                              device float *, constant int &, uint);
+                              device float *, constant int &, constant int &,
+                              uint);
 template [[host_name("csr_matvec_float32_int64")]] [[kernel]] void
 csr_matvec_kernel<float, long>(device const float *, device const long *,
                                device const long *, device const float *,
-                               device float *, constant int &, uint);
+                               device float *, constant int &, constant int &,
+                               uint);
 template [[host_name("csr_matvec_float16_int32")]] [[kernel]] void
 csr_matvec_kernel<half, int>(device const half *, device const int *,
                              device const int *, device const half *,
-                             device half *, constant int &, uint);
+                             device half *, constant int &, constant int &,
+                             uint);
 template [[host_name("csr_matvec_float16_int64")]] [[kernel]] void
 csr_matvec_kernel<half, long>(device const half *, device const long *,
                               device const long *, device const half *,
-                              device half *, constant int &, uint);
+                              device half *, constant int &, constant int &,
+                              uint);
 template [[host_name("csr_matvec_bfloat16_int32")]] [[kernel]] void
 csr_matvec_kernel<bfloat16_t, int>(device const bfloat16_t *,
                                    device const int *, device const int *,
                                    device const bfloat16_t *,
-                                   device bfloat16_t *, constant int &, uint);
+                                   device bfloat16_t *, constant int &,
+                                   constant int &, uint);
 template [[host_name("csr_matvec_bfloat16_int64")]] [[kernel]] void
 csr_matvec_kernel<bfloat16_t, long>(device const bfloat16_t *,
                                     device const long *, device const long *,
                                     device const bfloat16_t *,
-                                    device bfloat16_t *, constant int &, uint);
+                                    device bfloat16_t *, constant int &,
+                                    constant int &, uint);
 template [[host_name("csr_matvec_complex64_int32")]] [[kernel]] void
 csr_matvec_kernel<complex64_t, int>(device const complex64_t *,
                                     device const int *, device const int *,
                                     device const complex64_t *,
-                                    device complex64_t *, constant int &, uint);
+                                    device complex64_t *, constant int &,
+                                    constant int &, uint);
 template [[host_name("csr_matvec_complex64_int64")]] [[kernel]] void
 csr_matvec_kernel<complex64_t, long>(device const complex64_t *,
                                      device const long *, device const long *,
                                      device const complex64_t *,
                                      device complex64_t *, constant int &,
-                                     uint);
+                                     constant int &, uint);
 
 template <typename T, typename I>
 [[kernel]] void csr_matvec_vector_kernel(
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device const T *x [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
-    uint row [[threadgroup_position_in_grid]],
+    constant int &n_cols [[buffer(6)]],
+    uint2 row_group [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
+  // One threadgroup per output, indexed down the grid's second
+  // dimension; see the dispatch for why it is not a flat grid.
+  const uint row = row_group.y;
   threadgroup typename sparse_accumulator<T>::type partial[128];
 
   if (static_cast<int>(row) >= n_rows) {
@@ -90,7 +106,9 @@ template <typename T, typename I>
   const I start = indptr[row];
   const I end = indptr[row + 1];
   for (I p = start + static_cast<I>(lane); p < end; p += 128) {
-    acc += sparse_multiply<T>(data[p], x[indices[p]]);
+    acc += sparse_multiply<T>(
+        data[p], sparse_index_in_range(indices[p], n_cols) ? x[indices[p]]
+                                                           : T(0));
   }
   partial[lane] = acc;
   threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -111,7 +129,8 @@ template <typename T, typename I>
   template [[host_name("csr_matvec_vector_" #NAME)]] [[kernel]] void           \
   csr_matvec_vector_kernel<T, I>(device const T *, device const I *,           \
                                  device const I *, device const T *,           \
-                                 device T *, constant int &, uint, uint)
+                                 device T *, constant int &, constant int &,   \
+                                 uint2, uint)
 
 INSTANTIATE_CSR_MATVEC_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSR_MATVEC_VECTOR(float32_int64, float, long);

@@ -35,8 +35,10 @@ template <typename T, typename I>
   device atomic_float *atomic_out =
       reinterpret_cast<device atomic_float *>(out);
   for (I p = indptr[col]; p < indptr[col + 1]; ++p) {
-    const int row = static_cast<int>(indices[p]);
-    if (row >= 0 && row < n_rows) {
+    // Compared in the index type: casting to int first folds an index above
+    // INT_MAX back into range, so the check passed and the entry was counted.
+    if (sparse_index_in_range(indices[p], n_rows)) {
+      const int row = static_cast<int>(indices[p]);
       atomic_fetch_add_explicit(&atomic_out[row],
                                 sparse_norm_square<T>(data[p]),
                                 memory_order_relaxed);

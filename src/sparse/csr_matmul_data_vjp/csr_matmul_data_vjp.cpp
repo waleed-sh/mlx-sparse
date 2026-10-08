@@ -79,6 +79,9 @@ void csr_matmul_data_vjp_cpu_impl(const mx::array &indices,
                     cotangent = mx::array::unsafe_weak_copy(cotangent),
                     out = mx::array::unsafe_weak_copy(out), n_rows,
                     rhs_cols]() mutable {
+    // The stored index selects a row of the dense operand, so that operand's
+    // own leading dimension is the bound.
+    const int n_cols = rhs.shape(0);
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
     const auto *rhs_ptr = rhs.data<T>();
@@ -89,6 +92,13 @@ void csr_matmul_data_vjp_cpu_impl(const mx::array &indices,
       for (int row = range.begin; row < range.end; ++row) {
         const auto cotangent_offset = static_cast<size_t>(row) * rhs_cols;
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          // The forward pass drops this entry, so the output does not
+          // depend on its value and the gradient is zero. Written
+          // rather than skipped: out has one slot per stored entry.
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            out_ptr[p] = T(0);
+            continue;
+          }
           const auto rhs_offset =
               static_cast<size_t>(indices_ptr[p]) * rhs_cols;
           auto acc = Accumulator<T>::zero();
@@ -145,6 +155,7 @@ void CSRMatMulDataVJP::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(out, 4);
   encoder.set_bytes(n_rows_, 5);
   encoder.set_bytes(rhs_cols_, 6);
+  encoder.set_bytes(n_cols_, 7);
   auto threads = static_cast<size_t>(std::max(n_rows_, 1));
   auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
   encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));

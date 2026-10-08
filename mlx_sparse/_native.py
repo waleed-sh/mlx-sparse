@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import mlx.core as mx
 
+import mlx_sparse._convert as _convert
 import mlx_sparse._fallback as _fallback
 from mlx_sparse._ext_loader import extension
 from mlx_sparse._typing import Shape2D
@@ -43,11 +44,29 @@ def coo_tocsr(
     row: mx.array,
     col: mx.array,
     shape: Shape2D,
+    *,
+    return_permutation: bool = False,
 ):
     ext = extension()
+    array_ops = ext is not None and _convert.can_use_array_ops(data, shape)
+    # Only the paths that consult it pay for it; the kernels do their own check.
+    keep = (
+        _convert.entries_in_range(row, col, shape)
+        if return_permutation or array_ops
+        else None
+    )
+    order = (
+        _convert.coo_sort_permutation(row, col, shape[1], keep)
+        if return_permutation
+        else None
+    )
     if ext is None:
-        return _fallback.coo_to_csr(data, row, col, shape)
-    return ext.coo_tocsr(data, row, col, shape[0], shape[1])
+        buffers = _fallback.coo_to_csr(data, row, col, shape)
+    elif array_ops:
+        buffers = _convert.coo_to_csr(data, row, col, shape, order, keep)
+    else:
+        buffers = ext.coo_tocsr(data, row, col, shape[0], shape[1])
+    return (*buffers, order) if return_permutation else buffers
 
 
 def coo_tocsc(
@@ -55,11 +74,28 @@ def coo_tocsc(
     row: mx.array,
     col: mx.array,
     shape: Shape2D,
+    *,
+    return_permutation: bool = False,
 ):
     ext = extension()
+    array_ops = ext is not None and _convert.can_use_array_ops(data, shape)
+    keep = (
+        _convert.entries_in_range(row, col, shape)
+        if return_permutation or array_ops
+        else None
+    )
+    order = (
+        _convert.coo_sort_permutation(col, row, shape[0], keep)
+        if return_permutation
+        else None
+    )
     if ext is None:
-        return _fallback.coo_to_csc(data, row, col, shape)
-    return ext.coo_tocsc(data, row, col, shape[0], shape[1])
+        buffers = _fallback.coo_to_csc(data, row, col, shape)
+    elif array_ops:
+        buffers = _convert.coo_to_csc(data, row, col, shape, order, keep)
+    else:
+        buffers = ext.coo_tocsc(data, row, col, shape[0], shape[1])
+    return (*buffers, order) if return_permutation else buffers
 
 
 def coo_kron(lhs, rhs):

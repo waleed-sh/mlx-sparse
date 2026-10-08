@@ -15,6 +15,7 @@
 #include "sparse/csr_matvec_transpose/csr_matvec_transpose.h"
 
 #include "sparse/csr_matvec/csr_matvec.h"
+#include "sparse/csr_matvec_data_vjp/csr_matvec_data_vjp.h"
 #include "sparse/csr_transpose/csr_transpose.h"
 #include <algorithm>
 #include <stdexcept>
@@ -45,6 +46,15 @@ public:
 
   void eval_gpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
+
+  std::vector<mx::array> jvp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &tangents,
+                             const std::vector<int> &argnums) override;
+
+  std::vector<mx::array> vjp(const std::vector<mx::array> &primals,
+                             const std::vector<mx::array> &cotangents,
+                             const std::vector<int> &argnums,
+                             const std::vector<mx::array> &outputs) override;
 
   const char *name() const override { return "CSRMatVecTranspose"; }
 
@@ -91,6 +101,12 @@ void csr_matvec_transpose_cpu_impl(const mx::array &data,
         std::fill(out_ptr, out_ptr + n_cols, T{});
         for (int row = 0; row < n_rows; ++row) {
           for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            // The Metal kernel for this operation already checks the column;
+            // this path did not, so an out-of-range column scattered outside
+            // the output and the two backends disagreed on the same input.
+            if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+              continue;
+            }
             out_ptr[indices_ptr[p]] += data_ptr[p] * x_ptr[row];
           }
         }
@@ -99,6 +115,9 @@ void csr_matvec_transpose_cpu_impl(const mx::array &data,
                                 Accumulator<T>::zero());
         for (int row = 0; row < n_rows; ++row) {
           for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+            if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+              continue;
+            }
             accum[static_cast<size_t>(indices_ptr[p])] +=
                 multiply_accumulate<T>(data_ptr[p], x_ptr[row]);
           }
@@ -129,6 +148,9 @@ void csr_matvec_transpose_cpu_impl(const mx::array &data,
       for (int row = range.begin; row < range.end; ++row) {
         const T x_value = x_ptr[row];
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            continue;
+          }
           accum[static_cast<size_t>(indices_ptr[p])] +=
               multiply_accumulate<T>(data_ptr[p], x_value);
         }
@@ -187,6 +209,69 @@ void CSRMatVecTranspose::eval_cpu(const std::vector<mx::array> &inputs,
 #undef DISPATCH_CSR_MATVEC_T_VALUE
 
   throw std::runtime_error("csr_matvec_transpose unsupported value dtype.");
+}
+
+std::vector<mx::array>
+CSRMatVecTranspose::jvp(const std::vector<mx::array> &primals,
+                        const std::vector<mx::array> &tangents,
+                        const std::vector<int> &argnums) {
+  std::vector<mx::array> terms;
+  terms.reserve(argnums.size());
+  for (size_t i = 0; i < argnums.size(); ++i) {
+    if (argnums[i] == 0) {
+      terms.push_back(csr_matvec_transpose(tangents[i], primals[1], primals[2],
+                                           primals[3], n_rows_, n_cols_,
+                                           stream()));
+    } else if (argnums[i] == 3) {
+      terms.push_back(csr_matvec_transpose(primals[0], primals[1], primals[2],
+                                           tangents[i], n_rows_, n_cols_,
+                                           stream()));
+    } else {
+      throw std::runtime_error(
+          "CSRMatVecTranspose JVP is implemented only for data and dense RHS.");
+    }
+  }
+  if (terms.empty()) {
+    throw std::runtime_error(
+        "CSRMatVecTranspose JVP requires at least one tangent.");
+  }
+  auto result = terms[0];
+  for (size_t i = 1; i < terms.size(); ++i) {
+    result = mx::add(result, terms[i], stream());
+  }
+  return {result};
+}
+
+std::vector<mx::array>
+CSRMatVecTranspose::vjp(const std::vector<mx::array> &primals,
+                        const std::vector<mx::array> &cotangents,
+                        const std::vector<int> &argnums,
+                        const std::vector<mx::array> &) {
+  std::vector<mx::array> vjps;
+  vjps.reserve(argnums.size());
+  for (int argnum : argnums) {
+    if (argnum == 0) {
+      // out[p] = data[p] * x[row(p)] accumulated into column indices[p], so the
+      // value gradient pairs the cotangent by COLUMN with x by ROW. That is
+      // csr_matvec_data_vjp with its two dense arguments in the opposite roles
+      // from the forward matvec: it forms cotangent_arg[row] * x_arg[col].
+      auto x = primals[3].dtype() == mx::complex64
+                   ? mx::conjugate(primals[3], stream())
+                   : primals[3];
+      vjps.push_back(csr_matvec_data_vjp(primals[1], primals[2], cotangents[0],
+                                         x, n_rows_, n_cols_, stream()));
+    } else if (argnum == 3) {
+      auto data = primals[0].dtype() == mx::complex64
+                      ? mx::conjugate(primals[0], stream())
+                      : primals[0];
+      vjps.push_back(csr_matvec(data, primals[1], primals[2], cotangents[0],
+                                n_rows_, n_cols_, stream()));
+    } else {
+      throw std::runtime_error(
+          "CSRMatVecTranspose VJP is implemented only for data and dense RHS.");
+    }
+  }
+  return vjps;
 }
 
 #ifdef _METAL_

@@ -26,8 +26,12 @@
 template <typename I>
 [[kernel]] void csr_transpose_count_kernel(
     device const I *indices [[buffer(0)]], device int *offsets [[buffer(1)]],
-    constant int &nnz [[buffer(2)]], uint tid [[thread_position_in_grid]]) {
+    constant int &nnz [[buffer(2)]], constant int &n_cols [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
   if (tid >= static_cast<uint>(nnz)) {
+    return;
+  }
+  if (!sparse_index_in_range(indices[tid], n_cols)) {
     return;
   }
   const int col = static_cast<int>(indices[tid]);
@@ -40,7 +44,6 @@ template <typename I>
 [[kernel]] void csr_transpose_prefix_kernel(device int *offsets [[buffer(0)]],
                                             device I *out_indptr [[buffer(1)]],
                                             constant int &n_cols [[buffer(2)]],
-                                            constant int &nnz [[buffer(3)]],
                                             uint tid
                                             [[thread_position_in_grid]]) {
   if (tid != 0) {
@@ -55,7 +58,9 @@ template <typename I>
     running += count;
   }
   offsets[n_cols] = running;
-  out_indptr[n_cols] = static_cast<I>(nnz);
+  // The running total, not nnz: an entry that was dropped was never placed,
+  // and a pointer array that counts it describes a matrix that does not exist.
+  out_indptr[n_cols] = static_cast<I>(running);
 }
 
 template <typename T, typename I>
@@ -64,9 +69,16 @@ template <typename T, typename I>
     device const I *indptr [[buffer(2)]],
     device const I *out_indptr [[buffer(3)]], device T *out_data [[buffer(4)]],
     device I *out_indices [[buffer(5)]], constant int &n_rows [[buffer(6)]],
-    constant int &n_cols [[buffer(7)]],
+    constant int &n_cols [[buffer(7)]], constant int &nnz [[buffer(8)]],
     uint dst_row [[thread_position_in_grid]]) {
-  if (static_cast<int>(dst_row) >= n_cols) {
+  if (static_cast<int>(dst_row) > n_cols) {
+    return;
+  }
+  if (static_cast<int>(dst_row) == n_cols) {
+    for (I p = out_indptr[n_cols]; p < static_cast<I>(nnz); ++p) {
+      out_data[p] = T(0);
+      out_indices[p] = I(0);
+    }
     return;
   }
 
@@ -84,23 +96,24 @@ template <typename T, typename I>
 
 template [[host_name("csr_transpose_count_int32")]] [[kernel]] void
 csr_transpose_count_kernel<int>(device const int *, device int *,
-                                constant int &, uint);
+                                constant int &, constant int &, uint);
 template [[host_name("csr_transpose_count_int64")]] [[kernel]] void
 csr_transpose_count_kernel<long>(device const long *, device int *,
-                                 constant int &, uint);
+                                 constant int &, constant int &, uint);
 
 template [[host_name("csr_transpose_prefix_int32")]] [[kernel]] void
 csr_transpose_prefix_kernel<int>(device int *, device int *, constant int &,
-                                 constant int &, uint);
+                                 uint);
 template [[host_name("csr_transpose_prefix_int64")]] [[kernel]] void
 csr_transpose_prefix_kernel<long>(device int *, device long *, constant int &,
-                                  constant int &, uint);
+                                  uint);
 
 #define INSTANTIATE_CSR_TRANSPOSE_FILL(NAME, T, I)                             \
   template [[host_name("csr_transpose_fill_" #NAME)]] [[kernel]] void          \
   csr_transpose_fill_kernel<T, I>(                                             \
       device const T *, device const I *, device const I *, device const I *,  \
-      device T *, device I *, constant int &, constant int &, uint)
+      device T *, device I *, constant int &, constant int &, constant int &,  \
+      uint)
 
 INSTANTIATE_CSR_TRANSPOSE_FILL(float32_int32, float, int);
 INSTANTIATE_CSR_TRANSPOSE_FILL(float32_int64, float, long);

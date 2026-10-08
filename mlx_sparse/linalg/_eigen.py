@@ -20,10 +20,14 @@ import mlx_sparse._native as _native
 from mlx_sparse.linalg.utils.spectral import as_csr as _as_csr
 from mlx_sparse.linalg.utils.spectral import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.spectral import normalize_ncv as _ncv
+from mlx_sparse.linalg.utils.spectral import normalize_which as _normalize_which
 from mlx_sparse.linalg.utils.spectral import (
     reject_iteration_controls as _reject_controls,
 )
 from mlx_sparse.linalg.utils.spectral import start_vector as _start_vector
+from mlx_sparse.linalg.utils.spectral import (
+    warn_if_ritz_unconverged as _warn_if_unconverged,
+)
 
 
 def lanczos(
@@ -56,8 +60,10 @@ def lanczos(
             :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
             Float16 and bfloat16 inputs are promoted to float32.
         k: Number of Lanczos steps.  Must satisfy ``0 < k <= A.shape[0]``.
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses a
+            deterministic ``ones + pseudo-random`` start vector; a plain
+            constant vector cannot be used, because it is an exact eigenvector
+            of any matrix with constant row sums.
         reorthogonalize: Whether to apply full reorthogonalisation at each
             step to suppress numerical loss of orthogonality.  Defaults to
             ``True``.
@@ -131,16 +137,32 @@ def eigsh(
             * ``"LA"``: Largest Algebraic (largest values)
             * ``"SA"``: Smallest Algebraic (smallest values)
 
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses a
+            deterministic ``ones + pseudo-random`` start vector; a plain
+            constant vector cannot be used, because it is an exact eigenvector
+            of any matrix with constant row sums.
         ncv: Number of Lanczos basis vectors to build before extracting
             Ritz pairs.  A larger value improves accuracy at the cost of
             more memory.  Defaults to ``max(2*k+1, k+1)``.
+
+            Because this is a single ``ncv``-bounded extraction rather than a
+            restarted loop, ``ncv`` is the *only* control over accuracy, and
+            the default is frequently too small.  On a 200-node
+            Barabasi-Albert graph Laplacian the default returns a largest
+            eigenvalue of 32.48 where the true value is 38.36, and a Fiedler
+            value of 3.00 where the true value is 1.30; ``ncv=20`` brings both
+            to six digits.  The returned pairs are therefore measured before
+            being returned, and an
+            :class:`~mlx_sparse.linalg.utils.spectral.UnconvergedRitzWarning`
+            reports the backward error when it is large.
         maxiter: Not yet supported because the current implementation performs
             one ``ncv``-bounded Ritz extraction, not an implicitly restarted
             convergence loop.  Pass ``None`` (the default).
         tol: Not yet supported for the same reason.  Pass ``0.0`` (the
-            default).
+            default).  Note in particular that it is not the threshold the
+            accuracy warning uses, which is a fixed
+            ``spectral.RITZ_BACKWARD_ERROR_TOLERANCE`` and is not something
+            the routine can iterate towards.
         return_eigenvectors: When ``True`` (the default), return both
             eigenvalues and eigenvectors.  When ``False``, return only the
             eigenvalues.
@@ -154,16 +176,24 @@ def eigsh(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``A`` is not square.
+        ValueError: If ``k`` is out of range, ``A`` is not square, or
+            ``which`` is not one of the accepted selectors.
+
+    Warns:
+        UnconvergedRitzWarning: If the extracted pairs carry a relative
+            backward error above ``RITZ_BACKWARD_ERROR_TOLERANCE``, which
+            means ``ncv`` was too small for this matrix.
     """
 
     _reject_controls(routine="eigsh", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="eigsh", accepted=("LM", "SM", "LA", "SA"))
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
         raise ValueError(f"eigsh requires a square matrix, got {csr.shape}.")
     if k <= 0 or k >= n:
         raise ValueError("k must satisfy 0 < k < A.shape[0].")
+    resolved_ncv = _ncv(n, int(k), ncv)
     values, vectors = _native.csr_eigsh(
         csr.data,
         csr.indices,
@@ -171,9 +201,10 @@ def eigsh(
         _start_vector(v0, n=n),
         csr.shape,
         k=int(k),
-        ncv=_ncv(n, int(k), ncv),
-        which=which.upper(),
+        ncv=resolved_ncv,
+        which=which,
     )
+    _warn_if_unconverged(csr, values, vectors, routine="eigsh", ncv=resolved_ncv)
     return (values, vectors) if return_eigenvectors else values
 
 
@@ -219,8 +250,10 @@ def eigs(
             * ``"LR"``: Largest Real part
             * ``"SR"``: Smallest Real part
 
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses a
+            deterministic ``ones + pseudo-random`` start vector; a plain
+            constant vector cannot be used, because it is an exact eigenvector
+            of any matrix with constant row sums.
         ncv: Dimension of the Arnoldi factorization before restart.
             Defaults to ``max(2*k+1, k+1)``.
         maxiter: Not yet supported because the current implementation performs
@@ -241,10 +274,12 @@ def eigs(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``A`` is not square.
+        ValueError: If ``k`` is out of range, ``A`` is not square, or
+            ``which`` is not one of the accepted selectors.
     """
 
     _reject_controls(routine="eigs", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="eigs", accepted=("LM", "SM", "LR", "SR"))
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
@@ -259,7 +294,7 @@ def eigs(
         csr.shape,
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     return (values, vectors) if return_eigenvectors else values
 
@@ -304,8 +339,10 @@ def svds(
             * ``"SM"``: Smallest in Magnitude
 
         v0: Optional starting vector for the right singular-vector Krylov
-            basis, with shape ``(A.shape[1],)``.  ``None`` uses the
-            deterministic all-ones vector.
+            basis, with shape ``(A.shape[1],)``.  ``None`` uses a deterministic
+            ``ones + pseudo-random`` start vector; a plain constant vector
+            cannot be used, because it is an exact singular vector of any
+            matrix with constant row sums.
         ncv: Number of Lanczos basis vectors to build.  Defaults to
             ``max(2*k+1, k+1)``.
         maxiter: Not yet supported because the current implementation performs
@@ -328,11 +365,13 @@ def svds(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``return_singular_vectors``
-            is not a recognised value.
+        ValueError: If ``k`` is out of range, ``which`` is not one of the
+            accepted selectors, or ``return_singular_vectors`` is not a
+            recognised value.
     """
 
     _reject_controls(routine="svds", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="svds", accepted=("LM", "SM"))
     if return_singular_vectors not in {True, False, "u", "vh"}:
         raise ValueError("return_singular_vectors must be True, False, 'u', or 'vh'.")
     csr = _float32_csr(_as_csr(A))
@@ -347,7 +386,7 @@ def svds(
         csr.shape,
         k=int(k),
         ncv=_ncv(csr.shape[1], int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     if return_singular_vectors is False:
         return singular

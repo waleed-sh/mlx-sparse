@@ -49,6 +49,7 @@ Sparse direct factorizations
 .. autofunction:: splu
 .. autofunction:: factorized
 .. autofunction:: spsolve
+.. autofunction:: spsolve_triangular
 
 .. autoclass:: FactorizedSolve
    :members:

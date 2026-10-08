@@ -75,12 +75,18 @@ void csc_matmul_transpose_cpu_impl(const mx::array &data,
     const auto *indptr_ptr = indptr.data<I>();
     const auto *rhs_ptr = rhs.data<T>();
     auto *out_ptr = out.data<T>();
+    // The stored index addresses a row of the dense operand, so that operand's
+    // own leading dimension is the bound.
+    const int n_rows = rhs.shape(0);
     auto compute_cols = [&](CpuRange range) {
       std::vector<typename Accumulator<T>::Type> acc(
           static_cast<size_t>(rhs_cols));
       for (int col = range.begin; col < range.end; ++col) {
         std::fill(acc.begin(), acc.end(), Accumulator<T>::zero());
         for (I p = indptr_ptr[col]; p < indptr_ptr[col + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_rows)) {
+            continue;
+          }
           const auto rhs_offset =
               static_cast<size_t>(indices_ptr[p]) * rhs_cols;
           const T value = data_ptr[p];
@@ -175,6 +181,7 @@ void CSCMatMulTranspose::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_output_array(out, 4);
   encoder.set_bytes(n_cols_, 5);
   encoder.set_bytes(rhs_cols_, 6);
+  encoder.set_bytes(n_rows_, 7);
   auto threads = std::max<size_t>(n_cols_ * rhs_cols_, 1);
   auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
   encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));

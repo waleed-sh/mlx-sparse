@@ -228,8 +228,11 @@ def test_native_wrappers_do_not_expose_stream_keyword(monkeypatch):
     monkeypatch.setattr(native, "extension", lambda: FakeExt())
 
     assert native.identity_like("x") == "identity"
-    assert native.coo_tocsr("data", "row", "col", (1, 2)) == "coo"
-    assert native.coo_tocsc("data", "row", "col", (1, 2)) == "coo_csc"
+    # The COO conversions reach the extension on the CPU stream; on the GPU
+    # they are built from array operations and never call it.
+    with native.mx.stream(native.mx.cpu):
+        assert native.coo_tocsr("data", "row", "col", (1, 2)) == "coo"
+        assert native.coo_tocsc("data", "row", "col", (1, 2)) == "coo_csc"
     coo_lhs = SimpleNamespace(data="ld", row="lr", col="lc", shape=(1, 2))
     coo_rhs = SimpleNamespace(data="rd", row="rr", col="rc", shape=(2, 3))
     assert native.coo_kron(coo_lhs, coo_rhs) == "kron"

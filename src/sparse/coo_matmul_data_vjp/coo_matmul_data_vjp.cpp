@@ -72,10 +72,21 @@ void coo_matmul_data_vjp_cpu_impl(const mx::array &row, const mx::array &col,
     const auto *rhs_ptr = rhs.data<T>();
     const auto *cotangent_ptr = cotangent.data<T>();
     auto *out_ptr = out.data<T>();
+    // The coordinates address a row of the cotangent and a row of the dense
+    // operand, so those operands' own leading dimensions are the bounds.
+    const int n_rows = cotangent.shape(0);
+    const int n_cols = rhs.shape(0);
 
     const int nnz = static_cast<int>(row.size());
     auto compute_entries = [&](CpuRange range) {
       for (int p = range.begin; p < range.end; ++p) {
+        // The forward pass drops this entry, so the output does not depend on
+        // its value and the gradient is zero. Written rather than skipped:
+        // out has one slot per stored entry.
+        if (!coo_entry_in_range(row_ptr[p], col_ptr[p], n_rows, n_cols)) {
+          out_ptr[p] = T(0);
+          continue;
+        }
         const auto rhs_offset = static_cast<size_t>(col_ptr[p]) * rhs_cols;
         const auto cot_offset = static_cast<size_t>(row_ptr[p]) * rhs_cols;
         auto acc = Accumulator<T>::zero();
@@ -161,6 +172,8 @@ void COOMatMulDataVJP::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_bytes(rhs_cols_, 5);
   auto nnz = static_cast<int>(row.size());
   encoder.set_bytes(nnz, 6);
+  encoder.set_bytes(n_rows_, 7);
+  encoder.set_bytes(n_cols_, 8);
   auto threads = std::max<size_t>(row.size(), 1);
   auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
   encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));

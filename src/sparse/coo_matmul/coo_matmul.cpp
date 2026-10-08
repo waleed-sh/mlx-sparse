@@ -78,7 +78,7 @@ private:
 template <typename T, typename I>
 void coo_matmul_cpu_impl(const mx::array &data, const mx::array &row,
                          const mx::array &col, const mx::array &rhs,
-                         mx::array &out, int n_rows, int rhs_cols,
+                         mx::array &out, int n_rows, int n_cols, int rhs_cols,
                          mx::Stream stream) {
   out.set_data(mx::allocator::malloc(out.nbytes()));
 
@@ -93,7 +93,7 @@ void coo_matmul_cpu_impl(const mx::array &data, const mx::array &row,
                     row = mx::array::unsafe_weak_copy(row),
                     col = mx::array::unsafe_weak_copy(col),
                     rhs = mx::array::unsafe_weak_copy(rhs),
-                    out = mx::array::unsafe_weak_copy(out), n_rows,
+                    out = mx::array::unsafe_weak_copy(out), n_rows, n_cols,
                     rhs_cols]() mutable {
     using AccT = typename Accumulator<T>::Type;
     const auto *data_ptr = data.data<T>();
@@ -103,9 +103,18 @@ void coo_matmul_cpu_impl(const mx::array &data, const mx::array &row,
     auto *out_ptr = out.data<T>();
     const size_t out_size = static_cast<size_t>(n_rows) * rhs_cols;
 
+    // The row indexes the output and the column indexes the right-hand side, so
+    // an entry outside the declared shape reads and writes past both.
+    auto keeps = [&](size_t p) {
+      return coo_entry_in_range(row_ptr[p], col_ptr[p], n_rows, n_cols);
+    };
+
     if constexpr (std::is_same_v<AccT, T>) {
       std::fill(out_ptr, out_ptr + out_size, T{});
       for (size_t p = 0; p < data.size(); ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         const auto out_offset = static_cast<size_t>(row_ptr[p]) * rhs_cols;
         const auto rhs_offset = static_cast<size_t>(col_ptr[p]) * rhs_cols;
         const T value = data_ptr[p];
@@ -116,6 +125,9 @@ void coo_matmul_cpu_impl(const mx::array &data, const mx::array &row,
     } else {
       std::vector<AccT> accum(out_size, Accumulator<T>::zero());
       for (size_t p = 0; p < data.size(); ++p) {
+        if (!keeps(p)) {
+          continue;
+        }
         const auto out_offset = static_cast<size_t>(row_ptr[p]) * rhs_cols;
         const auto rhs_offset = static_cast<size_t>(col_ptr[p]) * rhs_cols;
         const T value = data_ptr[p];
@@ -149,10 +161,10 @@ void COOMatMul::eval_cpu(const std::vector<mx::array> &inputs,
   if (data.dtype() == DTYPE) {                                                 \
     if (row.dtype() == mx::int32) {                                            \
       coo_matmul_cpu_impl<TYPE, int32_t>(data, row, col, rhs, out, n_rows_,    \
-                                         rhs_cols_, stream());                 \
+                                         n_cols_, rhs_cols_, stream());        \
     } else {                                                                   \
       coo_matmul_cpu_impl<TYPE, int64_t>(data, row, col, rhs, out, n_rows_,    \
-                                         rhs_cols_, stream());                 \
+                                         n_cols_, rhs_cols_, stream());        \
     }                                                                          \
     return;                                                                    \
   }
@@ -206,6 +218,8 @@ void COOMatMul::eval_gpu(const std::vector<mx::array> &inputs,
     encoder.set_bytes(rhs_cols_, 5);
     auto total = static_cast<int>(data.size() * rhs_cols_);
     encoder.set_bytes(total, 6);
+    encoder.set_bytes(n_rows_, 7);
+    encoder.set_bytes(n_cols_, 8);
     auto threads = std::max<size_t>(data.size() * rhs_cols_, 1);
     auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
     encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
@@ -225,6 +239,7 @@ void COOMatMul::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_bytes(rhs_cols_, 6);
   auto nnz = static_cast<int>(data.size());
   encoder.set_bytes(nnz, 7);
+  encoder.set_bytes(n_cols_, 8);
   encoder.dispatch_threads(MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
 }
 #else

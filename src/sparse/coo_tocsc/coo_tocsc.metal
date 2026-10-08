@@ -21,13 +21,33 @@ template <typename T, typename I>
                                       device T *out_data [[buffer(3)]],
                                       device I *out_indices [[buffer(4)]],
                                       constant int &nnz [[buffer(5)]],
+                                      constant int &n_rows [[buffer(6)]],
+                                      constant int &n_cols [[buffer(7)]],
                                       uint tid [[thread_position_in_grid]]) {
   if (tid >= static_cast<uint>(nnz)) {
     return;
   }
 
+  const bool keep = coo_entry_in_range(row[tid], col[tid], n_rows, n_cols);
+
+  // Ranks are taken among the entries that survive, so that they agree with the
+  // pointer array the companion kernel builds from the same predicate. Entries
+  // that do not survive take a slot past the last one any column points at, in
+  // input order, so every slot is written exactly once.
   int rank = 0;
+  int kept_total = 0;
+  int dropped_before = 0;
   for (int j = 0; j < nnz; ++j) {
+    if (!coo_entry_in_range(row[j], col[j], n_rows, n_cols)) {
+      if (j < static_cast<int>(tid)) {
+        dropped_before += 1;
+      }
+      continue;
+    }
+    kept_total += 1;
+    if (!keep) {
+      continue;
+    }
     const bool less = col[j] < col[tid] ||
                       (col[j] == col[tid] &&
                        (row[j] < row[tid] ||
@@ -37,15 +57,22 @@ template <typename T, typename I>
     }
   }
 
-  out_data[rank] = data[tid];
-  out_indices[rank] = row[tid];
+  if (keep) {
+    out_data[rank] = data[tid];
+    out_indices[rank] = row[tid];
+  } else {
+    out_data[kept_total + dropped_before] = T(0);
+    out_indices[kept_total + dropped_before] = I(0);
+  }
 }
 
 template <typename I>
-[[kernel]] void coo_tocsc_indptr_kernel(device const I *col [[buffer(0)]],
-                                        device I *out_indptr [[buffer(1)]],
-                                        constant int &nnz [[buffer(2)]],
-                                        constant int &n_cols [[buffer(3)]],
+[[kernel]] void coo_tocsc_indptr_kernel(device const I *row [[buffer(0)]],
+                                        device const I *col [[buffer(1)]],
+                                        device I *out_indptr [[buffer(2)]],
+                                        constant int &nnz [[buffer(3)]],
+                                        constant int &n_rows [[buffer(4)]],
+                                        constant int &n_cols [[buffer(5)]],
                                         uint tid [[thread_position_in_grid]]) {
   if (tid != 0) {
     return;
@@ -55,6 +82,9 @@ template <typename I>
     out_indptr[c] = I(0);
   }
   for (int p = 0; p < nnz; ++p) {
+    if (!coo_entry_in_range(row[p], col[p], n_rows, n_cols)) {
+      continue;
+    }
     out_indptr[static_cast<int>(col[p]) + 1] += I(1);
   }
   for (int c = 0; c < n_cols; ++c) {
@@ -66,7 +96,8 @@ template <typename I>
   template [[host_name("coo_tocsc_rank_" #NAME)]] [[kernel]] void              \
   coo_tocsc_rank_kernel<T, I>(device const T *, device const I *,              \
                               device const I *, device T *, device I *,        \
-                              constant int &, uint)
+                              constant int &, constant int &, constant int &,  \
+                              uint)
 
 INSTANTIATE_COO_TOCSC_RANK(float32_int32, float, int);
 INSTANTIATE_COO_TOCSC_RANK(float32_int64, float, long);
@@ -80,8 +111,10 @@ INSTANTIATE_COO_TOCSC_RANK(complex64_int64, complex64_t, long);
 #undef INSTANTIATE_COO_TOCSC_RANK
 
 template [[host_name("coo_tocsc_indptr_int32")]] [[kernel]] void
-coo_tocsc_indptr_kernel<int>(device const int *, device int *, constant int &,
+coo_tocsc_indptr_kernel<int>(device const int *, device const int *,
+                             device int *, constant int &, constant int &,
                              constant int &, uint);
 template [[host_name("coo_tocsc_indptr_int64")]] [[kernel]] void
-coo_tocsc_indptr_kernel<long>(device const long *, device long *,
-                              constant int &, constant int &, uint);
+coo_tocsc_indptr_kernel<long>(device const long *, device const long *,
+                              device long *, constant int &, constant int &,
+                              constant int &, uint);

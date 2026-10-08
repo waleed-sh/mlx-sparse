@@ -38,6 +38,11 @@ csr\_matvec
 
 .. autofunction:: csr_matvec
 
+csr\_matvec\_transpose
+----------------------
+
+.. autofunction:: csr_matvec_transpose
+
 coo\_matvec
 -----------
 
@@ -138,6 +143,11 @@ values, ``row_norms`` / ``col_norms`` return ``float32``, and ``diagonal`` /
      - :func:`csc_row_sums`, :func:`csc_col_sums`,
        :func:`csc_row_norms`, :func:`csc_col_norms`,
        :func:`csc_diagonal`, :func:`csc_trace`
+
+Each ``col`` reduction is also exported under a ``column`` spelling, which
+calls it and returns the same result: :func:`coo_column_sums`,
+:func:`coo_column_norms`, :func:`csr_column_sums`, :func:`csc_column_sums`
+and :func:`csc_column_norms`.
 
 COO and CSC reductions are native C++/Metal paths. Norm reductions use dense
 matrix semantics, so non-canonical COO/CSC inputs are canonicalized before

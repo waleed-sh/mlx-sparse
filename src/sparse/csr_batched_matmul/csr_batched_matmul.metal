@@ -35,6 +35,9 @@ template <typename T, typename I>
   const int rhs_batch = batch * n_cols * rhs_cols;
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      continue;
+    }
     acc += sparse_multiply<T>(
         data[p],
         rhs[rhs_batch + static_cast<int>(indices[p]) * rhs_cols + rhs_col]);
@@ -49,8 +52,11 @@ template <typename T, typename I>
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
     constant int &n_cols [[buffer(6)]], constant int &batch_size [[buffer(7)]],
     constant int &rhs_cols [[buffer(8)]],
-    uint out_id [[threadgroup_position_in_grid]],
+    uint2 out_id_group [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
+  // One threadgroup per output, indexed down the grid's second
+  // dimension; see the dispatch for why it is not a flat grid.
+  const uint out_id = out_id_group.y;
   threadgroup typename sparse_accumulator<T>::type partial[128];
 
   const int outputs_per_batch = n_rows * rhs_cols;
@@ -67,6 +73,9 @@ template <typename T, typename I>
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row] + static_cast<I>(lane); p < indptr[row + 1];
        p += 128) {
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      continue;
+    }
     acc += sparse_multiply<T>(
         data[p],
         rhs[rhs_batch + static_cast<int>(indices[p]) * rhs_cols + rhs_col]);
@@ -96,7 +105,7 @@ template <typename T, typename I>
   csr_batched_matmul_vector_kernel<T, I>(                                      \
       device const T *, device const I *, device const I *, device const T *,  \
       device T *, constant int &, constant int &, constant int &,              \
-      constant int &, uint, uint)
+      constant int &, uint2, uint)
 
 INSTANTIATE_CSR_BATCHED_MATMUL(float32_int32, float, int);
 INSTANTIATE_CSR_BATCHED_MATMUL(float32_int64, float, long);

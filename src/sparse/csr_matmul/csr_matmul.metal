@@ -22,6 +22,7 @@ template <typename T, typename I>
                                   device T *out [[buffer(4)]],
                                   constant int &n_rows [[buffer(5)]],
                                   constant int &rhs_cols [[buffer(6)]],
+                                  constant int &n_cols [[buffer(7)]],
                                   uint tid [[thread_position_in_grid]]) {
   const int total = n_rows * rhs_cols;
   if (tid >= static_cast<uint>(total)) {
@@ -33,6 +34,10 @@ template <typename T, typename I>
 
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
+    // The stored index selects a row of rhs, which has n_cols of them.
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      continue;
+    }
     acc += sparse_multiply<T>(data[p], rhs[indices[p] * rhs_cols + rhs_col]);
   }
   out[row * rhs_cols + rhs_col] = sparse_accumulator<T>::cast(acc);
@@ -42,57 +47,62 @@ template [[host_name("csr_matmul_float32_int32")]] [[kernel]] void
 csr_matmul_kernel<float, int>(device const float *, device const int *,
                               device const int *, device const float *,
                               device float *, constant int &, constant int &,
-                              uint);
+                              constant int &, uint);
 template [[host_name("csr_matmul_float32_int64")]] [[kernel]] void
 csr_matmul_kernel<float, long>(device const float *, device const long *,
                                device const long *, device const float *,
                                device float *, constant int &, constant int &,
-                               uint);
+                               constant int &, uint);
 template [[host_name("csr_matmul_float16_int32")]] [[kernel]] void
 csr_matmul_kernel<half, int>(device const half *, device const int *,
                              device const int *, device const half *,
                              device half *, constant int &, constant int &,
-                             uint);
+                             constant int &, uint);
 template [[host_name("csr_matmul_float16_int64")]] [[kernel]] void
 csr_matmul_kernel<half, long>(device const half *, device const long *,
                               device const long *, device const half *,
                               device half *, constant int &, constant int &,
-                              uint);
+                              constant int &, uint);
 template [[host_name("csr_matmul_bfloat16_int32")]] [[kernel]] void
 csr_matmul_kernel<bfloat16_t, int>(device const bfloat16_t *,
                                    device const int *, device const int *,
                                    device const bfloat16_t *,
                                    device bfloat16_t *, constant int &,
-                                   constant int &, uint);
+                                   constant int &, constant int &, uint);
 template [[host_name("csr_matmul_bfloat16_int64")]] [[kernel]] void
 csr_matmul_kernel<bfloat16_t, long>(device const bfloat16_t *,
                                     device const long *, device const long *,
                                     device const bfloat16_t *,
                                     device bfloat16_t *, constant int &,
-                                    constant int &, uint);
+                                    constant int &, constant int &, uint);
 template [[host_name("csr_matmul_complex64_int32")]] [[kernel]] void
 csr_matmul_kernel<complex64_t, int>(device const complex64_t *,
                                     device const int *, device const int *,
                                     device const complex64_t *,
                                     device complex64_t *, constant int &,
-                                    constant int &, uint);
+                                    constant int &, constant int &, uint);
 template [[host_name("csr_matmul_complex64_int64")]] [[kernel]] void
 csr_matmul_kernel<complex64_t, long>(device const complex64_t *,
                                      device const long *, device const long *,
                                      device const complex64_t *,
                                      device complex64_t *, constant int &,
-                                     constant int &, uint);
+                                     constant int &, constant int &, uint);
 
 template <typename T, typename I>
 [[kernel]] void csr_matmul_vector_kernel(
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device const T *rhs [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
-    constant int &rhs_cols [[buffer(6)]],
-    uint out_id [[threadgroup_position_in_grid]],
+    constant int &rhs_cols [[buffer(6)]], constant int &n_cols [[buffer(7)]],
+    uint2 group_pos [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
   threadgroup typename sparse_accumulator<T>::type partial[128];
 
+  // One threadgroup per (row, rhs column), indexed down the grid's SECOND
+  // dimension. A flat grid would need n_rows * rhs_cols * 128 threads in one
+  // dimension, which wraps at 2^32 and silently drops every threadgroup past
+  // it -- so a large enough product returned zeros for the tail.
+  const uint out_id = group_pos.y;
   const int row = static_cast<int>(out_id) / rhs_cols;
   const int rhs_col = static_cast<int>(out_id) - row * rhs_cols;
   if (row >= n_rows) {
@@ -102,6 +112,10 @@ template <typename T, typename I>
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row] + static_cast<I>(lane); p < indptr[row + 1];
        p += 128) {
+    // The stored index selects a row of rhs, which has n_cols of them.
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      continue;
+    }
     acc += sparse_multiply<T>(data[p], rhs[indices[p] * rhs_cols + rhs_col]);
   }
   partial[lane] = acc;
@@ -123,7 +137,8 @@ template <typename T, typename I>
   template [[host_name("csr_matmul_vector_" #NAME)]] [[kernel]] void           \
   csr_matmul_vector_kernel<T, I>(                                              \
       device const T *, device const I *, device const I *, device const T *,  \
-      device T *, constant int &, constant int &, uint, uint)
+      device T *, constant int &, constant int &, constant int &, uint2,      \
+      uint)
 
 INSTANTIATE_CSR_MATMUL_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSR_MATMUL_VECTOR(float32_int64, float, long);

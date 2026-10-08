@@ -19,13 +19,20 @@ template <typename T, typename I>
     device const I *indices [[buffer(0)]], device const I *indptr [[buffer(1)]],
     device const T *rhs [[buffer(2)]], device const T *cotangent [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
-    constant int &rhs_cols [[buffer(6)]],
+    constant int &rhs_cols [[buffer(6)]], constant int &n_cols [[buffer(7)]],
     uint row [[thread_position_in_grid]]) {
   if (static_cast<int>(row) >= n_rows) {
     return;
   }
 
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
+    // The forward pass drops this entry, so the output does not depend on
+    // its value and the gradient is zero. Written rather than skipped: out
+    // has one slot per stored entry.
+    if (!sparse_index_in_range(indices[p], n_cols)) {
+      out[p] = T(0);
+      continue;
+    }
     typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
     const int col = static_cast<int>(indices[p]);
     for (int k = 0; k < rhs_cols; ++k) {
@@ -40,7 +47,7 @@ template <typename T, typename I>
   template [[host_name("csr_matmul_data_vjp_" #NAME)]] [[kernel]] void         \
   csr_matmul_data_vjp_kernel<T, I>(                                            \
       device const I *, device const I *, device const T *, device const T *,  \
-      device T *, constant int &, constant int &, uint)
+      device T *, constant int &, constant int &, constant int &, uint)
 
 INSTANTIATE_CSR_MATMUL_DATA_VJP(float32_int32, float, int);
 INSTANTIATE_CSR_MATMUL_DATA_VJP(float32_int64, float, long);

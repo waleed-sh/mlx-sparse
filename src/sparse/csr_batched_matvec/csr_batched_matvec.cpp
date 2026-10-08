@@ -114,9 +114,14 @@ void csr_batched_matvec_cpu_impl(const mx::array &data,
         const auto out_batch = static_cast<size_t>(batch) * n_rows;
         typename Accumulator<T>::Type acc = Accumulator<T>::zero();
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          // The stored index selects an element of this batch's dense operand,
+          // so the bound is the column count that is already in hand.
+          const I col = indices_ptr[p];
           acc += multiply_accumulate<T>(
               data_ptr[p],
-              rhs_ptr[rhs_batch + static_cast<size_t>(indices_ptr[p])]);
+              sparse_index_in_range(col, n_cols)
+                  ? rhs_ptr[rhs_batch + static_cast<size_t>(col)]
+                  : T(0));
         }
         out_ptr[out_batch + row] = Accumulator<T>::cast(acc);
       }
@@ -217,7 +222,10 @@ void CSRBatchedMatVec::eval_gpu(const std::vector<mx::array> &inputs,
 
   const auto outputs_count = static_cast<size_t>(batch_size_) * n_rows_;
   if (use_vector_kernel) {
-    encoder.dispatch_threads(MTL::Size(outputs_count * kVectorThreads, 1, 1),
+    // Down the grid's second dimension. A flat x-dimension of
+    // <threadgroups> * kVectorThreads threads wraps at 2^32, silently: the
+    // threadgroups past the wrap never run and their outputs stay zero.
+    encoder.dispatch_threads(MTL::Size(kVectorThreads, outputs_count, 1),
                              MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = std::max<size_t>(outputs_count, 1);

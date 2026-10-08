@@ -46,8 +46,10 @@ template <typename I>
   device atomic_float *atomic_out =
       reinterpret_cast<device atomic_float *>(out);
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
-    const int col = static_cast<int>(indices[p]);
-    if (col >= 0 && col < n_cols) {
+    // Compared in the index type: casting to int first folds an index above
+    // INT_MAX back into range, so the check passed and the entry was counted.
+    if (sparse_index_in_range(indices[p], n_cols)) {
+      const int col = static_cast<int>(indices[p]);
       atomic_fetch_add_explicit(&atomic_out[col], data[p],
                                 memory_order_relaxed);
     }
@@ -67,8 +69,10 @@ template <typename I>
   device atomic_float *atomic_out =
       reinterpret_cast<device atomic_float *>(out);
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
-    const int col = static_cast<int>(indices[p]);
-    if (col >= 0 && col < n_cols) {
+    // Compared in the index type: casting to int first folds an index above
+    // INT_MAX back into range, so the check passed and the entry was counted.
+    if (sparse_index_in_range(indices[p], n_cols)) {
+      const int col = static_cast<int>(indices[p]);
       atomic_fetch_add_explicit(&atomic_out[2 * col], data[p].real,
                                 memory_order_relaxed);
       atomic_fetch_add_explicit(&atomic_out[2 * col + 1], data[p].imag,

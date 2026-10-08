@@ -476,6 +476,148 @@ def test_csc_matvec_transpose_vjp_and_jvp_match_dense_mlx(mx):
     np.testing.assert_allclose(to_numpy(sparse_vjp[0]), to_numpy(dense_vjp[0]))
 
 
+def _csr_transpose_fixture(mx):
+    indices_np = np.array([0, 2, 1, 3], dtype=np.int32)
+    indptr_np = np.array([0, 2, 2, 4], dtype=np.int32)
+    row_np = np.array([0, 0, 2, 2], dtype=np.int32)
+    data_np = np.array([2.0, -1.0, 4.0, 5.0], dtype=np.float32)
+    dense_np = np.zeros((3, 4), dtype=np.float32)
+    dense_np[row_np, indices_np] = data_np
+    return (
+        mx.array(indices_np),
+        mx.array(indptr_np),
+        mx.array(data_np),
+        mx.array(dense_np),
+        row_np,
+        indices_np,
+    )
+
+
+def test_csr_matvec_transpose_data_and_rhs_gradients_match_dense_mlx(mx):
+    indices, indptr, data, dense, row_np, col_np = _csr_transpose_fixture(mx)
+    # A.T @ x consumes a vector of length n_rows.
+    x = mx.array(np.array([3.0, 10.0, 7.0], dtype=np.float32))
+
+    def sparse_loss(values, rhs):
+        csr = ms.csr_array(
+            (values, indices, indptr),
+            shape=(3, 4),
+            sorted_indices=True,
+            canonical=True,
+        )
+        y = ms.csr_matvec_transpose(csr, rhs)
+        return mx.sum(y * y)
+
+    def dense_loss(matrix, rhs):
+        y = mx.transpose(matrix) @ rhs
+        return mx.sum(y * y)
+
+    grad_data_sparse, grad_x_sparse = mx.grad(sparse_loss, argnums=(0, 1))(data, x)
+    grad_dense, grad_x_dense = mx.grad(dense_loss, argnums=(0, 1))(dense, x)
+
+    np.testing.assert_allclose(
+        to_numpy(grad_data_sparse),
+        to_numpy(grad_dense)[row_np, col_np],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        to_numpy(grad_x_sparse), to_numpy(grad_x_dense), rtol=1e-5, atol=1e-5
+    )
+
+
+def test_csr_matvec_transpose_jvp_and_vjp_match_dense_mlx(mx):
+    indices, indptr, data, dense, _, _ = _csr_transpose_fixture(mx)
+    csr = ms.csr_array(
+        (data, indices, indptr), shape=(3, 4), sorted_indices=True, canonical=True
+    )
+    x = mx.array(np.array([1.0, -0.5, 2.0], dtype=np.float32))
+    tangent = mx.array(np.array([0.25, -1.0, 0.5], dtype=np.float32))
+    cotangent = mx.array(np.array([1.0, -2.0, 0.5, 0.25], dtype=np.float32))
+
+    _, sparse_jvp = mx.jvp(
+        lambda rhs: ms.csr_matvec_transpose(csr, rhs), (x,), (tangent,)
+    )
+    _, dense_jvp = mx.jvp(lambda rhs: mx.transpose(dense) @ rhs, (x,), (tangent,))
+    _, sparse_vjp = mx.vjp(
+        lambda rhs: ms.csr_matvec_transpose(csr, rhs), (x,), (cotangent,)
+    )
+    _, dense_vjp = mx.vjp(lambda rhs: mx.transpose(dense) @ rhs, (x,), (cotangent,))
+
+    np.testing.assert_allclose(to_numpy(sparse_jvp[0]), to_numpy(dense_jvp[0]))
+    np.testing.assert_allclose(to_numpy(sparse_vjp[0]), to_numpy(dense_vjp[0]))
+
+
+def test_csr_matvec_transpose_data_jvp_matches_dense_mlx(mx):
+    """The value tangent is the direction the RHS-only cells never exercise."""
+    indices, indptr, data, dense, row_np, col_np = _csr_transpose_fixture(mx)
+    x = mx.array(np.array([1.0, -0.5, 2.0], dtype=np.float32))
+    tangent_np = np.array([0.5, 1.5, -0.25, 2.0], dtype=np.float32)
+    dense_tangent_np = np.zeros((3, 4), dtype=np.float32)
+    dense_tangent_np[row_np, col_np] = tangent_np
+
+    def sparse_fn(values):
+        csr = ms.csr_array(
+            (values, indices, indptr),
+            shape=(3, 4),
+            sorted_indices=True,
+            canonical=True,
+        )
+        return ms.csr_matvec_transpose(csr, x)
+
+    _, sparse_jvp = mx.jvp(sparse_fn, (data,), (mx.array(tangent_np),))
+    _, dense_jvp = mx.jvp(
+        lambda matrix: mx.transpose(matrix) @ x,
+        (dense,),
+        (mx.array(dense_tangent_np),),
+    )
+
+    np.testing.assert_allclose(
+        to_numpy(sparse_jvp[0]), to_numpy(dense_jvp[0]), rtol=1e-5, atol=1e-5
+    )
+
+
+@pytest.mark.cpu_only
+def test_csr_matvec_transpose_complex_gradients_match_dense_mlx(mx):
+    row_np = np.array([0, 0, 1, 2], dtype=np.int32)
+    col_np = np.array([0, 2, 1, 3], dtype=np.int32)
+    indptr_np = np.array([0, 2, 3, 4], dtype=np.int32)
+    data_np = np.array([2.0 + 1.0j, -1.0 - 0.5j, 4.0 + 2.0j, 5.0 - 1.0j], np.complex64)
+    dense_np = np.zeros((3, 4), dtype=np.complex64)
+    dense_np[row_np, col_np] = data_np
+
+    indices = mx.array(col_np)
+    indptr = mx.array(indptr_np)
+    data = mx.array(data_np)
+    dense = mx.array(dense_np)
+    x = mx.array(np.array([1.0 + 1.0j, -0.5j, 2.0 + 0.25j], dtype=np.complex64))
+
+    def sparse_loss(values, rhs):
+        csr = ms.csr_array(
+            (values, indices, indptr),
+            shape=(3, 4),
+            sorted_indices=True,
+            canonical=True,
+        )
+        return _complex_energy(mx, ms.csr_matvec_transpose(csr, rhs))
+
+    def dense_loss(matrix, rhs):
+        return _complex_energy(mx, mx.transpose(matrix) @ rhs)
+
+    grad_data_sparse, grad_x_sparse = mx.grad(sparse_loss, argnums=(0, 1))(data, x)
+    grad_dense, grad_x_dense = mx.grad(dense_loss, argnums=(0, 1))(dense, x)
+
+    np.testing.assert_allclose(
+        to_numpy(grad_data_sparse),
+        to_numpy(grad_dense)[row_np, col_np],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+    np.testing.assert_allclose(
+        to_numpy(grad_x_sparse), to_numpy(grad_x_dense), rtol=1e-5, atol=1e-5
+    )
+
+
 def _stored_sparse(mx, format_name, values):
     shape = (3, 3)
     index_dtype = mx.int64

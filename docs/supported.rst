@@ -130,18 +130,28 @@ Conversions and structural operations
      - Notes
    * - ``COOArray.tocsr()``
      - Done
-     - Native primitive (CPU and Metal). Sorts by row then column. Preserves
-       duplicates.
+     - Sorts by row then column and preserves duplicates. CPU runs the native
+       counting sort; GPU sorts the row-major keys with MLX array operations
+       and falls back to the native primitive for ``complex64``.
    * - ``COOArray.tocsr(canonical=True)``
      - Done
      - Sorts and sums duplicates.
+   * - ``COOArray.tocsr(return_permutation=True)``
+     - Done
+     - Also returns the ``(nnz,)`` permutation applied, so arrays parallel to
+       ``data`` can be reordered with ``mx.take``. Rejected together with
+       ``canonical=True``, which sums entries rather than permuting them.
    * - ``COOArray.tocsc()``
      - Done
-     - Native ``coo_tocsc`` primitive (CPU and Metal). Sorts by column then
-       row. Preserves duplicates.
+     - Sorts by column then row and preserves duplicates. Takes the same two
+       paths as ``COOArray.tocsr()``.
    * - ``COOArray.tocsc(canonical=True)``
      - Done
      - Sorts row indices within columns and sums duplicates.
+   * - ``COOArray.tocsc(return_permutation=True)``
+     - Done
+     - Column-major counterpart of
+       ``COOArray.tocsr(return_permutation=True)``.
    * - ``CSRArray.tocsc()``
      - Done
      - Native ``csr_tocsc`` conversion with count/prefix/fill structure build.
@@ -216,10 +226,13 @@ Sparse-dense arithmetic
    * - Feature
      - Status
      - Notes
-   * - ``csr_matvec`` (all value dtypes, int32 and int64)
+   * - ``csr_matvec`` / ``csr_matvec_transpose``
+       (all value dtypes, int32 and int64)
      - Done
      - CPU and Metal GPU. Scalar row kernel plus vector-reduction kernel for
-       long rows on Metal.
+       long rows on Metal. The transpose matvec computes ``A.T @ x`` against the
+       CSR layout; non-``float32`` GPU data lowers through ``csr_transpose``
+       plus ``csr_matvec``.
    * - ``csc_matvec`` / ``csc_matvec_transpose``
      - Done
      - Native CSC kernels. Forward matvec is column scatter-add, transpose
@@ -589,11 +602,16 @@ compact buffers.
      - All value and index dtypes
      - Fixed-output materialization kernel
    * - ``coo_tocsr``
-     - All value and index dtypes
-     - Rank-based stable sort plus indptr build
+     - ``complex64`` only
+     - Rank-based stable sort plus indptr build. The rank is quadratic in
+       ``nnz``, so other value dtypes take the array-op path instead: a stable
+       sort of the row-major keys, two gathers and a histogram scan.
+       ``complex64`` stays here because the gather's VJP is a scatter and the
+       Metal scatter has no ``complex64`` support.
    * - ``coo_tocsc``
-     - All value and index dtypes
-     - Rank-based stable column-major sort plus indptr build
+     - ``complex64`` only
+     - Rank-based stable column-major sort plus indptr build, kept for the
+       same reason as ``coo_tocsr``.
    * - ``csr_transpose``
      - All value and index dtypes
      - Parallel count/prefix plus deterministic fill
@@ -675,3 +693,25 @@ Known limitations
   ``float16`` and ``bfloat16`` inputs are promoted to ``float32`` before
   solver dispatch. Sparse ``dot``/``vdot`` support ``complex64``.
 * Full validation (``validate="full"``) may trigger host synchronization.
+* CSR selection (``A[rows]``, ``A[:, s:e]``, ``A[rows, s:e]``) synchronizes one
+  count, because the number of stored entries in the result depends on how full
+  the selected rows are. A row index outside the shape **raises**
+  ``IndexError``, as it does in SciPy: the index is an operand the caller
+  supplies rather than stored structure, and the operation already reads that
+  count back to the host, so checking it costs nothing further. Negative ids
+  count from the end. A bare integer (``A[i]``) is refused because the result
+  would be one-dimensional and this package has no such container; use
+  ``A[[i]]``. Column slices with a negative step are refused because they would
+  reverse the column order within every row. Arbitrary column *sets* are not
+  supported, only ranges.
+* COO coordinates outside the declared shape are ignored. ``validate="full"``
+  rejects them with a message naming the offending bound, but it is not the
+  default and it reads the coordinates back to the host, so it cannot be used
+  inside ``mx.compile``. The kernels therefore apply the same bound themselves:
+  an entry whose row is outside ``[0, n_rows)`` or whose column is outside
+  ``[0, n_cols)`` contributes nothing, on either backend, and the result is the
+  result of converting the remaining entries. For the compressed conversions
+  that leaves ``indptr[-1]`` short of ``nnz``, and the value and index slots
+  past it are zero. Out-of-range coordinates are a caller error and
+  ``validate="full"`` is how to be told about them; the guarantee here is only
+  that they cannot reach past the end of a buffer.

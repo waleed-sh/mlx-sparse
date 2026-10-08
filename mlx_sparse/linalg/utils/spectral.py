@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import mlx.core as mx
 
 from mlx_sparse._csr import CSRArray
@@ -49,12 +51,33 @@ def normalize_ncv(n: int, k: int, ncv: int | None) -> int:
     return min(n, max(k + 1, 2 * k + 1 if ncv is None else int(ncv)))
 
 
+#: Fixed key for the default Krylov start vector, which is ``ones + pseudo-random``.
+#:
+#: The random term is what makes the start vector usable at all on structured input.
+#: A constant vector is an exact eigenvector of any matrix with constant row sums, so
+#: for a graph Laplacian (``L @ 1 == 0``) or a row-stochastic matrix (``P @ 1 == 1``)
+#: the Krylov space built from a pure ``ones`` start is one-dimensional. Every solver
+#: here then returns ``k`` copies of that single eigenpair, whatever ``which`` asked
+#: for. Any component off the constant direction removes the degeneracy.
+#:
+#: The ones term is what keeps ``which="SM"`` cheap on a Laplacian, whose smallest
+#: eigenvector is the constant vector: the sum keeps a constant-direction overlap of
+#: ``1/sqrt(2)`` at every ``n``, where a pure random start would dilute it to
+#: ``~1/sqrt(n)`` and need far more iterations to recover it.
+#:
+#: The key is fixed rather than drawn from the global stream, so ``v0=None`` is
+#: reproducible across calls and processes and does not consume user random state.
+_DEFAULT_START_KEY = mx.random.key(0)
+
+
 def start_vector(v0, *, n: int, name: str = "v0") -> mx.array:
     """Return a finite float32 start vector for a Krylov spectral routine.
 
     Args:
-        v0: Optional user-provided start vector.  ``None`` maps to the current
-            deterministic all-ones vector.
+        v0: Optional user-provided start vector.  ``None`` maps to a deterministic
+            ``ones + pseudo-random`` vector, seeded from a fixed key so that repeated
+            calls agree and the global random stream is left alone.  See
+            ``_DEFAULT_START_KEY`` for why neither term can be dropped.
         n: Required vector length.
         name: Name used in validation errors.
 
@@ -67,7 +90,10 @@ def start_vector(v0, *, n: int, name: str = "v0") -> mx.array:
     """
 
     if v0 is None:
-        return mx.ones((int(n),), dtype=mx.float32)
+        length = int(n)
+        return mx.ones((length,), dtype=mx.float32) + mx.random.normal(
+            shape=(length,), dtype=mx.float32, key=_DEFAULT_START_KEY
+        )
     vector = ensure_float32_vector(name, v0, require_finite=True)
     if vector.shape[0] != n:
         raise ValueError(f"{name} has length {vector.shape[0]}, expected {n}.")
@@ -101,3 +127,123 @@ def reject_iteration_controls(
             f"{routine} tol requires an implicitly restarted convergence loop; "
             "the current implementation performs one ncv-bounded Ritz extraction."
         )
+
+
+# A Ritz pair extracted from a converged basis lands near float32 round-off,
+# and one extracted from a basis that is too small lands orders of magnitude
+# above it. Measured on a graph Laplacian, converged extractions sit at 1e-6 to
+# 3e-6 and unconverged ones at 3e-3 and worse, so the boundary is placed in the
+# middle of that gap rather than at a value any particular matrix argues for.
+RITZ_BACKWARD_ERROR_TOLERANCE = 1e-4
+
+
+def matrix_inf_norm(csr: CSRArray) -> mx.array:
+    """Return ``max_i sum_j |A[i, j]|``, the induced infinity norm.
+
+    Used to make a residual relative. It bounds the spectral norm, needs one
+    pass over the stored values, and unlike the eigenvalue itself it does not
+    vanish for the near-zero end of a Laplacian spectrum.
+    """
+    magnitudes = CSRArray(
+        data=mx.abs(csr.data),
+        indices=csr.indices,
+        indptr=csr.indptr,
+        shape=csr.shape,
+        sorted_indices=csr.sorted_indices,
+        has_canonical_format=csr.has_canonical_format,
+    )
+    if csr.shape[0] == 0 or csr.nnz == 0:
+        return mx.array(1.0, dtype=mx.float32)
+    return mx.max(magnitudes.row_sums())
+
+
+def ritz_backward_error(csr: CSRArray, values: mx.array, vectors: mx.array) -> mx.array:
+    """Return the largest relative backward error over the returned pairs.
+
+    For each pair this is ``||A v - lam v|| / (||A||_inf ||v||)``. It is the
+    quantity a caller would compute to decide whether to trust the answer, and
+    it needs one sparse product against the ``(n, k)`` block of vectors.
+    """
+    residual = csr @ vectors - vectors * values.reshape(1, -1)
+    residual_norms = mx.sqrt(mx.sum(mx.square(residual), axis=0))
+    vector_norms = mx.sqrt(mx.sum(mx.square(vectors), axis=0))
+    scale = matrix_inf_norm(csr)
+    scale = mx.where(scale > 0, scale, mx.array(1.0, dtype=scale.dtype))
+    vector_norms = mx.where(vector_norms > 0, vector_norms, mx.ones_like(vector_norms))
+    return mx.max(residual_norms / (vector_norms * scale))
+
+
+class UnconvergedRitzWarning(RuntimeWarning):
+    """The returned Ritz pairs did not meet the accepted backward error."""
+
+
+def warn_if_ritz_unconverged(
+    csr: CSRArray,
+    values: mx.array,
+    vectors: mx.array,
+    *,
+    routine: str,
+    ncv: int,
+) -> None:
+    """Warn when the extracted Ritz pairs carry a large backward error.
+
+    One ``ncv``-bounded extraction is not a convergence loop, so the basis can
+    simply be too small for the requested pairs, and the Ritz values are then
+    wrong by an amount nothing in the result reports. Measuring the residual
+    costs one sparse product against the returned block and turns that silence
+    into a statement the caller can act on.
+
+    This warns rather than raises. Accuracy here is governed entirely by
+    ``ncv`` and degrades continuously with it, so there is no backward error
+    that separates "converged" from "not converged" for every matrix, and a
+    caller who has chosen an ``ncv`` and accepted the resulting error is
+    entitled to their answer. Callers who want a hard bound can measure it
+    directly with :func:`ritz_backward_error` and decide for themselves.
+    """
+    if values.size == 0:
+        return
+    error = float(ritz_backward_error(csr, values, vectors))
+    if error <= RITZ_BACKWARD_ERROR_TOLERANCE:
+        return
+    warnings.warn(
+        f"{routine} returned pairs with a relative backward error of "
+        f"{error:.3e}, above {RITZ_BACKWARD_ERROR_TOLERANCE:.0e}, so the "
+        f"eigenvalues are not accurate to float32 round-off. This is one "
+        f"ncv-bounded Ritz extraction rather than a restarted loop, so "
+        f"accuracy is governed entirely by ncv; ncv={ncv} was used here and a "
+        f"larger value tightens the result.",
+        UnconvergedRitzWarning,
+        stacklevel=3,
+    )
+
+
+def normalize_which(which, *, routine: str, accepted: tuple[str, ...]) -> str:
+    """Return the upper-cased Ritz selector, rejecting anything unrecognized.
+
+    The native Ritz selection sorts descending whenever the selector is not one of
+    the small-end names, so an unrecognized selector silently produces the
+    largest-algebraic pairs instead of failing.  That turns a typo, or a selector
+    this routine does not implement, into a wrong answer rather than an error.
+
+    Args:
+        which: Selector as passed by the caller.  Matching is case-insensitive.
+        routine: Name used in the error message.
+        accepted: Selectors this routine implements, upper-cased.
+
+    Returns:
+        The upper-cased selector.
+
+    Raises:
+        ValueError: If ``which`` is not one of ``accepted``.
+    """
+
+    if not isinstance(which, str):
+        raise ValueError(
+            f"{routine} which must be a string, got {type(which).__name__}."
+        )
+    normalized = which.upper()
+    if normalized not in accepted:
+        raise ValueError(
+            f"{routine} which must be one of {', '.join(accepted)}, got {which!r}."
+        )
+    return normalized

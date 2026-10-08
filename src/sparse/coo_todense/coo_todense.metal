@@ -28,6 +28,9 @@ template <typename T, typename I>
     out[i] = T(0);
   }
   for (int p = 0; p < nnz; ++p) {
+    if (!coo_entry_in_range(row[p], col[p], n_rows, n_cols)) {
+      continue;
+    }
     const int offset =
         static_cast<int>(row[p]) * n_cols + static_cast<int>(col[p]);
     out[offset] = sparse_add_storage<T>(out[offset], data[p]);

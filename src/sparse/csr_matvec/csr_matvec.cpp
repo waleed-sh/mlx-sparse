@@ -40,6 +40,7 @@ namespace {
 constexpr size_t kVectorThreads = 128;
 constexpr size_t kVectorMinAverageNnz = 32;
 
+
 class CSRMatVec : public mx::Primitive {
 public:
   CSRMatVec(mx::Stream stream, int n_rows, int n_cols)
@@ -77,37 +78,45 @@ private:
 };
 
 template <typename T, typename I>
+static inline T csr_matvec_operand(const T *x_ptr, I index, int n_cols) {
+  // The index addresses x, so x's own length is the bound and no extra
+  // dimension has to be threaded in. Written as a select rather than a branch
+  // so the unrolled cases below keep their shape.
+  return sparse_index_in_range(index, n_cols) ? x_ptr[index] : T(0);
+}
+
+template <typename T, typename I>
 typename Accumulator<T>::Type
 csr_matvec_row_accum(const T *data_ptr, const I *indices_ptr, I begin, I end,
-                     const T *x_ptr) {
+                     const T *x_ptr, int n_cols) {
   using AccT = typename Accumulator<T>::Type;
   switch (end - begin) {
   case 0:
     return Accumulator<T>::zero();
   case 1:
-    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]);
+    return multiply_accumulate<T>(data_ptr[begin], csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin], n_cols));
   case 2:
-    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]) +
+    return multiply_accumulate<T>(data_ptr[begin], csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin], n_cols)) +
            multiply_accumulate<T>(data_ptr[begin + 1],
-                                  x_ptr[indices_ptr[begin + 1]]);
+                                  csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin + 1], n_cols));
   case 3:
-    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]) +
+    return multiply_accumulate<T>(data_ptr[begin], csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin], n_cols)) +
            multiply_accumulate<T>(data_ptr[begin + 1],
-                                  x_ptr[indices_ptr[begin + 1]]) +
+                                  csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin + 1], n_cols)) +
            multiply_accumulate<T>(data_ptr[begin + 2],
-                                  x_ptr[indices_ptr[begin + 2]]);
+                                  csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin + 2], n_cols));
   case 4:
-    return multiply_accumulate<T>(data_ptr[begin], x_ptr[indices_ptr[begin]]) +
+    return multiply_accumulate<T>(data_ptr[begin], csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin], n_cols)) +
            multiply_accumulate<T>(data_ptr[begin + 1],
-                                  x_ptr[indices_ptr[begin + 1]]) +
+                                  csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin + 1], n_cols)) +
            multiply_accumulate<T>(data_ptr[begin + 2],
-                                  x_ptr[indices_ptr[begin + 2]]) +
+                                  csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin + 2], n_cols)) +
            multiply_accumulate<T>(data_ptr[begin + 3],
-                                  x_ptr[indices_ptr[begin + 3]]);
+                                  csr_matvec_operand<T, I>(x_ptr, indices_ptr[begin + 3], n_cols));
   default:
     AccT acc = Accumulator<T>::zero();
     for (I p = begin; p < end; ++p) {
-      acc += multiply_accumulate<T>(data_ptr[p], x_ptr[indices_ptr[p]]);
+      acc += multiply_accumulate<T>(data_ptr[p], csr_matvec_operand<T, I>(x_ptr, indices_ptr[p], n_cols));
     }
     return acc;
   }
@@ -139,11 +148,13 @@ void csr_matvec_cpu_impl(const mx::array &data, const mx::array &indices,
     const auto *indptr_ptr = indptr.data<I>();
     const auto *x_ptr = x.data<T>();
     auto *out_ptr = out.data<T>();
+    const int n_cols = static_cast<int>(x.size());
 
     auto compute_rows = [&](CpuRange range) {
       for (int row = range.begin; row < range.end; ++row) {
         const auto acc = csr_matvec_row_accum<T, I>(
-            data_ptr, indices_ptr, indptr_ptr[row], indptr_ptr[row + 1], x_ptr);
+            data_ptr, indices_ptr, indptr_ptr[row], indptr_ptr[row + 1], x_ptr,
+            n_cols);
         out_ptr[row] = Accumulator<T>::cast(static_cast<AccT>(acc));
       }
     };
@@ -304,10 +315,14 @@ void CSRMatVec::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_input_array(x, 3);
   encoder.set_output_array(out, 4);
   encoder.set_bytes(n_rows_, 5);
+  encoder.set_bytes(n_cols_, 6);
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_rows_);
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
+    // Down the grid's second dimension. A flat x-dimension of
+    // <threadgroups> * kVectorThreads threads wraps at 2^32, silently: the
+    // threadgroups past the wrap never run and their outputs stay zero.
+    encoder.dispatch_threads(MTL::Size(kVectorThreads, threadgroups, 1),
                              MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = static_cast<size_t>(std::max(n_rows_, 1));

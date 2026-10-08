@@ -105,6 +105,9 @@ void csr_todense_cpu_impl(const mx::array &data, const mx::array &indices,
     auto fill_rows = [&](CpuRange range) {
       for (int row = range.begin; row < range.end; ++row) {
         for (I p = indptr_ptr[row]; p < indptr_ptr[row + 1]; ++p) {
+          if (!sparse_index_in_range(indices_ptr[p], n_cols)) {
+            continue;
+          }
           const auto col = static_cast<int>(indices_ptr[p]);
           out_ptr[static_cast<size_t>(row) * n_cols + col] += data_ptr[p];
         }
