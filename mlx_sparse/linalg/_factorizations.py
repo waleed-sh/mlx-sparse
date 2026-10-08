@@ -36,9 +36,7 @@ from mlx_sparse.linalg.utils.factorization import as_sparse as _as_sparse
 from mlx_sparse.linalg.utils.factorization import (
     auto_factorized_method as _auto_factorized_method,
 )
-from mlx_sparse.linalg.utils.factorization import (
-    ensure_factor_rhs,
-)
+from mlx_sparse.linalg.utils.factorization import ensure_factor_rhs
 from mlx_sparse.linalg.utils.factorization import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.factorization import (
     normalize_factorized_method as _normalize_factorized_method,
