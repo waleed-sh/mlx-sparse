@@ -19,7 +19,7 @@ from typing import Callable, Literal, Protocol, TypeAlias
 import mlx.core as mx
 
 Shape2D: TypeAlias = tuple[int, int]
-ValidationMode: TypeAlias = bool | Literal["metadata", "full"]
+ValidationMode: TypeAlias = bool | Literal["none", "metadata", "full"]
 
 INDEX_DTYPES = (mx.int32, mx.int64)
 VALUE_DTYPES = (mx.float32, mx.float16, mx.bfloat16, mx.complex64)

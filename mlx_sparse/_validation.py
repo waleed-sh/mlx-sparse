@@ -50,13 +50,19 @@ def normalize_shape(shape: Sequence[int]) -> Shape2D:
 
 
 def normalize_validation_mode(validate: ValidationMode) -> str:
+    """Return the buffer validation mode for a sparse constructor.
+
+    ``True`` selects full validation. ``False`` and ``"none"`` disable
+    buffer validation. Shape normalization and input unpacking still apply.
+    Unsupported values raise ``ValueError``.
+    """
     if validate is True:
         return "full"
     if validate is False:
         return "none"
-    if validate not in {"metadata", "full"}:
+    if not isinstance(validate, str) or validate not in {"none", "metadata", "full"}:
         raise ValueError(
-            "validate must be one of False, True, 'metadata', or 'full', "
+            "validate must be one of False, True, 'none', 'metadata', or 'full', "
             f"got {validate!r}."
         )
     return validate

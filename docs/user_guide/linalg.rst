@@ -89,6 +89,30 @@ perform a single ``ncv``-bounded Ritz extraction, non-default ``tol`` or
 ``maxiter`` values are rejected until an implicitly restarted convergence loop
 is implemented.
 
+The ``which`` selector is case-insensitive and accepts the following values:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 35 45
+
+   * - Routine
+     - Selectors
+     - Selection criterion
+   * - ``eigsh``
+     - ``LM``, ``SM``, ``LA``, ``SA``
+     - Largest or smallest magnitude, or largest or smallest algebraic value.
+   * - ``eigs``
+     - ``LM``, ``SM``, ``LR``, ``SR``
+     - Largest or smallest magnitude, or largest or smallest real part.
+   * - ``svds``
+     - ``LM``, ``SM``
+     - Largest or smallest singular value.
+
+Unsupported selectors and non-string values raise ``ValueError`` before
+matrix preparation or native execution. SciPy's ``BE`` selector for ``eigsh``
+and ``LI`` and ``SI`` selectors for ``eigs`` are not implemented. ``LA`` and
+``SA`` apply to ``eigsh`` only. Use ``LR`` and ``SR`` with ``eigs``.
+
 ``svds`` execution model
 ~~~~~~~~~~~~~~~~~~~~~~~~
 

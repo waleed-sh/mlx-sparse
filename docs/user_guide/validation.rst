@@ -1,9 +1,9 @@
 Validation
 ==========
 
-The constructors :func:`~mlx_sparse.csr_array` and
-:func:`~mlx_sparse.coo_array` both accept a ``validate`` keyword that controls
-how thoroughly the input arrays are checked. Three levels are available.
+The constructors :func:`~mlx_sparse.csr_array`, :func:`~mlx_sparse.csc_array`,
+and :func:`~mlx_sparse.coo_array` accept a ``validate`` keyword that controls
+buffer validation. Three levels are available.
 
 Validation levels
 -----------------
@@ -74,9 +74,14 @@ Use full validation:
 ``False`` / ``"none"``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Skips all validation. Use only when the inputs are known correct and
-construction performance is critical (e.g. constructing the same sparse
-structure thousands of times in a benchmark loop).
+``False`` and ``"none"`` select the same mode. Both skip buffer rank, length,
+dtype, and value checks without reading array values or synchronizing to host.
+Inputs must already satisfy the sparse format invariants.
+
+Shape normalization, buffer conversion to MLX arrays, and input unpacking
+still apply. A negative dimension, a shape that is not rank 2, or an invalid
+buffer tuple is rejected in every validation mode. Unknown modes raise
+``ValueError``.
 
 Setting validation on a constructor call
 -----------------------------------------
@@ -97,8 +102,8 @@ Setting validation on a constructor call
    # Full validation from a host context.
    A = ms.csr_array((data, indices, indptr), shape=(2, 3), validate="full")
 
-   # No checks. Caller guarantees correctness.
-   A = ms.csr_array((data, indices, indptr), shape=(2, 3), validate=False)
+   # Skip buffer validation for known-valid inputs.
+   A = ms.csr_array((data, indices, indptr), shape=(2, 3), validate="none")
 
 Native operations do not re-run full validation. They check ranks, shapes, and
 dtypes at the C++ level, but they do not scan index bounds or verify indptr

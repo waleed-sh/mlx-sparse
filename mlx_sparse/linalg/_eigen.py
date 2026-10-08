@@ -20,6 +20,7 @@ import mlx_sparse._native as _native
 from mlx_sparse.linalg.utils.spectral import as_csr as _as_csr
 from mlx_sparse.linalg.utils.spectral import float32_csr as _float32_csr
 from mlx_sparse.linalg.utils.spectral import normalize_ncv as _ncv
+from mlx_sparse.linalg.utils.spectral import normalize_which as _normalize_which
 from mlx_sparse.linalg.utils.spectral import (
     reject_iteration_controls as _reject_controls,
 )
@@ -131,6 +132,9 @@ def eigsh(
             * ``"LA"``: Largest Algebraic (largest values)
             * ``"SA"``: Smallest Algebraic (smallest values)
 
+            Selectors are case-insensitive. Other values, including ``"BE"``,
+            raise ``ValueError``.
+
         v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
             deterministic all-ones start vector.
         ncv: Number of Lanczos basis vectors to build before extracting
@@ -154,10 +158,12 @@ def eigsh(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``A`` is not square.
+        ValueError: If ``which`` is not a supported string, ``k`` is out of
+            range, or ``A`` is not square.
     """
 
     _reject_controls(routine="eigsh", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="eigsh", allowed=("LM", "SM", "LA", "SA"))
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
@@ -172,7 +178,7 @@ def eigsh(
         csr.shape,
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     return (values, vectors) if return_eigenvectors else values
 
@@ -190,11 +196,10 @@ def eigs(
 ):
     """Compute a few eigenpairs of a general sparse square matrix.
 
-    Uses the native CSR Arnoldi-based eigensolver (an implicitly restarted
-    Arnoldi method) to find the ``k`` eigenpairs of the general (possibly
-    non-symmetric) sparse matrix ``A`` that match the criterion specified by
-    ``which``.  Each Arnoldi step dispatches a sparse matrix-vector product
-    to the GPU via the native Metal kernel.
+    Uses the native CSR Arnoldi-based eigensolver to find the ``k`` eigenpairs
+    of the general, possibly non-symmetric sparse matrix ``A`` that match
+    ``which``. Each Arnoldi step uses a native sparse matrix-vector product
+    on the selected device.
 
     For symmetric matrices, :func:`eigsh` is faster and more accurate because
     it uses the symmetric Lanczos recurrence instead of the full Arnoldi
@@ -219,9 +224,12 @@ def eigs(
             * ``"LR"``: Largest Real part
             * ``"SR"``: Smallest Real part
 
+            Selectors are case-insensitive. Other values, including ``"LI"``
+            and ``"SI"``, raise ``ValueError``.
+
         v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
             deterministic all-ones start vector.
-        ncv: Dimension of the Arnoldi factorization before restart.
+        ncv: Dimension of the Arnoldi factorization before Ritz extraction.
             Defaults to ``max(2*k+1, k+1)``.
         maxiter: Not yet supported because the current implementation performs
             one ``ncv``-bounded Ritz extraction, not an implicitly restarted
@@ -241,10 +249,12 @@ def eigs(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``A`` is not square.
+        ValueError: If ``which`` is not a supported string, ``k`` is out of
+            range, or ``A`` is not square.
     """
 
     _reject_controls(routine="eigs", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="eigs", allowed=("LM", "SM", "LR", "SR"))
     csr = _float32_csr(_as_csr(A))
     n = csr.shape[0]
     if csr.shape[0] != csr.shape[1]:
@@ -259,7 +269,7 @@ def eigs(
         csr.shape,
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     return (values, vectors) if return_eigenvectors else values
 
@@ -303,6 +313,8 @@ def svds(
             * ``"LM"``: Largest in Magnitude (default)
             * ``"SM"``: Smallest in Magnitude
 
+            Selectors are case-insensitive. Other values raise ``ValueError``.
+
         v0: Optional starting vector for the right singular-vector Krylov
             basis, with shape ``(A.shape[1],)``.  ``None`` uses the
             deterministic all-ones vector.
@@ -328,11 +340,12 @@ def svds(
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
-        ValueError: If ``k`` is out of range or ``return_singular_vectors``
-            is not a recognised value.
+        ValueError: If ``which`` is not a supported string, ``k`` is out of
+            range, or ``return_singular_vectors`` is not a recognised value.
     """
 
     _reject_controls(routine="svds", tol=float(tol), maxiter=maxiter)
+    which = _normalize_which(which, routine="svds", allowed=("LM", "SM"))
     if return_singular_vectors not in {True, False, "u", "vh"}:
         raise ValueError("return_singular_vectors must be True, False, 'u', or 'vh'.")
     csr = _float32_csr(_as_csr(A))
@@ -347,7 +360,7 @@ def svds(
         csr.shape,
         k=int(k),
         ncv=_ncv(csr.shape[1], int(k), ncv),
-        which=which.upper(),
+        which=which,
     )
     if return_singular_vectors is False:
         return singular

@@ -658,7 +658,8 @@ def csr_array(
               without reading array values. Safe to call on device arrays.
             - ``"full"`` / ``True``: also verifies ``indptr`` monotonicity
               and column index bounds. May synchronize to host.
-            - ``False`` / ``"none"``: skips all checks.
+            - ``False`` / ``"none"``: skips buffer validation. Shape
+              normalization and input unpacking still apply.
 
         sorted_indices: Set to ``True`` to assert that column indices within
             each row are already sorted ascending. Default ``False``.
@@ -672,7 +673,8 @@ def csr_array(
     Raises:
         TypeError: If ``arg`` is not a 3-tuple or a ``CSRArray``, or if dtype
             constraints are violated.
-        ValueError: If shape or length constraints are violated.
+        ValueError: If ``validate`` is unsupported or shape or length
+            constraints are violated.
 
     Example::
 

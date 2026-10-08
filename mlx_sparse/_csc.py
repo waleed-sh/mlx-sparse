@@ -418,7 +418,58 @@ def csc_array(
     sorted_indices: bool = False,
     canonical: bool | None = None,
 ) -> CSCArray:
-    """Construct a :class:`CSCArray` from explicit CSC buffers."""
+    """Construct a :class:`CSCArray` from explicit CSC buffers.
+
+    Accepts a ``(data, indices, indptr)`` triple or an existing ``CSCArray``.
+    Buffer inputs are converted to ``mlx.core.array`` if needed.
+
+    Args:
+        arg: A length-3 iterable ``(data, indices, indptr)`` where
+
+            - *data*: stored values of shape ``(nnz,)`` with dtype
+              ``float32``, ``float16``, ``bfloat16``, or ``complex64``.
+            - *indices*: row indices of shape ``(nnz,)`` with dtype
+              ``int32`` or ``int64``.
+            - *indptr*: column pointers of shape ``(n_cols + 1,)`` with
+              the same integer dtype as *indices*.
+
+            An existing :class:`CSCArray` is returned unchanged when its
+            shape matches ``shape``.
+        shape: Matrix dimensions as a length-2 sequence ``(n_rows, n_cols)``.
+        validate: Validation level, one of:
+
+            - ``"metadata"`` *(default)*: checks ranks, lengths, and dtypes
+              without reading buffer values.
+            - ``"full"`` / ``True``: also checks column pointer endpoints,
+              monotonicity, and row index bounds. May synchronize to host.
+            - ``False`` / ``"none"``: skips buffer validation. Shape
+              normalization and input unpacking still apply.
+
+        sorted_indices: Set to ``True`` to assert that row indices within
+            each column are sorted in ascending order. Default ``False``.
+        canonical: Set to ``True`` to assert sorted indices with no duplicate
+            rows within a column. Implies ``sorted_indices=True``. Default
+            ``None``.
+
+    Returns:
+        A :class:`CSCArray` with the supplied buffers and shape.
+
+    Raises:
+        TypeError: If ``arg`` cannot be unpacked as a buffer triple or buffer
+            dtypes are unsupported under the selected validation mode.
+        ValueError: If ``validate`` is unsupported or shape or buffer
+            constraints are violated.
+
+    Example::
+
+        import mlx.core as mx
+        import mlx_sparse as ms
+
+        data = mx.array([1.0, 2.0, 3.0], dtype=mx.float32)
+        indices = mx.array([0, 1, 0], dtype=mx.int32)
+        indptr = mx.array([0, 2, 3], dtype=mx.int32)
+        A = ms.csc_array((data, indices, indptr), shape=(2, 2), validate="full")
+    """
     mode = normalize_validation_mode(validate)
     shape = normalize_shape(shape)
 
