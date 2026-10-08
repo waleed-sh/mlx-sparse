@@ -371,7 +371,8 @@ def coo_array(
             - ``"metadata"`` *(default)*: checks ranks, lengths, and dtypes.
             - ``"full"`` / ``True``: also verifies coordinate bounds. May
               synchronize to host.
-            - ``False`` / ``"none"``: skips all checks.
+            - ``False`` / ``"none"``: skips buffer validation. Shape
+              normalization and input unpacking still apply.
 
         canonical: Set to ``True`` to assert the coordinates are sorted and
             duplicate-free. Default ``None`` (not asserted).
@@ -382,7 +383,8 @@ def coo_array(
     Raises:
         TypeError: If ``arg`` cannot be unpacked as ``(data, (row, col))``, or
             if dtype constraints are violated.
-        ValueError: If shape or length constraints are violated.
+        ValueError: If ``validate`` is unsupported or shape or length
+            constraints are violated.
 
     Example::
 

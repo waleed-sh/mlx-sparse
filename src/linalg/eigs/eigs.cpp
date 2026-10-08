@@ -147,6 +147,8 @@ std::tuple<mx::array, mx::array>
 csr_eigs(const mx::array &data, const mx::array &indices,
          const mx::array &indptr, const mx::array &v0, int n_rows, int n_cols,
          int k, int ncv, const std::string &which) {
+  linalg_detail::require_spectral_which(which, "csr_eigs",
+                                        {"LM", "SM", "LR", "SR"});
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument("csr_eigs requires a non-empty square matrix.");
   }

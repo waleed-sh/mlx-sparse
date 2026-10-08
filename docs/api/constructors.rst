@@ -12,6 +12,11 @@ csr\_array
 
 .. autofunction:: csr_array
 
+csc\_array
+----------
+
+.. autofunction:: csc_array
+
 coo\_array
 ----------
 
@@ -95,7 +100,8 @@ asarray
 Validation modes
 ----------------
 
-The ``validate`` parameter on :func:`csr_array` and :func:`coo_array` accepts:
+The ``validate`` parameter on :func:`csr_array`, :func:`csc_array`, and
+:func:`coo_array` accepts:
 
 .. list-table::
    :widths: 25 75
@@ -109,7 +115,8 @@ The ``validate`` parameter on :func:`csr_array` and :func:`coo_array` accepts:
      - Full metadata checks plus value-level checks (bounds, monotonicity).
        May call ``mx.eval`` to read index values from device.
    * - ``False`` or ``"none"``
-     - No checks. Use only when inputs are known valid.
+     - Skip buffer validation. Shape normalization and input unpacking still
+       apply. Use only when buffers are known valid.
 
 See :doc:`../user_guide/validation` for a detailed discussion.
 

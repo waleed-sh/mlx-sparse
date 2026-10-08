@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -31,6 +32,26 @@
 namespace mlx_sparse::linalg_detail {
 
 constexpr int kSolverThreads = 256;
+
+inline void
+require_spectral_which(const std::string &which, const char *routine,
+                       std::initializer_list<const char *> allowed) {
+  for (const char *choice : allowed) {
+    if (which == choice) {
+      return;
+    }
+  }
+  std::string message = std::string(routine) + " which must be one of ";
+  bool first = true;
+  for (const char *choice : allowed) {
+    if (!first) {
+      message += ", ";
+    }
+    message += std::string("'") + choice + "'";
+    first = false;
+  }
+  throw std::invalid_argument(message + ", got '" + which + "'.");
+}
 
 template <typename I>
 void csr_spmv_float(const float *data, const I *indices, const I *indptr,

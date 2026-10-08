@@ -49,6 +49,21 @@ def normalize_ncv(n: int, k: int, ncv: int | None) -> int:
     return min(n, max(k + 1, 2 * k + 1 if ncv is None else int(ncv)))
 
 
+def normalize_which(which: str, *, routine: str, allowed: tuple[str, ...]) -> str:
+    """Return an uppercase selector supported by the spectral routine.
+
+    Reject unsupported strings and non-string inputs before matrix
+    preparation or native execution. Lowercase and mixed-case selectors
+    are accepted. Unsupported values raise ``ValueError``.
+    """
+    if isinstance(which, str):
+        normalized = which.upper()
+        if normalized in allowed:
+            return normalized
+    choices = ", ".join(repr(choice) for choice in allowed)
+    raise ValueError(f"{routine} which must be one of {choices}, got {which!r}.")
+
+
 def start_vector(v0, *, n: int, name: str = "v0") -> mx.array:
     """Return a finite float32 start vector for a Krylov spectral routine.
 

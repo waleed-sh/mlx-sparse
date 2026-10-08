@@ -22,7 +22,9 @@ Packaging
 Backwards incompatible changes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-* None.
+* ``linalg.eigsh``, ``linalg.eigs``, and ``linalg.svds`` now reject unsupported
+  ``which`` selectors with ``ValueError``. Values that previously fell through
+  to largest-algebraic ordering no longer return an unintended result.
 
 Deprecations
 ~~~~~~~~~~~~
@@ -32,12 +34,18 @@ Deprecations
 Bug fixes
 ~~~~~~~~~
 
-* None.
+* Validate spectral selectors before matrix preparation and at native entry
+  points. Preserve case-insensitive support for documented selectors.
+* Accept ``validate="none"`` in CSR, CSC, and COO constructors as an alias for
+  ``False`` without buffer checks or host synchronization.
 
 Tests
 ~~~~~
 
-* None.
+* Add selector rejection and spectrum selection coverage for public and
+  native spectral entry points.
+* Add constructor validation mode coverage, including buffer reuse, disabled
+  checks, and shape errors.
 
 Benchmarks
 ~~~~~~~~~~
@@ -47,7 +55,8 @@ Benchmarks
 Documentation
 ~~~~~~~~~~~~~
 
-* None.
+* Document supported spectral selectors and their error behavior.
+* Clarify disabled buffer validation and document the CSC constructor.
 
 
 mlx-sparse v0.0.6b0 (22.07.2026)
