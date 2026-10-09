@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "sparse/csc_col_norms/csc_col_norms.h"
+#include "common/metal_dispatch.h"
 
 #include <algorithm>
 #include <cmath>
@@ -188,8 +189,10 @@ void CSCColNorms::eval_gpu(const std::vector<mx::array> &inputs,
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_cols_);
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
-                             MTL::Size(kVectorThreads, 1, 1));
+    const auto grid = cooperative_grid(threadgroups);
+    encoder.dispatch_threads(
+        MTL::Size(grid.groups_x * kVectorThreads, grid.groups_y, 1),
+        MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = static_cast<size_t>(std::max(n_cols_, 1));
     auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());

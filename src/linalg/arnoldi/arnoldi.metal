@@ -22,12 +22,11 @@ template <typename I>
     device float *basis [[buffer(5)]], device int *actual [[buffer(6)]],
     device float *work [[buffer(7)]], constant int &n_rows [[buffer(8)]],
     constant int &n_cols [[buffer(9)]], constant int &k [[buffer(10)]],
+    constant int &complete_basis [[buffer(11)]],
     uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   const int cols = k + 1;
   threadgroup float scratch[256];
-  threadgroup float shared_scalar;
-  threadgroup int shared_done;
   threadgroup int shared_used;
 
   for (int i = static_cast<int>(lane); i < cols * k;
@@ -39,30 +38,20 @@ template <typename I>
     basis[i] = 0.0f;
   }
 
-  float norm_local = 0.0f;
-  for (int row = static_cast<int>(lane); row < n_rows;
-       row += static_cast<int>(k_linalg_threads)) {
-    norm_local += v0[row] * v0[row];
-  }
-  const float norm0 =
-      sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
-  for (int row = static_cast<int>(lane); row < n_rows;
-       row += static_cast<int>(k_linalg_threads)) {
-    basis[row * cols] = norm0 <= 1.1920928955078125e-7f
-                            ? (row == 0 ? 1.0f : 0.0f)
-                            : v0[row] / norm0;
+  threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+
+  if (!initialize_krylov_basis(v0, basis, n_rows, cols, scratch, lane)) {
+    if (lane == 0) {
+      actual[0] = 0;
+    }
+    return;
   }
   if (lane == 0) {
-    shared_done = 0;
     shared_used = 0;
   }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
+  threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
   for (int j = 0; j < k; ++j) {
-    if (shared_done != 0) {
-      break;
-    }
-
     for (int row = static_cast<int>(lane); row < n_rows;
          row += static_cast<int>(k_linalg_threads)) {
       float acc = 0.0f;
@@ -71,7 +60,8 @@ template <typename I>
       }
       work[row] = acc;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    const float operator_norm = krylov_vector_norm(work, n_rows, scratch, lane);
 
     for (int pass = 0; pass < 2; ++pass) {
       for (int col = 0; col <= j; ++col) {
@@ -88,33 +78,36 @@ template <typename I>
              row += static_cast<int>(k_linalg_threads)) {
           work[row] -= coeff * basis[row * cols + col];
         }
-        threadgroup_barrier(mem_flags::mem_threadgroup);
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
       }
     }
 
-    float h_next_local = 0.0f;
-    for (int row = static_cast<int>(lane); row < n_rows;
-         row += static_cast<int>(k_linalg_threads)) {
-      h_next_local += work[row] * work[row];
-    }
-    const float h_next =
-        sqrt(max(reduce_sum_256(h_next_local, scratch, lane), 0.0f));
+    const float h_next = krylov_vector_norm(work, n_rows, scratch, lane);
     if (lane == 0) {
       h[(j + 1) * k + j] = h_next;
-      shared_scalar = h_next;
       shared_used = j + 1;
-      if (h_next <= 1.1920928955078125e-7f) {
-        shared_done = 1;
-      }
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (shared_done == 0) {
-      for (int row = static_cast<int>(lane); row < n_rows;
-           row += static_cast<int>(k_linalg_threads)) {
-        basis[row * cols + j + 1] = work[row] / shared_scalar;
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    if (h_next <= 8 * 1.1920928955078125e-7f * operator_norm) {
+      if (lane == 0) {
+        h[(j + 1) * k + j] = 0.0f;
       }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (complete_basis == 0 || j + 1 == k) {
+        break;
+      }
+      if (!restart_krylov_basis(basis, work, n_rows, cols, j + 1, scratch,
+                                lane)) {
+        if (lane == 0) {
+          shared_used = -shared_used;
+        }
+        break;
+      }
+      continue;
     }
+    for (int row = int(lane); row < n_rows; row += int(k_linalg_threads)) {
+      basis[size_t(row) * cols + j + 1] = work[row] / h_next;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
   }
 
   if (lane == 0) {
@@ -127,11 +120,11 @@ csr_arnoldi_kernel<int>(device const float *, device const int *,
                         device const int *, device const float *,
                         device float *, device float *, device int *,
                         device float *, constant int &, constant int &,
-                        constant int &, uint);
+                        constant int &, constant int &, uint);
 
 template [[host_name("csr_arnoldi_float32_int64")]] [[kernel]] void
 csr_arnoldi_kernel<long>(device const float *, device const long *,
                          device const long *, device const float *,
                          device float *, device float *, device int *,
                          device float *, constant int &, constant int &,
-                         constant int &, uint);
+                         constant int &, constant int &, uint);

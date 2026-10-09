@@ -23,6 +23,7 @@
 
 #include "common/common.h"
 #include "common/cpu_parallel.h"
+#include "common/metal_dispatch.h"
 #include "common/vmap.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
@@ -305,6 +306,9 @@ void CSRBatchedMatMul::eval_gpu(const std::vector<mx::array> &inputs,
   auto kernel_name = sparse_kernel_name(
       use_vector_kernel ? "csr_batched_matmul_vector" : "csr_batched_matmul",
       data.dtype(), indices.dtype());
+  if (needs_wide_dense_indices(out.size(), rhs.size())) {
+    kernel_name += "_large";
+  }
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -322,12 +326,16 @@ void CSRBatchedMatMul::eval_gpu(const std::vector<mx::array> &inputs,
   const auto outputs_count =
       static_cast<size_t>(batch_size_) * n_rows_ * rhs_cols_;
   if (use_vector_kernel) {
-    encoder.dispatch_threads(MTL::Size(outputs_count * kVectorThreads, 1, 1),
-                             MTL::Size(kVectorThreads, 1, 1));
+    const auto grid = cooperative_grid(outputs_count);
+    encoder.dispatch_threads(
+        MTL::Size(grid.groups_x * kVectorThreads, grid.groups_y, 1),
+        MTL::Size(kVectorThreads, 1, 1));
   } else {
-    auto threads = std::max<size_t>(outputs_count, 1);
-    auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
-    encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+    const auto grid = cooperative_grid(outputs_count);
+    auto group =
+        std::min(grid.groups_x, kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(grid.groups_x, grid.groups_y, 1),
+                             MTL::Size(group, 1, 1));
   }
 }
 #else

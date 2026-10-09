@@ -21,6 +21,33 @@
 
 using namespace metal;
 
+inline float sparse_simd_sum(float value) { return simd_sum(value); }
+
+inline complex64_t sparse_simd_sum(complex64_t value) {
+  return complex64_t(simd_sum(value.real), simd_sum(value.imag));
+}
+
+// Exchange one value per SIMD group with one threadgroup barrier.
+template <typename T>
+inline T sparse_cooperative_sum_128(T value, threadgroup T *partial,
+                                    uint simd_lane, uint simd_group,
+                                    uint simd_width) {
+  const T group_sum = sparse_simd_sum(value);
+  if (simd_lane == 0) {
+    partial[simd_group] = group_sum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (simd_group == 0) {
+    T sum = T(0);
+    for (uint group = simd_lane; group < 128 / simd_width;
+         group += simd_width) {
+      sum += partial[group];
+    }
+    return sparse_simd_sum(sum);
+  }
+  return T(0);
+}
+
 template <typename T> struct sparse_accumulator {
   typedef T type;
   static inline type zero() { return type(0); }

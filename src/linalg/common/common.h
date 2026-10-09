@@ -21,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -90,7 +91,74 @@ inline float dot_column_float(const float *basis, const float *w, int n,
 }
 
 inline float norm_float(const std::vector<float> &x) {
-  return std::sqrt(std::max(dot_float(x, x), 0.0f));
+  return static_cast<float>(std::sqrt(std::max(dot_double(x, x), 0.0)));
+}
+
+// Scale before squaring to preserve the direction of small and large starts.
+inline bool initialize_krylov_basis(const float *start, float *basis, int n,
+                                    int stride) {
+  float scale = 0.0f;
+  for (int row = 0; row < n; ++row) {
+    if (!std::isfinite(start[row])) {
+      return false;
+    }
+    scale = std::max(scale, std::abs(start[row]));
+  }
+  if (scale == 0.0f) {
+    return false;
+  }
+  double squared = 0.0;
+  for (int row = 0; row < n; ++row) {
+    const double value = static_cast<double>(start[row]) / scale;
+    squared += value * value;
+  }
+  const double norm = std::sqrt(squared);
+  for (int row = 0; row < n; ++row) {
+    basis[static_cast<size_t>(row) * stride] =
+        static_cast<float>((static_cast<double>(start[row]) / scale) / norm);
+  }
+  return true;
+}
+
+inline float krylov_random_component(uint32_t row, uint32_t seed) {
+  uint32_t bits = row ^ seed;
+  bits ^= bits >> 16;
+  bits *= 0x7feb352d;
+  bits ^= bits >> 15;
+  bits *= 0x846ca68b;
+  bits ^= bits >> 16;
+  return static_cast<float>(bits >> 8) * (2.0f / 16777216.0f) - 1.0f;
+}
+
+// Continue from the orthogonal complement when an invariant block closes.
+inline bool restart_krylov_basis(float *basis, std::vector<float> &work, int n,
+                                 int stride, int used) {
+  for (uint32_t attempt = 0; attempt < 3; ++attempt) {
+    const uint32_t seed =
+        0x9e3779b9u * static_cast<uint32_t>(used) + 0x85ebca6bu * (attempt + 1);
+    for (int row = 0; row < n; ++row) {
+      work[row] = krylov_random_component(static_cast<uint32_t>(row), seed);
+    }
+    const float initial_norm = norm_float(work);
+    for (int pass = 0; pass < 2; ++pass) {
+      for (int col = 0; col < used; ++col) {
+        const float correction =
+            dot_column_float(basis, work.data(), n, stride, col);
+        for (int row = 0; row < n; ++row) {
+          work[row] -=
+              correction * basis[static_cast<size_t>(row) * stride + col];
+        }
+      }
+    }
+    const float norm = norm_float(work);
+    if (norm > 16 * std::numeric_limits<float>::epsilon() * initial_norm) {
+      for (int row = 0; row < n; ++row) {
+        basis[static_cast<size_t>(row) * stride + used] = work[row] / norm;
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 inline std::vector<double> solve_dense_system(std::vector<double> a,
@@ -279,6 +347,15 @@ host_csr_spmv_transpose(const float *data, const I *indices, const I *indptr,
 
 inline std::pair<std::vector<float>, std::vector<float>>
 jacobi_symmetric(std::vector<float> a, int n) {
+  float scale = 0.0f;
+  for (float value : a) {
+    scale = std::max(scale, std::abs(value));
+  }
+  if (scale > 0.0f) {
+    for (float &value : a) {
+      value /= scale;
+    }
+  }
   std::vector<float> vectors(static_cast<size_t>(n) * n, 0.0f);
   for (int i = 0; i < n; ++i) {
     vectors[static_cast<size_t>(i) * n + i] = 1.0f;
@@ -304,9 +381,9 @@ jacobi_symmetric(std::vector<float> a, int n) {
     const float app = a[static_cast<size_t>(p) * n + p];
     const float aqq = a[static_cast<size_t>(q) * n + q];
     const float apq = a[static_cast<size_t>(p) * n + q];
-    const float tau = (aqq - app) / (2.0f * apq);
-    const float t = (tau >= 0.0f ? 1.0f : -1.0f) /
-                    (std::abs(tau) + std::sqrt(1.0f + tau * tau));
+    const double tau = (static_cast<double>(aqq) - app) / (2.0 * apq);
+    const float t = static_cast<float>((tau >= 0.0 ? 1.0 : -1.0) /
+                                       (std::abs(tau) + std::hypot(1.0, tau)));
     const float c = 1.0f / std::sqrt(1.0f + t * t);
     const float s = t * c;
     for (int k = 0; k < n; ++k) {
@@ -330,13 +407,31 @@ jacobi_symmetric(std::vector<float> a, int n) {
   }
   std::vector<float> values(static_cast<size_t>(n));
   for (int i = 0; i < n; ++i) {
-    values[static_cast<size_t>(i)] = a[static_cast<size_t>(i) * n + i];
+    values[static_cast<size_t>(i)] = a[static_cast<size_t>(i) * n + i] * scale;
   }
   return {values, vectors};
 }
 
+inline int checked_krylov_dimension(int used) {
+  // Completion-enabled primitives report failed continuation with -used.
+  if (used < 0) {
+    throw std::runtime_error(
+        "Krylov basis continuation failed after " + std::to_string(-used) +
+        " directions. Could not generate an independent start. Use a "
+        "different v0 or request a smaller ncv.");
+  }
+  return used;
+}
+
 inline std::vector<int> select_ritz_indices(const std::vector<float> &values,
                                             int k, const std::string &which) {
+  if (values.size() < static_cast<size_t>(k)) {
+    throw std::runtime_error(
+        "Krylov basis dimension " + std::to_string(values.size()) +
+        " is smaller than the requested number of pairs " + std::to_string(k) +
+        ". The iteration reached an invariant subspace. Use a different "
+        "v0 or request fewer pairs.");
+  }
   std::vector<int> order(values.size());
   std::iota(order.begin(), order.end(), 0);
   if (which == "SM" || which == "SA" || which == "SR") {
@@ -368,10 +463,13 @@ host_lanczos_operator(int n, int steps, Apply &&apply) {
   std::vector<float> basis(static_cast<size_t>(n) * steps, 0.0f);
   std::vector<float> alphas(static_cast<size_t>(steps), 0.0f);
   std::vector<float> betas(static_cast<size_t>(steps), 0.0f);
-  for (int row = 0; row < n; ++row) {
-    basis[static_cast<size_t>(row) * steps] =
-        1.0f / std::sqrt(static_cast<float>(n));
+  std::mt19937 generator(0);
+  std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
+  std::vector<float> start(static_cast<size_t>(n));
+  for (float &value : start) {
+    value = distribution(generator);
   }
+  initialize_krylov_basis(start.data(), basis.data(), n, steps);
   float beta_prev = 0.0f;
   int used = 0;
   for (int j = 0; j < steps; ++j) {
@@ -380,6 +478,7 @@ host_lanczos_operator(int n, int steps, Apply &&apply) {
       q[static_cast<size_t>(row)] = basis[static_cast<size_t>(row) * steps + j];
     }
     auto w = apply(q);
+    const float operator_norm = norm_float(w);
     if (j > 0) {
       for (int row = 0; row < n; ++row) {
         w[static_cast<size_t>(row)] -=
@@ -408,7 +507,8 @@ host_lanczos_operator(int n, int steps, Apply &&apply) {
     const float beta = norm_float(w);
     betas[static_cast<size_t>(j)] = beta;
     used = j + 1;
-    if (j + 1 == steps || beta <= std::numeric_limits<float>::epsilon()) {
+    if (j + 1 == steps ||
+        beta <= 8 * std::numeric_limits<float>::epsilon() * operator_norm) {
       break;
     }
     for (int row = 0; row < n; ++row) {

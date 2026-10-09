@@ -13,6 +13,8 @@ Improvements
 ~~~~~~~~~~~~
 
 * Bump minimum supported MLX version to 0.32.3 and nanobind to >=3.0.1,<3.1.
+* Use SIMD reductions with one threadgroup barrier in cooperative Metal
+  sparse products, diagonals, sums, and norms.
 
 Packaging
 ~~~~~~~~~
@@ -25,6 +27,11 @@ Backwards incompatible changes
 * ``linalg.eigsh``, ``linalg.eigs``, and ``linalg.svds`` now reject unsupported
   ``which`` selectors with ``ValueError``. Values that previously fell through
   to largest-algebraic ordering no longer return an unintended result.
+* Spectral routines use a fixed-key random default start. Eigenvalue and
+  singular-value routines continue from orthogonal directions after invariant
+  breakdown. They raise ``RuntimeError`` if continuation fails or numerical
+  exhaustion leaves fewer Ritz candidates than requested instead of returning
+  duplicate pairs.
 
 Deprecations
 ~~~~~~~~~~~~
@@ -38,6 +45,12 @@ Bug fixes
   points. Preserve case-insensitive support for documented selectors.
 * Accept ``validate="none"`` in CSR, CSC, and COO constructors as an alias for
   ``False`` without buffer checks or host synchronization.
+* Avoid invariant all-ones starts in spectral routines and the native
+  Chebyshev spectral estimator. Preserve scaled user starts in CPU and Metal
+  normalization and use scale-relative breakdown checks. Preserve spectral
+  multiplicities when continuing a closed Krylov subspace.
+* Prevent cooperative Metal grids from wrapping at ``2**25`` outputs. Use
+  bounded two-dimensional launches and wide dense-product offsets.
 
 Tests
 ~~~~~
@@ -46,17 +59,21 @@ Tests
   native spectral entry points.
 * Add constructor validation mode coverage, including buffer reuse, disabled
   checks, and shape errors.
+* Add structured-matrix, scaled-start, random-state, and breakdown regressions.
+* Add integer-boundary launch tests and GPU cooperative kernel coverage for
+  large products, storage dtypes, index widths, and padded grids.
 
 Benchmarks
 ~~~~~~~~~~
 
-* None.
+* Add cooperative CSR product and row-sum GPU timings.
 
 Documentation
 ~~~~~~~~~~~~~
 
 * Document supported spectral selectors and their error behavior.
 * Clarify disabled buffer validation and document the CSC constructor.
+* Document Krylov starts, early breakdown, and cooperative Metal dispatch.
 
 
 mlx-sparse v0.0.6b0 (22.07.2026)

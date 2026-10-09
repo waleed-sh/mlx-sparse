@@ -45,9 +45,9 @@ using namespace linalg_detail;
 class CSRLanczos : public mx::Primitive {
 public:
   CSRLanczos(mx::Stream stream, int n_rows, int n_cols, int k,
-             bool reorthogonalize)
+             bool reorthogonalize, bool complete_basis)
       : Primitive(stream), n_rows_(n_rows), n_cols_(n_cols), k_(k),
-        reorthogonalize_(reorthogonalize) {}
+        reorthogonalize_(reorthogonalize), complete_basis_(complete_basis) {}
 
   void eval_cpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
@@ -59,13 +59,15 @@ public:
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSRLanczos &>(other);
     return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ && k_ == rhs.k_ &&
-           reorthogonalize_ == rhs.reorthogonalize_;
+           reorthogonalize_ == rhs.reorthogonalize_ &&
+           complete_basis_ == rhs.complete_basis_;
   }
 
 private:
   int n_rows_;
   int n_cols_;
   int k_;
+  bool complete_basis_;
   bool reorthogonalize_;
 };
 
@@ -74,7 +76,8 @@ void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
                           const mx::array &indptr, const mx::array &v0,
                           mx::array &alphas, mx::array &betas, mx::array &basis,
                           mx::array &actual, int n_rows, int k,
-                          bool reorthogonalize, mx::Stream stream) {
+                          bool reorthogonalize, bool complete_basis,
+                          mx::Stream stream) {
   alphas.set_data(mx::allocator::malloc(alphas.nbytes()));
   betas.set_data(mx::allocator::malloc(betas.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
@@ -98,7 +101,7 @@ void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
                     betas = mx::array::unsafe_weak_copy(betas),
                     basis = mx::array::unsafe_weak_copy(basis),
                     actual = mx::array::unsafe_weak_copy(actual), n_rows, k,
-                    reorthogonalize]() mutable {
+                    reorthogonalize, complete_basis]() mutable {
     const auto *data_ptr = data.data<float>();
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
@@ -112,20 +115,9 @@ void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
     std::fill(betas_ptr, betas_ptr + k, 0.0f);
     std::fill(basis_ptr, basis_ptr + static_cast<size_t>(n_rows) * k, 0.0f);
 
-    double v_norm2 = 0.0;
-    for (int i = 0; i < n_rows; ++i) {
-      v_norm2 +=
-          static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
-    }
-    float v_norm = std::sqrt(std::max(v_norm2, 0.0));
-    if (v_norm <= std::numeric_limits<float>::epsilon()) {
-      for (int i = 0; i < n_rows; ++i) {
-        basis_ptr[static_cast<size_t>(i) * k] = i == 0 ? 1.0f : 0.0f;
-      }
-    } else {
-      for (int i = 0; i < n_rows; ++i) {
-        basis_ptr[static_cast<size_t>(i) * k] = v0_ptr[i] / v_norm;
-      }
+    if (!initialize_krylov_basis(v0_ptr, basis_ptr, n_rows, k)) {
+      *actual_ptr = 0;
+      return;
     }
 
     std::vector<float> w(static_cast<size_t>(n_rows));
@@ -139,6 +131,7 @@ void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
       }
       csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, q.data(), w.data(),
                      n_rows);
+      const float operator_norm = norm_float(w);
       if (j > 0) {
         for (int i = 0; i < n_rows; ++i) {
           w[i] -= beta_prev * basis_ptr[static_cast<size_t>(i) * k + j - 1];
@@ -166,8 +159,20 @@ void csr_lanczos_cpu_impl(const mx::array &data, const mx::array &indices,
       float beta = norm_float(w);
       betas_ptr[j] = beta;
       used = j + 1;
-      if (j + 1 == k || beta <= eps) {
+      if (j + 1 == k) {
         break;
+      }
+      if (beta <= 8 * eps * operator_norm) {
+        betas_ptr[j] = 0.0f;
+        beta_prev = 0.0f;
+        if (!complete_basis) {
+          break;
+        }
+        if (!restart_krylov_basis(basis_ptr, w, n_rows, k, j + 1)) {
+          used = -used;
+          break;
+        }
+        continue;
       }
       for (int i = 0; i < n_rows; ++i) {
         basis_ptr[static_cast<size_t>(i) * k + j + 1] = w[i] / beta;
@@ -188,15 +193,15 @@ void CSRLanczos::eval_cpu(const std::vector<mx::array> &inputs,
   auto &v0 = inputs[3];
 
   if (indices.dtype() == mx::int32) {
-    csr_lanczos_cpu_impl<int32_t>(data, indices, indptr, v0, outputs[0],
-                                  outputs[1], outputs[2], outputs[3], n_rows_,
-                                  k_, reorthogonalize_, stream());
+    csr_lanczos_cpu_impl<int32_t>(
+        data, indices, indptr, v0, outputs[0], outputs[1], outputs[2],
+        outputs[3], n_rows_, k_, reorthogonalize_, complete_basis_, stream());
     return;
   }
   if (indices.dtype() == mx::int64) {
-    csr_lanczos_cpu_impl<int64_t>(data, indices, indptr, v0, outputs[0],
-                                  outputs[1], outputs[2], outputs[3], n_rows_,
-                                  k_, reorthogonalize_, stream());
+    csr_lanczos_cpu_impl<int64_t>(
+        data, indices, indptr, v0, outputs[0], outputs[1], outputs[2],
+        outputs[3], n_rows_, k_, reorthogonalize_, complete_basis_, stream());
     return;
   }
   throw std::runtime_error("csr_lanczos requires int32 or int64 indices.");
@@ -245,6 +250,8 @@ void CSRLanczos::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_bytes(k_, 11);
   int reorth = reorthogonalize_ ? 1 : 0;
   encoder.set_bytes(reorth, 12);
+  int complete = complete_basis_ ? 1 : 0;
+  encoder.set_bytes(complete, 13);
   encoder.dispatch_threads(MTL::Size(kSolverThreads, 1, 1),
                            MTL::Size(kSolverThreads, 1, 1));
   encoder.add_temporary(std::move(work));
@@ -260,7 +267,8 @@ void CSRLanczos::eval_gpu(const std::vector<mx::array> &,
 std::tuple<mx::array, mx::array, mx::array, mx::array>
 csr_lanczos(const mx::array &data, const mx::array &indices,
             const mx::array &indptr, const mx::array &v0, int n_rows,
-            int n_cols, int k, bool reorthogonalize, mx::StreamOrDevice s) {
+            int n_cols, int k, bool reorthogonalize, mx::StreamOrDevice s,
+            bool complete_basis) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument(
         "csr_lanczos requires a non-empty square matrix.");
@@ -289,8 +297,8 @@ csr_lanczos(const mx::array &data, const mx::array &indices,
   auto indptr_contig = mx::contiguous(indptr, false, stream);
   auto v0_contig = mx::contiguous(v0, false, stream);
 
-  auto primitive =
-      std::make_shared<CSRLanczos>(stream, n_rows, n_cols, k, reorthogonalize);
+  auto primitive = std::make_shared<CSRLanczos>(
+      stream, n_rows, n_cols, k, reorthogonalize, complete_basis);
   auto outputs = mx::array::make_arrays(
       {mx::Shape{k}, mx::Shape{k}, mx::Shape{n_rows, k}, mx::Shape{}},
       {mx::float32, mx::float32, mx::float32, mx::int32}, primitive,

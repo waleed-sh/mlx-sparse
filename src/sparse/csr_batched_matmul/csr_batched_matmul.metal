@@ -14,97 +14,104 @@
 
 #include "common/metal_common.h"
 
-template <typename T, typename I>
+template <typename T, typename I, typename O>
 [[kernel]] void csr_batched_matmul_kernel(
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device const T *rhs [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
     constant int &n_cols [[buffer(6)]], constant int &batch_size [[buffer(7)]],
     constant int &rhs_cols [[buffer(8)]],
-    uint tid [[thread_position_in_grid]]) {
-  const int outputs_per_batch = n_rows * rhs_cols;
-  const int total = batch_size * outputs_per_batch;
-  if (static_cast<int>(tid) >= total) {
+    uint2 position [[thread_position_in_grid]],
+    uint2 grid_size [[threads_per_grid]]) {
+  const O tid = O(position.y) * grid_size.x + position.x;
+  const O outputs_per_batch = O(n_rows) * rhs_cols;
+  const O total = O(batch_size) * outputs_per_batch;
+  if (O(tid) >= total) {
     return;
   }
 
-  const int batch = static_cast<int>(tid) / outputs_per_batch;
-  const int rem = static_cast<int>(tid) - batch * outputs_per_batch;
-  const int row = rem / rhs_cols;
-  const int rhs_col = rem - row * rhs_cols;
-  const int rhs_batch = batch * n_cols * rhs_cols;
+  const int batch = int(tid / outputs_per_batch);
+  const O rem = tid - O(batch) * outputs_per_batch;
+  const int row = int(rem / rhs_cols);
+  const int rhs_col = int(rem % rhs_cols);
+  const O rhs_batch = O(batch) * n_cols * rhs_cols;
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row]; p < indptr[row + 1]; ++p) {
     acc += sparse_multiply<T>(
-        data[p],
-        rhs[rhs_batch + static_cast<int>(indices[p]) * rhs_cols + rhs_col]);
+        data[p], rhs[rhs_batch + O(indices[p]) * rhs_cols + rhs_col]);
   }
   out[tid] = sparse_accumulator<T>::cast(acc);
 }
 
-template <typename T, typename I>
+template <typename T, typename I, typename O>
 [[kernel]] void csr_batched_matmul_vector_kernel(
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device const T *rhs [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
     constant int &n_cols [[buffer(6)]], constant int &batch_size [[buffer(7)]],
     constant int &rhs_cols [[buffer(8)]],
-    uint out_id [[threadgroup_position_in_grid]],
-    uint lane [[thread_index_in_threadgroup]]) {
-  threadgroup typename sparse_accumulator<T>::type partial[128];
+    uint2 group_id [[threadgroup_position_in_grid]],
+    uint2 group_count [[threadgroups_per_grid]],
+    uint lane [[thread_index_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]],
+    uint simd_width [[threads_per_simdgroup]]) {
+  const O out_id = O(group_id.y) * group_count.x + group_id.x;
+  threadgroup typename sparse_accumulator<T>::type partial[32];
 
-  const int outputs_per_batch = n_rows * rhs_cols;
-  const int total = batch_size * outputs_per_batch;
-  if (static_cast<int>(out_id) >= total) {
+  const O outputs_per_batch = O(n_rows) * rhs_cols;
+  const O total = O(batch_size) * outputs_per_batch;
+  if (out_id >= total) {
     return;
   }
 
-  const int batch = static_cast<int>(out_id) / outputs_per_batch;
-  const int rem = static_cast<int>(out_id) - batch * outputs_per_batch;
-  const int row = rem / rhs_cols;
-  const int rhs_col = rem - row * rhs_cols;
-  const int rhs_batch = batch * n_cols * rhs_cols;
+  const int batch = int(out_id / outputs_per_batch);
+  const O rem = out_id - O(batch) * outputs_per_batch;
+  const int row = int(rem / rhs_cols);
+  const int rhs_col = int(rem % rhs_cols);
+  const O rhs_batch = O(batch) * n_cols * rhs_cols;
   typename sparse_accumulator<T>::type acc = sparse_accumulator<T>::zero();
   for (I p = indptr[row] + static_cast<I>(lane); p < indptr[row + 1];
        p += 128) {
     acc += sparse_multiply<T>(
-        data[p],
-        rhs[rhs_batch + static_cast<int>(indices[p]) * rhs_cols + rhs_col]);
+        data[p], rhs[rhs_batch + O(indices[p]) * rhs_cols + rhs_col]);
   }
-  partial[lane] = acc;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  for (uint stride = 64; stride > 0; stride >>= 1) {
-    if (lane < stride) {
-      partial[lane] += partial[lane + stride];
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
+  const auto sum = sparse_cooperative_sum_128(acc, partial, simd_lane,
+                                              simd_group, simd_width);
 
   if (lane == 0) {
-    out[out_id] = sparse_accumulator<T>::cast(partial[0]);
+    out[out_id] = sparse_accumulator<T>::cast(sum);
   }
 }
 
-#define INSTANTIATE_CSR_BATCHED_MATMUL(NAME, T, I)                             \
+#define INSTANTIATE_CSR_BATCHED_MATMUL(NAME, T, I, O)                          \
   template [[host_name("csr_batched_matmul_" #NAME)]] [[kernel]] void          \
-  csr_batched_matmul_kernel<T, I>(device const T *, device const I *,          \
-                                  device const I *, device const T *,          \
-                                  device T *, constant int &, constant int &,  \
-                                  constant int &, constant int &, uint);       \
-  template [[host_name("csr_batched_matmul_vector_" #NAME)]] [[kernel]] void   \
-  csr_batched_matmul_vector_kernel<T, I>(                                      \
+  csr_batched_matmul_kernel<T, I, O>(                                          \
       device const T *, device const I *, device const I *, device const T *,  \
       device T *, constant int &, constant int &, constant int &,              \
-      constant int &, uint, uint)
+      constant int &, uint2, uint2);                                           \
+  template [[host_name("csr_batched_matmul_vector_" #NAME)]] [[kernel]] void   \
+  csr_batched_matmul_vector_kernel<T, I, O>(                                   \
+      device const T *, device const I *, device const I *, device const T *,  \
+      device T *, constant int &, constant int &, constant int &,              \
+      constant int &, uint2, uint2, uint, uint, uint, uint)
 
-INSTANTIATE_CSR_BATCHED_MATMUL(float32_int32, float, int);
-INSTANTIATE_CSR_BATCHED_MATMUL(float32_int64, float, long);
-INSTANTIATE_CSR_BATCHED_MATMUL(float16_int32, half, int);
-INSTANTIATE_CSR_BATCHED_MATMUL(float16_int64, half, long);
-INSTANTIATE_CSR_BATCHED_MATMUL(bfloat16_int32, bfloat16_t, int);
-INSTANTIATE_CSR_BATCHED_MATMUL(bfloat16_int64, bfloat16_t, long);
-INSTANTIATE_CSR_BATCHED_MATMUL(complex64_int32, complex64_t, int);
-INSTANTIATE_CSR_BATCHED_MATMUL(complex64_int64, complex64_t, long);
+INSTANTIATE_CSR_BATCHED_MATMUL(float32_int32, float, int, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(float32_int32_large, float, int, size_t);
+INSTANTIATE_CSR_BATCHED_MATMUL(float32_int64, float, long, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(float32_int64_large, float, long, size_t);
+INSTANTIATE_CSR_BATCHED_MATMUL(float16_int32, half, int, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(float16_int32_large, half, int, size_t);
+INSTANTIATE_CSR_BATCHED_MATMUL(float16_int64, half, long, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(float16_int64_large, half, long, size_t);
+INSTANTIATE_CSR_BATCHED_MATMUL(bfloat16_int32, bfloat16_t, int, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(bfloat16_int32_large, bfloat16_t, int, size_t);
+INSTANTIATE_CSR_BATCHED_MATMUL(bfloat16_int64, bfloat16_t, long, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(bfloat16_int64_large, bfloat16_t, long, size_t);
+INSTANTIATE_CSR_BATCHED_MATMUL(complex64_int32, complex64_t, int, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(complex64_int32_large, complex64_t, int, size_t);
+INSTANTIATE_CSR_BATCHED_MATMUL(complex64_int64, complex64_t, long, uint);
+INSTANTIATE_CSR_BATCHED_MATMUL(complex64_int64_large, complex64_t, long,
+                               size_t);
 
 #undef INSTANTIATE_CSR_BATCHED_MATMUL

@@ -26,6 +26,8 @@ from mlx_sparse.linalg.utils.arrays import (
 )
 from mlx_sparse.linalg.utils.sparse import canonical_csr
 
+_DEFAULT_START_KEY = mx.random.key(0)
+
 
 def as_csr(A) -> CSRArray:
     """Return spectral-routine input as canonical CSR."""
@@ -68,8 +70,8 @@ def start_vector(v0, *, n: int, name: str = "v0") -> mx.array:
     """Return a finite float32 start vector for a Krylov spectral routine.
 
     Args:
-        v0: Optional user-provided start vector.  ``None`` maps to the current
-            deterministic all-ones vector.
+        v0: Optional user-provided start vector. ``None`` uses standard normal
+            samples from a fixed key, independent of the global random stream.
         n: Required vector length.
         name: Name used in validation errors.
 
@@ -82,7 +84,7 @@ def start_vector(v0, *, n: int, name: str = "v0") -> mx.array:
     """
 
     if v0 is None:
-        return mx.ones((int(n),), dtype=mx.float32)
+        return mx.random.normal((int(n),), dtype=mx.float32, key=_DEFAULT_START_KEY)
     vector = ensure_float32_vector(name, v0, require_finite=True)
     if vector.shape[0] != n:
         raise ValueError(f"{name} has length {vector.shape[0]}, expected {n}.")

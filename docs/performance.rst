@@ -31,6 +31,29 @@ The break-even point also depends on whether the sparse structure is reused:
 if you multiply the same matrix by many different vectors, the per-assembly
 cost is amortized over all products.
 
+Cooperative Metal dispatch
+--------------------------
+
+Long CSR rows and CSC columns use 128-thread cooperative reductions. Output
+positions are distributed over two grid dimensions. Dense products use
+32-bit logical offsets when both the output and RHS fit that range, and
+64-bit offsets for larger arrays. Each grid dimension stays within Metal's
+coordinate range. This avoids the previous overflow at
+``2**25`` outputs caused by multiplying the output count by 128 in one
+dimension.
+
+Each SIMD group reduces its values in registers. The groups exchange their
+partial sums through threadgroup memory with one barrier. Float16 and
+bfloat16 products continue to accumulate in float32. Complex values reduce
+their real and imaginary components separately.
+
+``benchmarks/bench_cooperative_dispatch.py`` measures cooperative CSR
+products and row sums across several row lengths and RHS widths:
+
+.. code-block:: bash
+
+   python benchmarks/bench_cooperative_dispatch.py --output timings.json
+
 Running the benchmarks
 -----------------------
 

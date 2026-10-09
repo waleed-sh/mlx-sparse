@@ -10,7 +10,7 @@ recursive-include mlx_sparse *.py *.metallib
 recursive-include benchmarks *.py *.md
 recursive-include docs *.css *.ipynb *.py *.rst
 recursive-include examples *.py
-recursive-include tests *.py
+recursive-include tests *.py *.mm
 
 prune build
 prune docs/_build

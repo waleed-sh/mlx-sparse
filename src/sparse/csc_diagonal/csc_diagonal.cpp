@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "sparse/csc_diagonal/csc_diagonal.h"
+#include "common/metal_dispatch.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -236,8 +237,10 @@ void CSCDiagonal::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_bytes(diag_size, 4);
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(diag_size);
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
-                             MTL::Size(kVectorThreads, 1, 1));
+    const auto grid = cooperative_grid(threadgroups);
+    encoder.dispatch_threads(
+        MTL::Size(grid.groups_x * kVectorThreads, grid.groups_y, 1),
+        MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = static_cast<size_t>(std::max(diag_size, 1));
     auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());

@@ -24,13 +24,11 @@ template <typename I>
     constant int &n_rows [[buffer(9)]], constant int &n_cols [[buffer(10)]],
     constant int &k [[buffer(11)]],
     constant int &reorthogonalize [[buffer(12)]],
+    constant int &complete_basis [[buffer(13)]],
     uint lane [[thread_index_in_threadgroup]]) {
   (void)n_cols;
   threadgroup float scratch[256];
-  threadgroup float shared_scalar;
-  threadgroup float shared_beta;
   threadgroup float beta_prev;
-  threadgroup int shared_done;
   threadgroup int shared_used;
 
   for (int i = static_cast<int>(lane); i < k;
@@ -43,30 +41,21 @@ template <typename I>
     basis[i] = 0.0f;
   }
 
-  float norm_local = 0.0f;
-  for (int row = static_cast<int>(lane); row < n_rows;
-       row += static_cast<int>(k_linalg_threads)) {
-    norm_local += v0[row] * v0[row];
-  }
-  const float norm0 =
-      sqrt(max(reduce_sum_256(norm_local, scratch, lane), 0.0f));
-  for (int row = static_cast<int>(lane); row < n_rows;
-       row += static_cast<int>(k_linalg_threads)) {
-    basis[row * k] = norm0 <= 1.1920928955078125e-7f ? (row == 0 ? 1.0f : 0.0f)
-                                                     : v0[row] / norm0;
+  threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+
+  if (!initialize_krylov_basis(v0, basis, n_rows, k, scratch, lane)) {
+    if (lane == 0) {
+      actual[0] = 0;
+    }
+    return;
   }
   if (lane == 0) {
     beta_prev = 0.0f;
-    shared_done = 0;
     shared_used = 0;
   }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
+  threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
   for (int j = 0; j < k; ++j) {
-    if (shared_done != 0) {
-      break;
-    }
-
     for (int row = static_cast<int>(lane); row < n_rows;
          row += static_cast<int>(k_linalg_threads)) {
       float acc = 0.0f;
@@ -75,14 +64,15 @@ template <typename I>
       }
       work[row] = acc;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    const float operator_norm = krylov_vector_norm(work, n_rows, scratch, lane);
 
     if (j > 0) {
       for (int row = static_cast<int>(lane); row < n_rows;
            row += static_cast<int>(k_linalg_threads)) {
         work[row] -= beta_prev * basis[row * k + j - 1];
       }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
+      threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
     }
 
     float alpha_local = 0.0f;
@@ -98,7 +88,7 @@ template <typename I>
          row += static_cast<int>(k_linalg_threads)) {
       work[row] -= alpha * basis[row * k + j];
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
     if (reorthogonalize != 0) {
       for (int pass = 0; pass < 2; ++pass) {
@@ -113,36 +103,45 @@ template <typename I>
                row += static_cast<int>(k_linalg_threads)) {
             work[row] -= corr * basis[row * k + col];
           }
-          threadgroup_barrier(mem_flags::mem_threadgroup);
+          threadgroup_barrier(mem_flags::mem_threadgroup |
+                              mem_flags::mem_device);
         }
       }
     }
 
-    float beta_local = 0.0f;
-    for (int row = static_cast<int>(lane); row < n_rows;
-         row += static_cast<int>(k_linalg_threads)) {
-      beta_local += work[row] * work[row];
-    }
-    const float beta =
-        sqrt(max(reduce_sum_256(beta_local, scratch, lane), 0.0f));
+    const float beta = krylov_vector_norm(work, n_rows, scratch, lane);
     if (lane == 0) {
       betas[j] = beta;
-      shared_beta = beta;
       shared_used = j + 1;
-      if (j + 1 == k || beta <= 1.1920928955078125e-7f) {
-        shared_done = 1;
-      } else {
-        beta_prev = beta;
-      }
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    if (shared_done == 0) {
-      for (int row = static_cast<int>(lane); row < n_rows;
-           row += static_cast<int>(k_linalg_threads)) {
-        basis[row * k + j + 1] = work[row] / shared_beta;
-      }
-      threadgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    if (j + 1 == k) {
+      break;
     }
+    if (beta <= 8 * 1.1920928955078125e-7f * operator_norm) {
+      if (lane == 0) {
+        betas[j] = 0.0f;
+        beta_prev = 0.0f;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      if (complete_basis == 0) {
+        break;
+      }
+      if (!restart_krylov_basis(basis, work, n_rows, k, j + 1, scratch, lane)) {
+        if (lane == 0) {
+          shared_used = -shared_used;
+        }
+        break;
+      }
+      continue;
+    }
+    if (lane == 0) {
+      beta_prev = beta;
+    }
+    for (int row = int(lane); row < n_rows; row += int(k_linalg_threads)) {
+      basis[size_t(row) * k + j + 1] = work[row] / beta;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
   }
 
   if (lane == 0) {
@@ -155,11 +154,13 @@ csr_lanczos_kernel<int>(device const float *, device const int *,
                         device const int *, device const float *,
                         device float *, device float *, device float *,
                         device int *, device float *, constant int &,
-                        constant int &, constant int &, constant int &, uint);
+                        constant int &, constant int &, constant int &,
+                        constant int &, uint);
 
 template [[host_name("csr_lanczos_float32_int64")]] [[kernel]] void
 csr_lanczos_kernel<long>(device const float *, device const long *,
                          device const long *, device const float *,
                          device float *, device float *, device float *,
                          device int *, device float *, constant int &,
-                         constant int &, constant int &, constant int &, uint);
+                         constant int &, constant int &, constant int &,
+                         constant int &, uint);

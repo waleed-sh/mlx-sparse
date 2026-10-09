@@ -41,11 +41,16 @@ template <typename T, typename I>
 [[kernel]] void csc_col_sums_vector_kernel(
     device const T *data [[buffer(0)]], device const I *indptr [[buffer(1)]],
     device T *out [[buffer(2)]], constant int &n_cols [[buffer(3)]],
-    uint col [[threadgroup_position_in_grid]],
-    uint lane [[thread_index_in_threadgroup]]) {
-  threadgroup typename sparse_accumulator<T>::type partial[128];
+    uint2 group_id [[threadgroup_position_in_grid]],
+    uint2 group_count [[threadgroups_per_grid]],
+    uint lane [[thread_index_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]],
+    uint simd_width [[threads_per_simdgroup]]) {
+  const uint col = group_id.y * group_count.x + group_id.x;
+  threadgroup typename sparse_accumulator<T>::type partial[32];
 
-  if (static_cast<int>(col) >= n_cols) {
+  if (col >= uint(n_cols)) {
     return;
   }
 
@@ -56,25 +61,19 @@ template <typename T, typename I>
     acc += typename sparse_accumulator<T>::type(data[p]);
   }
 
-  partial[lane] = acc;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  for (uint stride = 64; stride > 0; stride >>= 1) {
-    if (lane < stride) {
-      partial[lane] += partial[lane + stride];
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
+  const auto sum = sparse_cooperative_sum_128(acc, partial, simd_lane,
+                                              simd_group, simd_width);
 
   if (lane == 0) {
-    out[col] = sparse_accumulator<T>::cast(partial[0]);
+    out[col] = sparse_accumulator<T>::cast(sum);
   }
 }
 
 #define INSTANTIATE_CSC_COL_SUMS_VECTOR(NAME, T, I)                            \
   template [[host_name("csc_col_sums_vector_" #NAME)]] [[kernel]] void         \
   csc_col_sums_vector_kernel<T, I>(device const T *, device const I *,         \
-                                   device T *, constant int &, uint, uint)
+                                   device T *, constant int &, uint2, uint2,   \
+                                   uint, uint, uint, uint)
 
 INSTANTIATE_CSC_COL_SUMS_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSC_COL_SUMS_VECTOR(float32_int64, float, long);
