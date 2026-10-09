@@ -89,6 +89,43 @@ perform a single ``ncv``-bounded Ritz extraction, non-default ``tol`` or
 ``maxiter`` values are rejected until an implicitly restarted convergence loop
 is implemented.
 
+Starting vectors and breakdown
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``v0=None``, ``lanczos``, ``eigsh``, ``eigs``, and ``svds`` draw standard
+normal samples from a fixed MLX key. Repeated calls on the same device use the
+same start without consuming the global random stream. A random start avoids
+the all-ones vector's invariant subspace on graph Laplacians and stochastic
+matrices. It does not guarantee overlap with every eigenspace for every input.
+
+Explicit starts must be finite and nonzero after conversion to float32.
+Native CPU and Metal normalization scale values before squaring, preserving
+the direction of small and large starts. Choose a start with components in
+the eigenspaces you want to approximate. For ``svds``, these are eigenspaces
+of the right normal operator ``A.T @ A``.
+
+An eigenvector start or a matrix with only a few distinct eigenvalues can
+close the Krylov subspace before the requested basis dimension is reached.
+``eigsh``, ``eigs``, and ``svds`` continue from a new random direction
+orthogonalized against the existing basis. Native CPU and Metal code use
+two orthogonalization passes and up to three attempts to find that direction.
+The original start remains the first basis vector. This allows independent
+directions for repeated eigenvalues within the existing ``ncv`` budget.
+Breakdown checks are relative to the operator product's norm.
+
+This continuation does not add an implicitly restarted convergence loop.
+The routines still perform one ``ncv``-bounded Ritz extraction. They raise
+``RuntimeError`` if orthogonal continuation fails or numerical exhaustion
+leaves fewer than ``k`` independent Ritz candidates. They do not duplicate
+a candidate to fill the result.
+
+The low-level ``lanczos`` routine returns fixed-size arrays. After early
+breakdown, unused coefficients and basis columns remain zero.
+
+Chebyshev setup uses a separate fixed-seed random start for its native Lanczos
+spectral estimate. Gershgorin bounds retain their existing role in selecting
+the preconditioner interval.
+
 The ``which`` selector is case-insensitive and accepts the following values:
 
 .. list-table::

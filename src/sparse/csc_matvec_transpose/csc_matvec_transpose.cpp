@@ -22,6 +22,7 @@
 
 #include "common/common.h"
 #include "common/cpu_parallel.h"
+#include "common/metal_dispatch.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
 #include "mlx/ops.h"
@@ -255,8 +256,10 @@ void CSCMatVecTranspose::eval_gpu(const std::vector<mx::array> &inputs,
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_cols_);
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
-                             MTL::Size(kVectorThreads, 1, 1));
+    const auto grid = cooperative_grid(threadgroups);
+    encoder.dispatch_threads(
+        MTL::Size(grid.groups_x * kVectorThreads, grid.groups_y, 1),
+        MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = static_cast<size_t>(std::max(n_cols_, 1));
     auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());

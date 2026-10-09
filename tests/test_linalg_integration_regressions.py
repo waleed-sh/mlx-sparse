@@ -141,7 +141,9 @@ def test_shifted_graph_laplacian_csc_solver_and_hermitian_eigsh(mx, to_numpy):
         assert info == 0, solver.__name__
         assert _relative_residual(dense, got, rhs) < 2e-5
 
-    smallest = linalg.eigsh(csc, k=1, which="SM", ncv=8, return_eigenvectors=False)
+    smallest = linalg.eigsh(
+        csc, k=1, which="SM", ncv=dense.shape[0], return_eigenvectors=False
+    )
     expected = np.linalg.eigvalsh(dense)
     np.testing.assert_allclose(to_numpy(smallest), expected[:1], rtol=5e-3, atol=5e-3)
 

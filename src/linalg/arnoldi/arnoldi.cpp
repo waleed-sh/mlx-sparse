@@ -44,8 +44,10 @@ using namespace linalg_detail;
 
 class CSRArnoldi : public mx::Primitive {
 public:
-  CSRArnoldi(mx::Stream stream, int n_rows, int n_cols, int k)
-      : Primitive(stream), n_rows_(n_rows), n_cols_(n_cols), k_(k) {}
+  CSRArnoldi(mx::Stream stream, int n_rows, int n_cols, int k,
+             bool complete_basis)
+      : Primitive(stream), n_rows_(n_rows), n_cols_(n_cols), k_(k),
+        complete_basis_(complete_basis) {}
 
   void eval_cpu(const std::vector<mx::array> &inputs,
                 std::vector<mx::array> &outputs) override;
@@ -56,20 +58,23 @@ public:
 
   bool is_equivalent(const mx::Primitive &other) const override {
     const auto &rhs = static_cast<const CSRArnoldi &>(other);
-    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ && k_ == rhs.k_;
+    return n_rows_ == rhs.n_rows_ && n_cols_ == rhs.n_cols_ && k_ == rhs.k_ &&
+           complete_basis_ == rhs.complete_basis_;
   }
 
 private:
   int n_rows_;
   int n_cols_;
   int k_;
+  bool complete_basis_;
 };
 
 template <typename I>
 void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
                           const mx::array &indptr, const mx::array &v0,
                           mx::array &h, mx::array &basis, mx::array &actual,
-                          int n_rows, int k, mx::Stream stream) {
+                          int n_rows, int k, bool complete_basis,
+                          mx::Stream stream) {
   h.set_data(mx::allocator::malloc(h.nbytes()));
   basis.set_data(mx::allocator::malloc(basis.nbytes()));
   actual.set_data(mx::allocator::malloc(actual.nbytes()));
@@ -89,8 +94,8 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
                     v0 = mx::array::unsafe_weak_copy(v0),
                     h = mx::array::unsafe_weak_copy(h),
                     basis = mx::array::unsafe_weak_copy(basis),
-                    actual = mx::array::unsafe_weak_copy(actual), n_rows,
-                    k]() mutable {
+                    actual = mx::array::unsafe_weak_copy(actual), n_rows, k,
+                    complete_basis]() mutable {
     const auto *data_ptr = data.data<float>();
     const auto *indices_ptr = indices.data<I>();
     const auto *indptr_ptr = indptr.data<I>();
@@ -103,20 +108,9 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
     std::fill(h_ptr, h_ptr + static_cast<size_t>(cols) * k, 0.0f);
     std::fill(basis_ptr, basis_ptr + static_cast<size_t>(n_rows) * cols, 0.0f);
 
-    double v_norm2 = 0.0;
-    for (int i = 0; i < n_rows; ++i) {
-      v_norm2 +=
-          static_cast<double>(v0_ptr[i]) * static_cast<double>(v0_ptr[i]);
-    }
-    float v_norm = std::sqrt(std::max(v_norm2, 0.0));
-    if (v_norm <= std::numeric_limits<float>::epsilon()) {
-      for (int i = 0; i < n_rows; ++i) {
-        basis_ptr[static_cast<size_t>(i) * cols] = i == 0 ? 1.0f : 0.0f;
-      }
-    } else {
-      for (int i = 0; i < n_rows; ++i) {
-        basis_ptr[static_cast<size_t>(i) * cols] = v0_ptr[i] / v_norm;
-      }
+    if (!initialize_krylov_basis(v0_ptr, basis_ptr, n_rows, cols)) {
+      *actual_ptr = 0;
+      return;
     }
 
     std::vector<float> w(static_cast<size_t>(n_rows));
@@ -129,6 +123,7 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
       }
       csr_spmv_float(data_ptr, indices_ptr, indptr_ptr, q.data(), w.data(),
                      n_rows);
+      const float operator_norm = norm_float(w);
       for (int pass = 0; pass < 2; ++pass) {
         for (int col = 0; col <= j; ++col) {
           double coeff = 0.0;
@@ -145,8 +140,16 @@ void csr_arnoldi_cpu_impl(const mx::array &data, const mx::array &indices,
       float h_next = norm_float(w);
       h_ptr[static_cast<size_t>(j + 1) * k + j] = h_next;
       used = j + 1;
-      if (h_next <= eps) {
-        break;
+      if (h_next <= 8 * eps * operator_norm) {
+        h_ptr[static_cast<size_t>(j + 1) * k + j] = 0.0f;
+        if (!complete_basis || j + 1 == k) {
+          break;
+        }
+        if (!restart_krylov_basis(basis_ptr, w, n_rows, cols, j + 1)) {
+          used = -used;
+          break;
+        }
+        continue;
       }
       for (int row = 0; row < n_rows; ++row) {
         basis_ptr[static_cast<size_t>(row) * cols + j + 1] = w[row] / h_next;
@@ -168,13 +171,13 @@ void CSRArnoldi::eval_cpu(const std::vector<mx::array> &inputs,
   if (indices.dtype() == mx::int32) {
     csr_arnoldi_cpu_impl<int32_t>(data, indices, indptr, v0, outputs[0],
                                   outputs[1], outputs[2], n_rows_, k_,
-                                  stream());
+                                  complete_basis_, stream());
     return;
   }
   if (indices.dtype() == mx::int64) {
     csr_arnoldi_cpu_impl<int64_t>(data, indices, indptr, v0, outputs[0],
                                   outputs[1], outputs[2], n_rows_, k_,
-                                  stream());
+                                  complete_basis_, stream());
     return;
   }
   throw std::runtime_error("csr_arnoldi requires int32 or int64 indices.");
@@ -218,6 +221,8 @@ void CSRArnoldi::eval_gpu(const std::vector<mx::array> &inputs,
   encoder.set_bytes(n_rows_, 8);
   encoder.set_bytes(n_cols_, 9);
   encoder.set_bytes(k_, 10);
+  int complete = complete_basis_ ? 1 : 0;
+  encoder.set_bytes(complete, 11);
   encoder.dispatch_threads(MTL::Size(kSolverThreads, 1, 1),
                            MTL::Size(kSolverThreads, 1, 1));
   encoder.add_temporary(std::move(work));
@@ -233,7 +238,7 @@ void CSRArnoldi::eval_gpu(const std::vector<mx::array> &,
 std::tuple<mx::array, mx::array, mx::array>
 csr_arnoldi(const mx::array &data, const mx::array &indices,
             const mx::array &indptr, const mx::array &v0, int n_rows,
-            int n_cols, int k, mx::StreamOrDevice s) {
+            int n_cols, int k, mx::StreamOrDevice s, bool complete_basis) {
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
     throw std::invalid_argument(
         "csr_arnoldi requires a non-empty square matrix.");
@@ -262,7 +267,8 @@ csr_arnoldi(const mx::array &data, const mx::array &indices,
   auto indptr_contig = mx::contiguous(indptr, false, stream);
   auto v0_contig = mx::contiguous(v0, false, stream);
 
-  auto primitive = std::make_shared<CSRArnoldi>(stream, n_rows, n_cols, k);
+  auto primitive =
+      std::make_shared<CSRArnoldi>(stream, n_rows, n_cols, k, complete_basis);
   auto outputs = mx::array::make_arrays(
       {mx::Shape{k + 1, k}, mx::Shape{n_rows, k + 1}, mx::Shape{}},
       {mx::float32, mx::float32, mx::int32}, primitive,

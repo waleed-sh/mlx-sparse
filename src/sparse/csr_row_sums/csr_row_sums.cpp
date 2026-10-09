@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "sparse/csr_row_sums/csr_row_sums.h"
+#include "common/metal_dispatch.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -223,8 +224,10 @@ void CSRRowSums::eval_gpu(const std::vector<mx::array> &inputs,
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_rows_);
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
-                             MTL::Size(kVectorThreads, 1, 1));
+    const auto grid = cooperative_grid(threadgroups);
+    encoder.dispatch_threads(
+        MTL::Size(grid.groups_x * kVectorThreads, grid.groups_y, 1),
+        MTL::Size(kVectorThreads, 1, 1));
   } else {
     auto threads = static_cast<size_t>(std::max(n_rows_, 1));
     auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());

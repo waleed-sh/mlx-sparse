@@ -44,6 +44,15 @@ namespace {
 using namespace linalg_detail;
 
 std::vector<float> qr_eigenvalues_real(std::vector<float> h, int n) {
+  float scale = 0.0f;
+  for (float value : h) {
+    scale = std::max(scale, std::abs(value));
+  }
+  if (scale > 0.0f) {
+    for (float &value : h) {
+      value /= scale;
+    }
+  }
   std::vector<float> q(static_cast<size_t>(n) * n, 0.0f);
   std::vector<float> r(static_cast<size_t>(n) * n, 0.0f);
   for (int sweep = 0; sweep < std::max(64, 64 * n); ++sweep) {
@@ -92,7 +101,7 @@ std::vector<float> qr_eigenvalues_real(std::vector<float> h, int n) {
   }
   std::vector<float> values(static_cast<size_t>(n));
   for (int i = 0; i < n; ++i) {
-    values[static_cast<size_t>(i)] = h[static_cast<size_t>(i) * n + i];
+    values[static_cast<size_t>(i)] = h[static_cast<size_t>(i) * n + i] * scale;
   }
   return values;
 }
@@ -107,10 +116,10 @@ csr_eigs_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
 
   // Arnoldi factorisation via GPU kernel (falls back to CPU if no GPU device)
   auto [h_mx, basis_mx, actual_k_mx] = csr_arnoldi(
-      data, indices, indptr, v0_contig, n_rows, n_rows, steps, stream);
+      data, indices, indptr, v0_contig, n_rows, n_rows, steps, stream, true);
   mx::eval(h_mx, basis_mx, actual_k_mx);
 
-  const int used = static_cast<int>(actual_k_mx.item<int32_t>());
+  const int used = checked_krylov_dimension(actual_k_mx.item<int32_t>());
   const float *h_ptr = h_mx.data<float>();
   const float *basis_ptr = basis_mx.data<float>();
 

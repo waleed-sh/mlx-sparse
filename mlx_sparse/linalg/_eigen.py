@@ -57,8 +57,10 @@ def lanczos(
             :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
             Float16 and bfloat16 inputs are promoted to float32.
         k: Number of Lanczos steps.  Must satisfy ``0 < k <= A.shape[0]``.
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional finite, nonzero starting vector of shape ``(n,)``.
+            ``None`` uses standard normal samples from a fixed key without
+            consuming the global random stream. Explicit vectors retain
+            their direction and are normalized in native code.
         reorthogonalize: Whether to apply full reorthogonalisation at each
             step to suppress numerical loss of orthogonality.  Defaults to
             ``True``.
@@ -70,10 +72,14 @@ def lanczos(
         ``alphas`` is the diagonal of shape ``(k,)``, ``betas`` is the
         sub-diagonal of shape ``(k-1,)`` or ``(k,)``, and ``Q`` is the
         basis matrix of shape ``(n, k)``.  When ``return_basis=False``,
-        returns ``(alphas, betas)`` without the basis.
+        returns ``(alphas, betas)`` without the basis. If the recurrence
+        reaches an invariant subspace before ``k`` steps, unused coefficients
+        and basis columns are zero. The last nonzero basis column ends the
+        valid factorization.
 
     Raises:
-        ValueError: If ``k`` is out of range.
+        ValueError: If ``k`` is out of range or ``v0`` has the wrong shape,
+            contains non-finite values, or is zero after float32 conversion.
     """
 
     csr = _float32_csr(_as_csr(A))
@@ -135,11 +141,15 @@ def eigsh(
             Selectors are case-insensitive. Other values, including ``"BE"``,
             raise ``ValueError``.
 
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional finite, nonzero starting vector of shape ``(n,)``.
+            ``None`` uses standard normal samples from a fixed key without
+            consuming the global random stream. Explicit vectors retain
+            their direction and are normalized in native code.
         ncv: Number of Lanczos basis vectors to build before extracting
             Ritz pairs.  A larger value improves accuracy at the cost of
-            more memory.  Defaults to ``max(2*k+1, k+1)``.
+            more memory. Defaults to ``max(2*k+1, k+1)``. After invariant
+            breakdown, the recurrence continues from an orthogonal random
+            direction within this budget.
         maxiter: Not yet supported because the current implementation performs
             one ``ncv``-bounded Ritz extraction, not an implicitly restarted
             convergence loop.  Pass ``None`` (the default).
@@ -159,7 +169,9 @@ def eigsh(
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
         ValueError: If ``which`` is not a supported string, ``k`` is out of
-            range, or ``A`` is not square.
+            range, ``A`` is not square, or ``v0`` is invalid.
+        RuntimeError: If orthogonal continuation fails or the recurrence
+            produces fewer than ``k`` independent Ritz candidates.
     """
 
     _reject_controls(routine="eigsh", tol=float(tol), maxiter=maxiter)
@@ -227,10 +239,14 @@ def eigs(
             Selectors are case-insensitive. Other values, including ``"LI"``
             and ``"SI"``, raise ``ValueError``.
 
-        v0: Optional starting vector of shape ``(n,)``.  ``None`` uses the
-            deterministic all-ones start vector.
+        v0: Optional finite, nonzero starting vector of shape ``(n,)``.
+            ``None`` uses standard normal samples from a fixed key without
+            consuming the global random stream. Explicit vectors retain
+            their direction and are normalized in native code.
         ncv: Dimension of the Arnoldi factorization before Ritz extraction.
-            Defaults to ``max(2*k+1, k+1)``.
+            Defaults to ``max(2*k+1, k+1)``. After invariant breakdown, the
+            recurrence continues from an orthogonal random direction within
+            this budget.
         maxiter: Not yet supported because the current implementation performs
             one ``ncv``-bounded Ritz extraction, not an implicitly restarted
             convergence loop.  Pass ``None`` (the default).
@@ -250,7 +266,9 @@ def eigs(
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
         ValueError: If ``which`` is not a supported string, ``k`` is out of
-            range, or ``A`` is not square.
+            range, ``A`` is not square, or ``v0`` is invalid.
+        RuntimeError: If orthogonal continuation fails or the recurrence
+            produces fewer than ``k`` independent Ritz candidates.
     """
 
     _reject_controls(routine="eigs", tol=float(tol), maxiter=maxiter)
@@ -315,11 +333,14 @@ def svds(
 
             Selectors are case-insensitive. Other values raise ``ValueError``.
 
-        v0: Optional starting vector for the right singular-vector Krylov
-            basis, with shape ``(A.shape[1],)``.  ``None`` uses the
-            deterministic all-ones vector.
+        v0: Optional finite, nonzero starting vector for the right
+            singular-vector basis, with shape ``(A.shape[1],)``. ``None`` uses
+            standard normal samples from a fixed key without consuming the
+            global random stream. Explicit vectors retain their direction
+            and are normalized in native code.
         ncv: Number of Lanczos basis vectors to build.  Defaults to
-            ``max(2*k+1, k+1)``.
+            ``max(2*k+1, k+1)``. After invariant breakdown, the recurrence
+            continues from an orthogonal random direction within this budget.
         maxiter: Not yet supported because the current implementation performs
             one ``ncv``-bounded normal-operator Ritz extraction.  Pass ``None``
             (the default).
@@ -341,7 +362,10 @@ def svds(
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
             values.
         ValueError: If ``which`` is not a supported string, ``k`` is out of
-            range, or ``return_singular_vectors`` is not a recognised value.
+            range, ``v0`` is invalid, or ``return_singular_vectors`` is not
+            a recognised value.
+        RuntimeError: If orthogonal continuation fails or the normal-operator
+            recurrence produces fewer than ``k`` independent Ritz candidates.
     """
 
     _reject_controls(routine="svds", tol=float(tol), maxiter=maxiter)

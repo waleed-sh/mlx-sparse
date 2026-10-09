@@ -24,6 +24,7 @@
 
 #include "common/common.h"
 #include "common/cpu_parallel.h"
+#include "common/metal_dispatch.h"
 #include "common/vmap.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
@@ -276,6 +277,9 @@ void CSRMatMul::eval_gpu(const std::vector<mx::array> &inputs,
   auto kernel_name =
       sparse_kernel_name(use_vector_kernel ? "csr_matmul_vector" : "csr_matmul",
                          data.dtype(), indices.dtype());
+  if (needs_wide_dense_indices(out.size(), rhs.size())) {
+    kernel_name += "_large";
+  }
   auto *kernel = device.get_kernel(kernel_name, lib);
 
   auto &encoder = mx::metal::get_command_encoder(s);
@@ -290,12 +294,17 @@ void CSRMatMul::eval_gpu(const std::vector<mx::array> &inputs,
 
   if (use_vector_kernel) {
     const auto threadgroups = static_cast<size_t>(n_rows_) * rhs_cols_;
-    encoder.dispatch_threads(MTL::Size(threadgroups * kVectorThreads, 1, 1),
-                             MTL::Size(kVectorThreads, 1, 1));
+    const auto grid = cooperative_grid(threadgroups);
+    encoder.dispatch_threads(
+        MTL::Size(grid.groups_x * kVectorThreads, grid.groups_y, 1),
+        MTL::Size(kVectorThreads, 1, 1));
   } else {
-    auto threads = static_cast<size_t>(std::max(n_rows_ * rhs_cols_, 1));
-    auto group = std::min(threads, kernel->maxTotalThreadsPerThreadgroup());
-    encoder.dispatch_threads(MTL::Size(threads, 1, 1), MTL::Size(group, 1, 1));
+    const auto grid =
+        cooperative_grid(static_cast<size_t>(n_rows_) * rhs_cols_);
+    auto group =
+        std::min(grid.groups_x, kernel->maxTotalThreadsPerThreadgroup());
+    encoder.dispatch_threads(MTL::Size(grid.groups_x, grid.groups_y, 1),
+                             MTL::Size(group, 1, 1));
   }
 }
 #else

@@ -78,11 +78,16 @@ template <typename T, typename I>
     device const T *data [[buffer(0)]], device const I *indices [[buffer(1)]],
     device const I *indptr [[buffer(2)]], device const T *x [[buffer(3)]],
     device T *out [[buffer(4)]], constant int &n_rows [[buffer(5)]],
-    uint row [[threadgroup_position_in_grid]],
-    uint lane [[thread_index_in_threadgroup]]) {
-  threadgroup typename sparse_accumulator<T>::type partial[128];
+    uint2 group_id [[threadgroup_position_in_grid]],
+    uint2 group_count [[threadgroups_per_grid]],
+    uint lane [[thread_index_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]],
+    uint simd_width [[threads_per_simdgroup]]) {
+  const uint row = group_id.y * group_count.x + group_id.x;
+  threadgroup typename sparse_accumulator<T>::type partial[32];
 
-  if (static_cast<int>(row) >= n_rows) {
+  if (row >= uint(n_rows)) {
     return;
   }
 
@@ -92,26 +97,19 @@ template <typename T, typename I>
   for (I p = start + static_cast<I>(lane); p < end; p += 128) {
     acc += sparse_multiply<T>(data[p], x[indices[p]]);
   }
-  partial[lane] = acc;
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  for (uint stride = 64; stride > 0; stride >>= 1) {
-    if (lane < stride) {
-      partial[lane] += partial[lane + stride];
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-  }
+  const auto sum = sparse_cooperative_sum_128(acc, partial, simd_lane,
+                                              simd_group, simd_width);
 
   if (lane == 0) {
-    out[row] = sparse_accumulator<T>::cast(partial[0]);
+    out[row] = sparse_accumulator<T>::cast(sum);
   }
 }
 
 #define INSTANTIATE_CSR_MATVEC_VECTOR(NAME, T, I)                              \
   template [[host_name("csr_matvec_vector_" #NAME)]] [[kernel]] void           \
-  csr_matvec_vector_kernel<T, I>(device const T *, device const I *,           \
-                                 device const I *, device const T *,           \
-                                 device T *, constant int &, uint, uint)
+  csr_matvec_vector_kernel<T, I>(                                              \
+      device const T *, device const I *, device const I *, device const T *,  \
+      device T *, constant int &, uint2, uint2, uint, uint, uint, uint)
 
 INSTANTIATE_CSR_MATVEC_VECTOR(float32_int32, float, int);
 INSTANTIATE_CSR_MATVEC_VECTOR(float32_int64, float, long);

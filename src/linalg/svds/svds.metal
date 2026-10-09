@@ -22,13 +22,11 @@ template <typename I>
     device float *betas [[buffer(5)]], device float *basis [[buffer(6)]],
     device int *actual [[buffer(7)]], device float *work [[buffer(8)]],
     constant int &n_rows [[buffer(9)]], constant int &n_cols [[buffer(10)]],
-    constant int &k [[buffer(11)]], uint lane [[thread_index_in_threadgroup]]) {
+    constant int &k [[buffer(11)]], constant int &complete_basis [[buffer(12)]],
+    uint lane [[thread_index_in_threadgroup]]) {
   threadgroup float scratch[256];
   threadgroup float shared_alpha;
-  threadgroup float shared_beta;
-  threadgroup float shared_v0_norm;
   threadgroup float beta_prev;
-  threadgroup int shared_done;
   threadgroup int shared_used;
 
   for (int i = static_cast<int>(lane); i < k;
@@ -40,46 +38,30 @@ template <typename I>
        i += static_cast<int>(k_linalg_threads)) {
     basis[i] = 0.0f;
   }
-  float v0_norm_local = 0.0f;
-  for (int col = static_cast<int>(lane); col < n_cols;
-       col += static_cast<int>(k_linalg_threads)) {
-    v0_norm_local += v0[col] * v0[col];
-  }
-  const float v0_norm =
-      sqrt(max(reduce_sum_256(v0_norm_local, scratch, lane), 0.0f));
-  if (lane == 0) {
-    shared_v0_norm = v0_norm;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
+  threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
-  for (int col = static_cast<int>(lane); col < n_cols;
-       col += static_cast<int>(k_linalg_threads)) {
-    basis[col * k] = shared_v0_norm <= 1.1920928955078125e-7f
-                         ? (col == 0 ? 1.0f : 0.0f)
-                         : v0[col] / shared_v0_norm;
-    work[col] = 0.0f;
+  if (!initialize_krylov_basis(v0, basis, n_cols, k, scratch, lane)) {
+    if (lane == 0) {
+      actual[0] = 0;
+    }
+    return;
   }
   if (lane == 0) {
     actual[0] = 0;
     beta_prev = 0.0f;
-    shared_done = 0;
     shared_used = 0;
   }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
+  threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
   device atomic_float *atomic_work =
       reinterpret_cast<device atomic_float *>(work);
 
   for (int j = 0; j < k; ++j) {
-    if (shared_done != 0) {
-      break;
-    }
-
     for (int col = static_cast<int>(lane); col < n_cols;
          col += static_cast<int>(k_linalg_threads)) {
       work[col] = 0.0f;
     }
-    threadgroup_barrier(mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
     for (int row = static_cast<int>(lane); row < n_rows;
          row += static_cast<int>(k_linalg_threads)) {
@@ -102,14 +84,15 @@ template <typename I>
         }
       }
     }
-    threadgroup_barrier(mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    const float operator_norm = krylov_vector_norm(work, n_cols, scratch, lane);
 
     if (j > 0) {
       for (int col = static_cast<int>(lane); col < n_cols;
            col += static_cast<int>(k_linalg_threads)) {
         work[col] -= beta_prev * basis[col * k + j - 1];
       }
-      threadgroup_barrier(mem_flags::mem_device);
+      threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
     }
 
     float alpha_local = 0.0f;
@@ -122,13 +105,13 @@ template <typename I>
       alphas[j] = alpha;
       shared_alpha = alpha;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
     for (int col = static_cast<int>(lane); col < n_cols;
          col += static_cast<int>(k_linalg_threads)) {
       work[col] -= shared_alpha * basis[col * k + j];
     }
-    threadgroup_barrier(mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
 
     for (int pass = 0; pass < 2; ++pass) {
       for (int orth_col = 0; orth_col <= j; ++orth_col) {
@@ -142,36 +125,43 @@ template <typename I>
              col += static_cast<int>(k_linalg_threads)) {
           work[col] -= correction * basis[col * k + orth_col];
         }
-        threadgroup_barrier(mem_flags::mem_device);
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
       }
     }
 
-    float beta_local = 0.0f;
-    for (int col = static_cast<int>(lane); col < n_cols;
-         col += static_cast<int>(k_linalg_threads)) {
-      beta_local += work[col] * work[col];
-    }
-    const float beta =
-        sqrt(max(reduce_sum_256(beta_local, scratch, lane), 0.0f));
+    const float beta = krylov_vector_norm(work, n_cols, scratch, lane);
     if (lane == 0) {
       betas[j] = beta;
-      shared_beta = beta;
       shared_used = j + 1;
-      if (j + 1 == k || beta <= 1.1920928955078125e-7f) {
-        shared_done = 1;
-      } else {
-        beta_prev = beta;
-      }
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    if (shared_done == 0) {
-      for (int col = static_cast<int>(lane); col < n_cols;
-           col += static_cast<int>(k_linalg_threads)) {
-        basis[col * k + j + 1] = work[col] / shared_beta;
-      }
-      threadgroup_barrier(mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    if (j + 1 == k) {
+      break;
     }
+    if (beta <= 8 * 1.1920928955078125e-7f * operator_norm) {
+      if (lane == 0) {
+        betas[j] = 0.0f;
+        beta_prev = 0.0f;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      if (complete_basis == 0) {
+        break;
+      }
+      if (!restart_krylov_basis(basis, work, n_cols, k, j + 1, scratch, lane)) {
+        if (lane == 0) {
+          shared_used = -shared_used;
+        }
+        break;
+      }
+      continue;
+    }
+    if (lane == 0) {
+      beta_prev = beta;
+    }
+    for (int row = int(lane); row < n_cols; row += int(k_linalg_threads)) {
+      basis[size_t(row) * k + j + 1] = work[row] / beta;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
   }
 
   if (lane == 0) {
@@ -184,11 +174,13 @@ csr_normal_lanczos_kernel<int>(device const float *, device const int *,
                                device const int *, device const float *,
                                device float *, device float *, device float *,
                                device int *, device float *, constant int &,
-                               constant int &, constant int &, uint);
+                               constant int &, constant int &, constant int &,
+                               uint);
 
 template [[host_name("csr_normal_lanczos_float32_int64")]] [[kernel]] void
 csr_normal_lanczos_kernel<long>(device const float *, device const long *,
                                 device const long *, device const float *,
                                 device float *, device float *, device float *,
                                 device int *, device float *, constant int &,
-                                constant int &, constant int &, uint);
+                                constant int &, constant int &, constant int &,
+                                uint);

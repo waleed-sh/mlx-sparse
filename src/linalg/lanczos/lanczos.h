@@ -23,6 +23,7 @@ namespace mlx_sparse {
 std::tuple<mx::array, mx::array, mx::array, mx::array>
 csr_lanczos(const mx::array &data, const mx::array &indices,
             const mx::array &indptr, const mx::array &v0, int n_rows,
-            int n_cols, int k, bool reorthogonalize, mx::StreamOrDevice s = {});
+            int n_cols, int k, bool reorthogonalize, mx::StreamOrDevice s = {},
+            bool complete_basis = false);
 
 } // namespace mlx_sparse

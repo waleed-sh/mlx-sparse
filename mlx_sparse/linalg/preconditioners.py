@@ -1315,7 +1315,8 @@ def chebyshev(
             recorded for diagnostics.
         estimate: Whether native Lanczos Ritz estimates should be computed as
             a fallback/refinement for the spectral interval. Defaults to
-            ``True``.
+            ``True``. The estimator uses a fixed-seed random start without
+            consuming the MLX global random stream.
 
     Returns:
         A :class:`ChebyshevPreconditioner` with native CPU/Metal apply support.

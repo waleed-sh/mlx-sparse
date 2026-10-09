@@ -53,11 +53,12 @@ csr_eigsh_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
 
   // Lanczos tridiagonalisation via GPU kernel (falls back to CPU if no GPU
   // device)
-  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] = csr_lanczos(
-      data, indices, indptr, v0_contig, n_rows, n_rows, steps, true, stream);
+  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] =
+      csr_lanczos(data, indices, indptr, v0_contig, n_rows, n_rows, steps, true,
+                  stream, true);
   mx::eval(alphas_mx, betas_mx, basis_mx, actual_k_mx);
 
-  const int used = static_cast<int>(actual_k_mx.item<int32_t>());
+  const int used = checked_krylov_dimension(actual_k_mx.item<int32_t>());
   const float *alphas_ptr = alphas_mx.data<float>();
   const float *betas_ptr = betas_mx.data<float>();
   const float *basis_ptr = basis_mx.data<float>();
