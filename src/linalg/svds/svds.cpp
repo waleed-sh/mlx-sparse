@@ -24,8 +24,10 @@
 #include <type_traits>
 #include <vector>
 
+#include "linalg/svds/bidiagonal.h"
 #include "mlx/allocator.h"
 #include "mlx/backend/cpu/encoder.h"
+#include "mlx/linalg.h"
 #include "mlx/ops.h"
 #include "mlx/primitives.h"
 #include "mlx/transforms.h"
@@ -203,69 +205,44 @@ void csr_normal_lanczos_cpu_impl(const mx::array &data,
   });
 }
 
-template <typename I>
 std::tuple<mx::array, mx::array, mx::array>
-csr_svds_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
-              int n_cols, const mx::array &v0, int k, int ncv,
-              const std::string &which) {
-  const int steps = std::min(n_cols, std::max(ncv, k + 1));
+csr_svds_impl(const mx::array &data, const mx::array &indices,
+              const mx::array &indptr, int n_rows, int n_cols,
+              const mx::array &v0, int k, int ncv, const std::string &which,
+              bool compute_u, bool compute_v) {
+  const int steps = std::min({n_rows, n_cols, std::max(ncv, k + 1)});
   auto stream = mx::default_stream(mx::default_device());
-  auto v0_contig = mx::contiguous(v0, false, stream);
-  auto [alphas_mx, betas_mx, basis_mx, actual_k_mx] = csr_normal_lanczos(
-      data, indices, indptr, v0_contig, n_rows, n_cols, steps, stream, true);
-  mx::eval(alphas_mx, betas_mx, basis_mx, actual_k_mx);
-
-  const int used = checked_krylov_dimension(actual_k_mx.item<int32_t>());
-  const float *alphas_ptr = alphas_mx.data<float>();
-  const float *betas_ptr = betas_mx.data<float>();
-  const float *basis_ptr = basis_mx.data<float>();
-
-  std::vector<float> tridiagonal(static_cast<size_t>(used) * used, 0.0f);
-  for (int i = 0; i < used; ++i) {
-    tridiagonal[static_cast<size_t>(i) * used + i] = alphas_ptr[i];
-    if (i > 0) {
-      tridiagonal[static_cast<size_t>(i) * used + i - 1] = betas_ptr[i - 1];
-      tridiagonal[static_cast<size_t>(i - 1) * used + i] = betas_ptr[i - 1];
-    }
+  auto cpu = mx::default_stream(mx::Device(mx::Device::cpu, 0));
+  auto [left_t, right_t, images_t, actual] = csr_bidiagonal_basis(
+      data, indices, indptr, v0, n_rows, n_cols, steps, stream);
+  const int used = checked_krylov_dimension(actual.item<int32_t>());
+  if (used < k) {
+    throw std::runtime_error("Krylov basis dimension " + std::to_string(used) +
+                             " is smaller than the requested number of pairs.");
   }
-  auto [evals_all, vecs_small] = jacobi_symmetric(tridiagonal, used);
-  auto selected = select_ritz_indices(evals_all, k, which);
-  std::vector<float> singular(static_cast<size_t>(k), 0.0f);
-  std::vector<float> right(static_cast<size_t>(n_cols) * k, 0.0f);
-  std::vector<float> left(static_cast<size_t>(n_rows) * k, 0.0f);
-
-  data.eval();
-  indices.eval();
-  indptr.eval();
-  const auto *data_ptr = data.data<float>();
-  const auto *indices_ptr = indices.data<I>();
-  const auto *indptr_ptr = indptr.data<I>();
-
-  for (int out_col = 0; out_col < k; ++out_col) {
-    const int eig_col = selected[static_cast<size_t>(out_col)];
-    const float sigma =
-        std::sqrt(std::max(evals_all[static_cast<size_t>(eig_col)], 0.0f));
-    singular[static_cast<size_t>(out_col)] = sigma;
-    std::vector<float> v(static_cast<size_t>(n_cols), 0.0f);
-    for (int row = 0; row < n_cols; ++row) {
-      double acc = 0.0;
-      for (int j = 0; j < used; ++j) {
-        acc += basis_ptr[static_cast<size_t>(row) * steps + j] *
-               vecs_small[static_cast<size_t>(j) * used + eig_col];
-      }
-      v[static_cast<size_t>(row)] = static_cast<float>(acc);
-      right[static_cast<size_t>(out_col) * n_cols + row] =
-          static_cast<float>(acc);
-    }
-    auto av = host_csr_spmv(data_ptr, indices_ptr, indptr_ptr, v, n_rows);
-    for (int row = 0; row < n_rows; ++row) {
-      left[static_cast<size_t>(row) * k + out_col] =
-          sigma == 0.0f ? 0.0f : av[static_cast<size_t>(row)] / sigma;
-    }
+  // Retain all projection corrections and continuation couplings using
+  // sparse products already computed while building the bases.
+  auto projected = mx::matmul(left_t, mx::transpose(images_t, stream), stream);
+  const bool vectors = compute_u || compute_v;
+  auto small = mx::linalg::svd(projected, vectors, cpu);
+  auto singular = vectors ? small[1] : small[0];
+  std::vector<int32_t> order(k);
+  for (int i = 0; i < k; ++i) {
+    order[i] = which == "LM" ? i : steps - 1 - i;
   }
-  return {mx::array(left.begin(), mx::Shape{n_rows, k}, mx::float32),
-          mx::array(singular.begin(), mx::Shape{k}, mx::float32),
-          mx::array(right.begin(), mx::Shape{k, n_cols}, mx::float32)};
+  auto selected = mx::array(order.begin(), {k}, mx::int32);
+  auto s = mx::take(singular, selected, 0, stream);
+  auto u = mx::zeros({n_rows, 0}, mx::float32, stream);
+  auto vh = mx::zeros({0, n_cols}, mx::float32, stream);
+  if (compute_u) {
+    auto selected_u = mx::take(small[0], selected, 1, stream);
+    u = mx::matmul(mx::transpose(left_t, stream), selected_u, stream);
+  }
+  if (compute_v) {
+    auto selected_vh = mx::take(small[2], selected, 0, stream);
+    vh = mx::matmul(selected_vh, right_t, stream);
+  }
+  return {u, s, vh};
 }
 
 } // namespace
@@ -395,7 +372,8 @@ csr_normal_lanczos(const mx::array &data, const mx::array &indices,
 std::tuple<mx::array, mx::array, mx::array>
 csr_svds(const mx::array &data, const mx::array &indices,
          const mx::array &indptr, const mx::array &v0, int n_rows, int n_cols,
-         int k, int ncv, const std::string &which) {
+         int k, int ncv, const std::string &which, bool compute_u,
+         bool compute_v) {
   linalg_detail::require_spectral_which(which, "csr_svds", {"LM", "SM"});
   if (n_rows <= 0 || n_cols <= 0) {
     throw std::invalid_argument("csr_svds requires a non-empty matrix.");
@@ -417,16 +395,8 @@ csr_svds(const mx::array &data, const mx::array &indices,
     throw std::invalid_argument(
         "csr_svds data and indices must have equal length.");
   }
-  ncv = std::min(n_cols, std::max(ncv, k + 1));
-  if (indices.dtype() == mx::int32) {
-    return csr_svds_impl<int32_t>(data, indices, indptr, n_rows, n_cols, v0, k,
-                                  ncv, which);
-  }
-  if (indices.dtype() == mx::int64) {
-    return csr_svds_impl<int64_t>(data, indices, indptr, n_rows, n_cols, v0, k,
-                                  ncv, which);
-  }
-  throw std::runtime_error("csr_svds requires int32 or int64 indices.");
+  return csr_svds_impl(data, indices, indptr, n_rows, n_cols, v0, k, ncv, which,
+                       compute_u, compute_v);
 }
 
 } // namespace mlx_sparse

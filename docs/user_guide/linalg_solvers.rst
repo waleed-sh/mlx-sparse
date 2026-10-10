@@ -9,6 +9,9 @@ each solver runs. It is meant to answer two questions quickly:
 * Which sparse solver should I call?
 * Does that path run on CPU, Metal GPU, Apple Accelerate, or a mix?
 
+See :doc:`solver_limitations` for unchecked matrix assumptions, accuracy and
+convergence limits, result checks, and differences from established methods.
+
 Support labels
 --------------
 
@@ -50,13 +53,17 @@ default.
 and negative values mean numerical breakdown or an invalid iterative path.
 
 Pass ``return_info=True`` to replace the integer with a structured
-``SolverInfo`` object. It records the integer status, final true residual norm,
-iteration count, convergence reason, breakdown reason when applicable, solver
+``SolverInfo`` object. It records the integer status, final reported residual
+norm, iteration count, convergence reason, breakdown reason when applicable, solver
 name, tolerance settings, restart size for GMRES, and the preconditioner kind
 when one is used. Preconditioned residual norms are reported only by native
 paths that expose them, otherwise the field is ``None``. ``bicgstab`` accepts
-``tol`` as a SciPy-compatible alias for ``rtol``, if both are provided they
+``tol`` as a SciPy-compatible alias for ``rtol``; if both are provided they
 must agree.
+
+CG reports a recursively updated residual that can differ from ``b - A @ x``.
+Its success status does not certify the true residual of the returned solution.
+See :doc:`solver_limitations` for the warning and an independent residual check.
 
 Python callbacks are opt-in exit callbacks for the native sparse solvers. They
 are called once after the native CPU/Metal loop finishes, so the default solve
@@ -186,27 +193,30 @@ Solver support matrix
        CPU factorization APIs above.  CPU matrix-RHS solves use one native
        triangular-solve sequence instead of a Python loop over RHS columns.
    * - ``linalg.eigsh``
-     - A few eigenpairs of a square symmetric/Hermitian sparse matrix.
+     - A few eigenpairs of a square real symmetric sparse matrix.
      - Partial
      - No
-     - Lanczos projection can run on GPU, the small projected eigensolve runs
-       on CPU. ``v0`` is supported, non-default ``tol`` and ``maxiter`` require
-       an implicitly restarted loop and are rejected for now.
+     - Lanczos projection can run on GPU. The projected eigensolve and
+       full-basis eigenvector reconstruction run on CPU. ``v0`` is supported.
+       There is one bounded extraction without a convergence loop.
+       Non-default ``tol`` and ``maxiter`` are rejected.
    * - ``linalg.eigs``
      - A few eigenpairs of a square general sparse matrix.
      - Partial
      - No
-     - Arnoldi projection can run on GPU, the small Hessenberg eigensolve runs
-       on CPU. ``v0`` is supported, non-default ``tol`` and ``maxiter`` require
-       an implicitly restarted loop and are rejected for now.
+     - Arnoldi projection can run on GPU. The small Hessenberg eigensolve runs
+       on CPU, and requested vectors are reconstructed on the selected
+       device. Results are complex64. There is one bounded extraction without
+       a convergence loop. Non-default ``tol`` and ``maxiter`` are rejected.
    * - ``linalg.svds``
      - A few singular values/vectors of a sparse matrix.
      - Partial
      - No
-     - The native normal-operator Lanczos step can run on GPU, the small
-       eigensolve and singular-vector assembly run on CPU. ``v0`` is supported
-       for the right-vector Krylov basis, non-default ``tol`` and ``maxiter``
-       require an implicitly restarted loop and are rejected for now.
+     - Native Golub-Kahan basis construction and projection can run on GPU.
+       The small direct SVD runs on CPU, and requested singular vectors are
+       reconstructed on the selected device. ``v0`` starts the right basis.
+       There is one bounded extraction without a convergence loop.
+       Non-default ``tol`` and ``maxiter`` are rejected.
    * - ``linalg.lanczos``
      - Low-level Lanczos projection helper.
      - Partial
@@ -243,7 +253,8 @@ paths above.
      - Real rectangular least-squares system.
      - Accelerate-enabled Apple build.
    * - ``"cholesky_ata"``
-     - Real rectangular normal-equation solve.
+     - Real ``m >= n`` matrix with full column rank. Solves ``A.T @ A @ x = c``
+       with a length-``n`` right-hand side.
      - Accelerate-enabled Apple build.
 
 Accelerate direct solves currently operate on ``float32`` factorization
@@ -283,9 +294,10 @@ unpreconditioned CG path. ``diagonal`` and ``jacobi`` dispatch to native
 Jacobi-preconditioned CG on CPU or Metal depending on the selected MLX device.
 ``chebyshev`` dispatches to a native polynomial-preconditioned CG path whose
 preconditioner application uses only sparse matrix-vector products and vector
-updates. These paths still test convergence against the true residual
-``||b - A @ x||``. ``ichol0`` dispatches to a native C++ IC(0)-preconditioned
-CG loop, setup runs on CPU and standalone preconditioner application uses
+updates. CG stopping tests use the recursive residual, which can drift from
+``b - A @ x``. Check the returned solution independently as described in
+:doc:`solver_limitations`. ``ichol0`` dispatches to a native C++
+IC(0)-preconditioned CG loop. Setup runs on CPU and standalone application uses
 native CSR triangular solves on CPU or Metal.
 
 ``linalg.gmres`` accepts ``identity``, ``diagonal``/``jacobi``, ``ilu0``,

@@ -1646,12 +1646,13 @@ NB_MODULE(_ext, m) {
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
          const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &v0,
-         int n_rows, int n_cols, int k, int ncv, const std::string &which) {
+         int n_rows, int n_cols, int k, int ncv, const std::string &which,
+         bool compute_vectors) {
         return mlx_sparse::csr_eigs(data, indices, indptr, v0, n_rows, n_cols,
-                                    k, ncv, which);
+                                    k, ncv, which, compute_vectors);
       },
       "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
-      "ncv"_a, "which"_a,
+      "ncv"_a, "which"_a, "compute_vectors"_a = true,
       "Compute selected Arnoldi Ritz pairs from a CSR matrix.");
 
   m.def(
@@ -1659,12 +1660,13 @@ NB_MODULE(_ext, m) {
       [](const mlx_sparse::mx::array &data,
          const mlx_sparse::mx::array &indices,
          const mlx_sparse::mx::array &indptr, const mlx_sparse::mx::array &v0,
-         int n_rows, int n_cols, int k, int ncv, const std::string &which) {
+         int n_rows, int n_cols, int k, int ncv, const std::string &which,
+         bool compute_u, bool compute_v) {
         return mlx_sparse::csr_svds(data, indices, indptr, v0, n_rows, n_cols,
-                                    k, ncv, which);
+                                    k, ncv, which, compute_u, compute_v);
       },
       "data"_a, "indices"_a, "indptr"_a, "v0"_a, "n_rows"_a, "n_cols"_a, "k"_a,
-      "ncv"_a, "which"_a,
+      "ncv"_a, "which"_a, "compute_u"_a = true, "compute_v"_a = true,
       "Compute selected singular triplets from a CSR matrix.");
 
   m.def(

@@ -14,28 +14,17 @@
 
 #include "linalg/eigs/eigs.h"
 
-#include "linalg/arnoldi/arnoldi.h"
 #include <algorithm>
-#include <cmath>
 #include <complex>
-#include <limits>
-#include <map>
 #include <numeric>
 #include <stdexcept>
-#include <type_traits>
 #include <vector>
 
-#include "mlx/allocator.h"
-#include "mlx/backend/cpu/encoder.h"
-#include "mlx/ops.h"
-#include "mlx/primitives.h"
-#include "mlx/transforms.h"
-
-#ifdef _METAL_
-#include "mlx/backend/metal/device.h"
-#endif
-
+#include "linalg/arnoldi/arnoldi.h"
 #include "linalg/common/common.h"
+#include "mlx/linalg.h"
+#include "mlx/ops.h"
+#include "mlx/transforms.h"
 
 namespace mlx_sparse {
 
@@ -43,111 +32,59 @@ namespace {
 
 using namespace linalg_detail;
 
-std::vector<float> qr_eigenvalues_real(std::vector<float> h, int n) {
-  float scale = 0.0f;
-  for (float value : h) {
-    scale = std::max(scale, std::abs(value));
-  }
-  if (scale > 0.0f) {
-    for (float &value : h) {
-      value /= scale;
-    }
-  }
-  std::vector<float> q(static_cast<size_t>(n) * n, 0.0f);
-  std::vector<float> r(static_cast<size_t>(n) * n, 0.0f);
-  for (int sweep = 0; sweep < std::max(64, 64 * n); ++sweep) {
-    std::fill(q.begin(), q.end(), 0.0f);
-    std::fill(r.begin(), r.end(), 0.0f);
-    for (int col = 0; col < n; ++col) {
-      std::vector<float> v(static_cast<size_t>(n));
-      for (int row = 0; row < n; ++row) {
-        v[static_cast<size_t>(row)] = h[static_cast<size_t>(row) * n + col];
-      }
-      for (int prev = 0; prev < col; ++prev) {
-        double coeff = 0.0;
-        for (int row = 0; row < n; ++row) {
-          coeff += q[static_cast<size_t>(row) * n + prev] *
-                   v[static_cast<size_t>(row)];
-        }
-        r[static_cast<size_t>(prev) * n + col] = static_cast<float>(coeff);
-        for (int row = 0; row < n; ++row) {
-          v[static_cast<size_t>(row)] -= static_cast<float>(coeff) *
-                                         q[static_cast<size_t>(row) * n + prev];
-        }
-      }
-      const float v_norm = norm_float(v);
-      if (v_norm <= std::numeric_limits<float>::epsilon()) {
-        q[static_cast<size_t>(col) * n + col] = 1.0f;
-      } else {
-        r[static_cast<size_t>(col) * n + col] = v_norm;
-        for (int row = 0; row < n; ++row) {
-          q[static_cast<size_t>(row) * n + col] =
-              v[static_cast<size_t>(row)] / v_norm;
-        }
-      }
-    }
-    std::vector<float> next(static_cast<size_t>(n) * n, 0.0f);
-    for (int row = 0; row < n; ++row) {
-      for (int col = 0; col < n; ++col) {
-        double acc = 0.0;
-        for (int j = 0; j < n; ++j) {
-          acc += r[static_cast<size_t>(row) * n + j] *
-                 q[static_cast<size_t>(j) * n + col];
-        }
-        next[static_cast<size_t>(row) * n + col] = static_cast<float>(acc);
-      }
-    }
-    h.swap(next);
-  }
-  std::vector<float> values(static_cast<size_t>(n));
-  for (int i = 0; i < n; ++i) {
-    values[static_cast<size_t>(i)] = h[static_cast<size_t>(i) * n + i] * scale;
-  }
-  return values;
-}
-
-template <typename I>
 std::tuple<mx::array, mx::array>
-csr_eigs_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
-              const mx::array &v0, int k, int ncv, const std::string &which) {
+csr_eigs_impl(const mx::array &data, const mx::array &indices,
+              const mx::array &indptr, int n_rows, const mx::array &v0, int k,
+              int ncv, const std::string &which, bool compute_vectors) {
   const int steps = std::min(n_rows, std::max(ncv, k + 1));
   auto stream = mx::default_stream(mx::default_device());
-  auto v0_contig = mx::contiguous(v0, false, stream);
-
-  // Arnoldi factorisation via GPU kernel (falls back to CPU if no GPU device)
-  auto [h_mx, basis_mx, actual_k_mx] = csr_arnoldi(
-      data, indices, indptr, v0_contig, n_rows, n_rows, steps, stream, true);
-  mx::eval(h_mx, basis_mx, actual_k_mx);
-
-  const int used = checked_krylov_dimension(actual_k_mx.item<int32_t>());
-  const float *h_ptr = h_mx.data<float>();
-  const float *basis_ptr = basis_mx.data<float>();
-
-  // Extract used×used sub-Hessenberg (H has shape (steps+1, steps))
-  std::vector<float> h_square(static_cast<size_t>(used) * used, 0.0f);
-  for (int row = 0; row < used; ++row) {
-    for (int col = 0; col < used; ++col) {
-      h_square[static_cast<size_t>(row) * used + col] =
-          h_ptr[static_cast<size_t>(row) * steps + col];
-    }
+  auto cpu = mx::default_stream(mx::Device(mx::Device::cpu, 0));
+  auto [h, basis, actual] = csr_arnoldi(data, indices, indptr, v0, n_rows,
+                                        n_rows, steps, stream, true);
+  const int used = checked_krylov_dimension(actual.item<int32_t>());
+  if (used < k) {
+    throw std::runtime_error("Krylov basis dimension " + std::to_string(used) +
+                             " is smaller than the requested number of pairs.");
   }
-  auto values_all = qr_eigenvalues_real(h_square, used);
-  auto selected = select_ritz_indices(values_all, k, which);
-
-  // Ritz vectors are the corresponding Krylov basis vectors
-  std::vector<float> values(static_cast<size_t>(k), 0.0f);
-  std::vector<float> vectors(static_cast<size_t>(n_rows) * k, 0.0f);
-  for (int out_col = 0; out_col < k; ++out_col) {
-    const int eig_col = selected[static_cast<size_t>(out_col)];
-    values[static_cast<size_t>(out_col)] =
-        values_all[static_cast<size_t>(eig_col)];
-    for (int row = 0; row < n_rows; ++row) {
-      vectors[static_cast<size_t>(row) * k + out_col] =
-          basis_ptr[static_cast<size_t>(row) * (steps + 1) + (eig_col % used)];
-    }
+  auto projected = mx::slice(h, {0, 0}, {used, used}, cpu);
+  mx::array values = mx::zeros({used}, mx::complex64, cpu);
+  mx::array small_vectors = mx::zeros({0, 0}, mx::complex64, cpu);
+  if (compute_vectors) {
+    auto eigen = mx::linalg::eig(projected, cpu);
+    values = eigen.first;
+    small_vectors = eigen.second;
+  } else {
+    values = mx::linalg::eigvals(projected, cpu);
   }
-  return {mx::array(values.begin(), mx::Shape{k}, mx::float32),
-          mx::array(vectors.begin(), mx::Shape{n_rows, k}, mx::float32)};
+  values.eval();
+  const auto *ptr = values.data<mx::complex64_t>();
+  std::vector<int32_t> order(used);
+  std::iota(order.begin(), order.end(), 0);
+  auto score = [&](int i) {
+    const auto value = ptr[i];
+    return which == "LM" || which == "SM" ? std::abs(value) : value.real();
+  };
+  // Stable ordering keeps tied conjugate pairs in the dense solver's order.
+  std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+    return which == "SM" || which == "SR" ? score(a) < score(b)
+                                          : score(a) > score(b);
+  });
+  order.resize(k);
+  auto selected = mx::array(order.begin(), {k}, mx::int32);
+  auto selected_values = mx::take(values, selected, 0, stream);
+  if (!compute_vectors) {
+    return {selected_values, mx::zeros({n_rows, 0}, mx::complex64, stream)};
+  }
+  auto y = mx::take(small_vectors, selected, 1, stream);
+  auto q = mx::slice(basis, {0, 0}, {n_rows, used}, stream);
+  // Two real GEMMs avoid a complex copy of the entire Arnoldi basis.
+  auto real = mx::matmul(q, mx::real(y, stream), stream);
+  auto imag = mx::matmul(q, mx::imag(y, stream), stream);
+  auto vectors = mx::add(
+      real, mx::multiply(imag, mx::array(mx::complex64_t(0, 1)), stream),
+      stream);
+  auto norms = mx::linalg::norm(vectors, 0, true, stream);
+  return {selected_values, mx::divide(vectors, norms, stream)};
 }
 
 } // namespace
@@ -155,7 +92,7 @@ csr_eigs_impl(mx::array data, mx::array indices, mx::array indptr, int n_rows,
 std::tuple<mx::array, mx::array>
 csr_eigs(const mx::array &data, const mx::array &indices,
          const mx::array &indptr, const mx::array &v0, int n_rows, int n_cols,
-         int k, int ncv, const std::string &which) {
+         int k, int ncv, const std::string &which, bool compute_vectors) {
   linalg_detail::require_spectral_which(which, "csr_eigs",
                                         {"LM", "SM", "LR", "SR"});
   if (n_rows <= 0 || n_cols <= 0 || n_rows != n_cols) {
@@ -179,15 +116,8 @@ csr_eigs(const mx::array &data, const mx::array &indices,
         "csr_eigs data and indices must have equal length.");
   }
   ncv = std::min(n_rows, std::max(ncv, k + 1));
-  if (indices.dtype() == mx::int32) {
-    return csr_eigs_impl<int32_t>(data, indices, indptr, n_rows, v0, k, ncv,
-                                  which);
-  }
-  if (indices.dtype() == mx::int64) {
-    return csr_eigs_impl<int64_t>(data, indices, indptr, n_rows, v0, k, ncv,
-                                  which);
-  }
-  throw std::runtime_error("csr_eigs requires int32 or int64 indices.");
+  return csr_eigs_impl(data, indices, indptr, n_rows, v0, k, ncv, which,
+                       compute_vectors);
 }
 
 } // namespace mlx_sparse

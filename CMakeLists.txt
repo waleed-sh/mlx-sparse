@@ -67,6 +67,7 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/minres/minres.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/permute_vector/permute_vector.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/svds.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/src/linalg/svds/bidiagonal.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/linalg/triangular_solve/triangular_solve.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/diagonal/diagonal.cpp
     ${CMAKE_CURRENT_LIST_DIR}/src/preconditioners/bicgstab/bicgstab.cpp
