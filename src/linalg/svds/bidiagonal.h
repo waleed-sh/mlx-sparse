@@ -14,16 +14,18 @@
 
 #pragma once
 
-#include <string>
 #include <tuple>
 
 #include "common/common.h"
 
 namespace mlx_sparse {
 
-std::tuple<mx::array, mx::array>
-csr_eigs(const mx::array &data, const mx::array &indices,
-         const mx::array &indptr, const mx::array &v0, int n_rows, int n_cols,
-         int k, int ncv, const std::string &which, bool compute_vectors = true);
+// Transposed Golub-Kahan bases and A times the right basis, stored by
+// column for contiguous CPU loops and coalesced Metal access. The extra right
+// column retains the terminal residual, including right-nullspace starts.
+std::tuple<mx::array, mx::array, mx::array, mx::array>
+csr_bidiagonal_basis(const mx::array &data, const mx::array &indices,
+                     const mx::array &indptr, const mx::array &v0, int rows,
+                     int cols, int steps, mx::Stream stream);
 
 } // namespace mlx_sparse

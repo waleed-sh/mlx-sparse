@@ -1863,6 +1863,7 @@ def csr_eigs(
     k: int,
     ncv: int,
     which: str,
+    compute_vectors: bool = True,
 ):
     ext = extension()
     if ext is None:
@@ -1877,6 +1878,7 @@ def csr_eigs(
         int(k),
         int(ncv),
         str(which),
+        bool(compute_vectors),
     )
 
 
@@ -1890,6 +1892,8 @@ def csr_svds(
     k: int,
     ncv: int,
     which: str,
+    compute_u: bool = True,
+    compute_v: bool = True,
 ):
     ext = extension()
     if ext is None:
@@ -1904,6 +1908,8 @@ def csr_svds(
         int(k),
         int(ncv),
         str(which),
+        bool(compute_u),
+        bool(compute_v),
     )
 
 

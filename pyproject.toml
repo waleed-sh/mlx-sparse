@@ -14,7 +14,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mlx-sparse"
 dynamic = ["version"]
-description = "Sparse array containers and primitives for MLX"
+description = "Sparse array containers, primitives and linear algebra for MLX"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

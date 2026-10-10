@@ -57,11 +57,11 @@ def test_default_start_explores_constant_row_sum_matrix(
         vectors = to_numpy(vectors)
     expected = np.linalg.eigvalsh(dense.astype(np.float64))[-3:]
     np.testing.assert_allclose(np.sort(to_numpy(values)), expected, atol=3e-5)
-    np.testing.assert_allclose(vectors.T @ vectors, np.eye(3), atol=3e-5)
-    if routine != "eigs":
-        np.testing.assert_allclose(
-            dense @ vectors, vectors * to_numpy(values), atol=3e-5
-        )
+    if routine == "eigs":
+        np.testing.assert_allclose(np.linalg.norm(vectors, axis=0), 1, atol=3e-5)
+    else:
+        np.testing.assert_allclose(vectors.T @ vectors, np.eye(3), atol=3e-5)
+    np.testing.assert_allclose(dense @ vectors, vectors * to_numpy(values), atol=3e-5)
 
 
 def test_default_start_is_repeatable_and_preserves_global_random_stream(mx, to_numpy):
@@ -161,11 +161,11 @@ def test_invariant_start_continues_with_independent_directions(
         vectors = to_numpy(vectors)
     expected = np.linalg.eigvalsh(dense.astype(np.float64))[-3:]
     np.testing.assert_allclose(np.sort(to_numpy(values)), expected, atol=3e-5)
-    np.testing.assert_allclose(vectors.T @ vectors, np.eye(3), atol=3e-5)
-    if routine != "eigs":
-        np.testing.assert_allclose(
-            dense @ vectors, vectors * to_numpy(values), atol=3e-5
-        )
+    if routine == "eigs":
+        np.testing.assert_allclose(np.linalg.norm(vectors, axis=0), 1, atol=3e-5)
+    else:
+        np.testing.assert_allclose(vectors.T @ vectors, np.eye(3), atol=3e-5)
+    np.testing.assert_allclose(dense @ vectors, vectors * to_numpy(values), atol=3e-5)
 
 
 @pytest.mark.parametrize("routine", ["eigsh", "eigs", "svds"])
@@ -183,11 +183,11 @@ def test_invariant_blocks_preserve_spectral_multiplicity(
         values, vectors = getattr(linalg, routine)(a, k=3, ncv=6)
         vectors = to_numpy(vectors)
     np.testing.assert_allclose(np.sort(to_numpy(values)), [2, 3, 3], atol=3e-5)
-    np.testing.assert_allclose(vectors.T @ vectors, np.eye(3), atol=3e-5)
-    if routine != "eigs":
-        np.testing.assert_allclose(
-            dense @ vectors, vectors * to_numpy(values), atol=3e-5
-        )
+    if routine == "eigs":
+        np.testing.assert_allclose(np.linalg.norm(vectors, axis=0), 1, atol=3e-5)
+    else:
+        np.testing.assert_allclose(vectors.T @ vectors, np.eye(3), atol=3e-5)
+    np.testing.assert_allclose(dense @ vectors, vectors * to_numpy(values), atol=3e-5)
 
 
 @pytest.mark.parametrize("routine", ["eigsh", "eigs", "svds"])

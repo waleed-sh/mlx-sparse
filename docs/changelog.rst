@@ -13,6 +13,9 @@ Improvements
 ~~~~~~~~~~~~
 
 * Bump minimum supported MLX version to 0.32.3 and nanobind to >=3.0.1,<3.1.
+* Replace normal-operator SVD extraction with native CPU and Metal
+  Golub-Kahan bases and a direct projected SVD. Reconstruct requested vectors
+  on the selected device and skip unrequested vector families.
 * Use SIMD reductions with one threadgroup barrier in cooperative Metal
   sparse products, diagonals, sums, and norms.
 
@@ -32,6 +35,9 @@ Backwards incompatible changes
   breakdown. They raise ``RuntimeError`` if continuation fails or numerical
   exhaustion leaves fewer Ritz candidates than requested instead of returning
   duplicate pairs.
+* ``linalg.eigs`` now returns ``complex64`` eigenvalues and vectors for real
+  sparse inputs. ``svds`` caps ``ncv`` at the smaller matrix dimension and
+  retains an extra right basis direction when needed.
 
 Deprecations
 ~~~~~~~~~~~~
@@ -51,6 +57,12 @@ Bug fixes
   multiplicities when continuing a closed Krylov subspace.
 * Prevent cooperative Metal grids from wrapping at ``2**25`` outputs. Use
   bounded two-dimensional launches and wide dense-product offsets.
+* Reconstruct Arnoldi Ritz vectors from the projected eigenvectors. Support
+  real matrices with complex spectra and apply magnitude and real-part
+  selectors to complex Ritz values.
+* Return orthonormal left and right singular vectors for zero and repeated
+  singular values without dividing by a singular value. Handle right-nullspace
+  starts on wide matrices and avoid squaring small singular values.
 
 Tests
 ~~~~~
@@ -62,15 +74,25 @@ Tests
 * Add structured-matrix, scaled-start, random-state, and breakdown regressions.
 * Add integer-boundary launch tests and GPU cooperative kernel coverage for
   large products, storage dtypes, index widths, and padded grids.
+* Check eigenpair residuals and both singular-triplet equations across
+  matrix shapes, nullspaces, index widths, sparse formats, scaled operators,
+  and scaled or invariant starts.
 
 Benchmarks
 ~~~~~~~~~~
 
 * Add cooperative CSR product and row-sum GPU timings.
+* Add spectral extraction timings and residual measurements for square, tall,
+  and wide matrices with and without returned vectors.
 
 Documentation
 ~~~~~~~~~~~~~
 
+* Add a solver limitations guide covering numerical assumptions, accuracy
+  checks, known failure behavior, execution costs, and references to established
+  solver implementations.
+* Document complex Ritz outputs, the projected SVD execution model, return
+  options, and residual checks for partial spectral approximations.
 * Document supported spectral selectors and their error behavior.
 * Clarify disabled buffer validation and document the CSC constructor.
 * Document Krylov starts, early breakdown, and cooperative Metal dispatch.

@@ -219,12 +219,12 @@ def eigs(
 
     GPU note:
         When GPU execution is selected, Arnoldi factorisation uses the native
-        Arnoldi kernel.  The small Hessenberg eigensolve, Ritz value
-        selection, and output vector assembly run on the CPU after the basis
-        and Hessenberg matrix are copied back to host memory.
+        Arnoldi kernel. The small Hessenberg eigensolve runs on the CPU.
+        Ritz vectors are reconstructed as ``Q @ y`` on the selected device.
+        The Arnoldi basis is not copied to the host for reconstruction.
 
     Args:
-        A: Sparse square matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
+        A: Real sparse square matrix.  Must be a :class:`~mlx_sparse.CSRArray`,
             :class:`~mlx_sparse.COOArray`, or :class:`~mlx_sparse.CSCArray`.
             Float16 and bfloat16 inputs are promoted to float32.
         k: Number of eigenpairs to compute.  Must satisfy
@@ -260,7 +260,15 @@ def eigs(
         When ``return_eigenvectors=True``, a tuple ``(values, vectors)``
         where ``values`` has shape ``(k,)`` and ``vectors`` has shape
         ``(n, k)``.  When ``return_eigenvectors=False``, returns ``values``
-        alone.
+        alone. Values and vectors have dtype ``complex64``, including when
+        all selected eigenvalues are real. Vector columns have unit norm.
+        General eigenvectors need not be orthogonal and a defective matrix
+        need not have a complete set of independent eigenvectors.
+
+        These are Ritz approximations from one Arnoldi factorization.
+        Increase ``ncv`` and check ``A @ vectors - vectors * values`` when
+        accuracy matters. A small basis does not guarantee convergence,
+        especially for interior eigenvalues or nonnormal matrices.
 
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
@@ -288,6 +296,7 @@ def eigs(
         k=int(k),
         ncv=_ncv(n, int(k), ncv),
         which=which,
+        compute_vectors=bool(return_eigenvectors),
     )
     return (values, vectors) if return_eigenvectors else values
 
@@ -305,22 +314,22 @@ def svds(
 ):
     """Compute a few singular triplets of a sparse matrix.
 
-    Uses the native CSR Lanczos iteration applied to the normal operator
-    ``A.T @ A`` to find the ``k`` singular triplets (left singular vectors,
-    singular values, and right singular vectors) of the sparse matrix ``A``
-    that match the criterion specified by ``which``.
+    Builds fully reorthogonalized left and right bases with native
+    Golub-Kahan bidiagonalization and computes the SVD of their small
+    projection. The method applies ``A`` and ``A.T`` directly without forming
+    a normal matrix or squaring the singular values. Both vector families
+    are reconstructed from orthonormal bases, including zero singular values.
 
     GPU note:
-        When GPU execution is selected, the normal-operator Lanczos recurrence
-        uses a dedicated native ``A.T @ (A @ v)`` path.  The two sparse
-        products are kept inside one native step and the intermediate
-        ``A @ v`` vector is not materialized on the host.  The small
-        tridiagonal eigensolve, Ritz vector back transformation, and returned
-        singular-vector assembly still run on the CPU after the Lanczos basis
-        is synchronized.
+        Small problems use a fused native Metal recurrence. Larger problems
+        use parallel native sparse products and two-pass basis projections,
+        with scalar breakdown checks on the host.
+        The projection and singular-vector reconstruction run on the selected
+        device. Only the small projected matrix is passed to the CPU SVD.
+        Unrequested vector families are not reconstructed.
 
     Args:
-        A: Sparse matrix of shape ``(m, n)``.  Must be a
+        A: Real sparse matrix of shape ``(m, n)``.  Must be a
             :class:`~mlx_sparse.CSRArray`, :class:`~mlx_sparse.COOArray`, or
             :class:`~mlx_sparse.CSCArray`.  Float16 and bfloat16 inputs are
             promoted to float32.
@@ -338,12 +347,13 @@ def svds(
             standard normal samples from a fixed key without consuming the
             global random stream. Explicit vectors retain their direction
             and are normalized in native code.
-        ncv: Number of Lanczos basis vectors to build.  Defaults to
-            ``max(2*k+1, k+1)``. After invariant breakdown, the recurrence
-            continues from an orthogonal random direction within this budget.
+        ncv: Number of left basis vectors to build, capped at
+            ``min(A.shape)``. Defaults to ``max(2*k+1, k+1)``. The right basis
+            retains one additional vector when the column dimension permits
+            it. After breakdown on either side, the recurrence continues
+            from an orthogonal random direction within this budget.
         maxiter: Not yet supported because the current implementation performs
-            one ``ncv``-bounded normal-operator Ritz extraction.  Pass ``None``
-            (the default).
+            one ``ncv``-bounded projected SVD. Pass ``None`` (the default).
         tol: Not yet supported for the same reason.  Pass ``0.0`` (the
             default).
         return_singular_vectors: Controls which vectors are returned.
@@ -356,7 +366,19 @@ def svds(
     Returns:
         When ``return_singular_vectors=True``, a tuple ``(u, s, vh)`` where
         ``u`` has shape ``(m, k)``, ``s`` has shape ``(k,)``, and ``vh`` has
-        shape ``(k, n)``.  See ``return_singular_vectors`` for other forms.
+        shape ``(k, n)``. All arrays have dtype ``float32``. Singular values
+        are nonnegative, ordered largest first for ``"LM"`` and smallest
+        first for ``"SM"``. Both vector families are orthonormal to working
+        precision. See ``return_singular_vectors`` for other forms.
+
+        Results approximate the singular triplets of ``A``. Check both
+        ``A @ vh.T - u * s`` and ``A.T @ u - vh.T * s`` when accuracy matters.
+        Increase ``ncv`` if residuals are too large. A small basis does not
+        guarantee convergence, particularly for the smallest singular values.
+        Near rank deficiency, singular values below float32 resolution can
+        have large relative error. Bases within repeated or zero singular
+        subspaces are not unique. A near-zero projected value can have a
+        nonzero full-matrix residual and does not establish numerical rank.
 
     Raises:
         NotImplementedError: If ``maxiter`` or ``tol`` are not at their default
@@ -364,8 +386,8 @@ def svds(
         ValueError: If ``which`` is not a supported string, ``k`` is out of
             range, ``v0`` is invalid, or ``return_singular_vectors`` is not
             a recognised value.
-        RuntimeError: If orthogonal continuation fails or the normal-operator
-            recurrence produces fewer than ``k`` independent Ritz candidates.
+        RuntimeError: If orthogonal continuation fails or the recurrence
+            produces fewer than ``k`` independent candidates.
     """
 
     _reject_controls(routine="svds", tol=float(tol), maxiter=maxiter)
@@ -383,8 +405,10 @@ def svds(
         _start_vector(v0, n=csr.shape[1]),
         csr.shape,
         k=int(k),
-        ncv=_ncv(csr.shape[1], int(k), ncv),
+        ncv=_ncv(limit, int(k), ncv),
         which=which,
+        compute_u=return_singular_vectors in {True, "u"},
+        compute_v=return_singular_vectors in {True, "vh"},
     )
     if return_singular_vectors is False:
         return singular

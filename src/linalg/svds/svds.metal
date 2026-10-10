@@ -14,6 +14,221 @@
 
 #include "linalg/common/metal_common.h"
 
+[[kernel]] void csr_bidiagonal_zero(device float *out [[buffer(0)]],
+                                    constant int &n [[buffer(1)]],
+                                    uint row [[thread_position_in_grid]]) {
+  if (row < uint(n)) {
+    out[row] = 0.0f;
+  }
+}
+
+template <typename I>
+[[kernel]] void csr_bidiagonal_adjoint_kernel(
+    device const float *data [[buffer(0)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
+    device const float *u [[buffer(3)]], device atomic_float *out [[buffer(4)]],
+    constant int &m [[buffer(5)]], uint row [[thread_position_in_grid]]) {
+  if (row < uint(m)) {
+    const float value = u[row];
+    for (I t = indptr[row]; t < indptr[row + 1]; ++t) {
+      atomic_fetch_add_explicit(&out[indices[t]], data[t] * value,
+                                memory_order_relaxed);
+    }
+  }
+}
+
+template [[host_name(
+    "csr_bidiagonal_adjoint_float32_"
+    "int32")]] [[kernel]] decltype(csr_bidiagonal_adjoint_kernel<int32_t>)
+    csr_bidiagonal_adjoint_kernel<int32_t>;
+template [[host_name(
+    "csr_bidiagonal_adjoint_float32_"
+    "int64")]] [[kernel]] decltype(csr_bidiagonal_adjoint_kernel<int64_t>)
+    csr_bidiagonal_adjoint_kernel<int64_t>;
+
+// Every SIMD group computes the final scalar so all lanes can use it.
+// The second barrier allows immediate reuse of the shared workspace.
+inline float bidiagonal_sum(float value, threadgroup float *partial, uint lane,
+                            uint simd_width) {
+  const uint simd_lane = lane % simd_width;
+  const float group_sum = simd_sum(value);
+  if (simd_lane == 0) {
+    partial[lane / simd_width] = group_sum;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float total = 0.0f;
+  for (uint group = simd_lane; group < k_linalg_threads / simd_width;
+       group += simd_width) {
+    total += partial[group];
+  }
+  total = simd_sum(total);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  return total;
+}
+
+inline float bidiagonal_norm(device const float *work, int n,
+                             threadgroup float *partial, uint lane,
+                             uint simd_width) {
+  const uint simd_lane = lane % simd_width;
+  float scale = 0.0f;
+  for (int row = int(lane); row < n; row += int(k_linalg_threads)) {
+    scale = max(scale, abs(work[row]));
+  }
+  scale = simd_max(scale);
+  if (simd_lane == 0) {
+    partial[lane / simd_width] = scale;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  scale = 0.0f;
+  for (uint group = simd_lane; group < k_linalg_threads / simd_width;
+       group += simd_width) {
+    scale = max(scale, partial[group]);
+  }
+  scale = simd_max(scale);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (scale == 0.0f) {
+    return 0.0f;
+  }
+  float squared = 0.0f;
+  for (int row = int(lane); row < n; row += int(k_linalg_threads)) {
+    const float value = work[row] / scale;
+    squared += value * value;
+  }
+  return scale * sqrt(bidiagonal_sum(squared, partial, lane, simd_width));
+}
+
+inline bool append_bidiagonal_direction(device float *basis, device float *work,
+                                        int n, int used,
+                                        threadgroup float *scratch, uint lane,
+                                        uint simd_width) {
+  for (uint attempt = 0; attempt < 4; ++attempt) {
+    if (attempt != 0) {
+      const uint seed = 0x9e3779b9u * uint(used) + 0x85ebca6bu * attempt;
+      for (int row = int(lane); row < n; row += int(k_linalg_threads)) {
+        work[row] = krylov_random_component(uint(row), seed);
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    }
+    const float initial = bidiagonal_norm(work, n, scratch, lane, simd_width);
+    for (int pass = 0; pass < 2; ++pass) {
+      for (int col = 0; col < used; ++col) {
+        float local = 0.0f;
+        for (int row = int(lane); row < n; row += int(k_linalg_threads)) {
+          local += basis[size_t(col) * n + row] * work[row];
+        }
+        const float coefficient =
+            bidiagonal_sum(local, scratch, lane, simd_width);
+        for (int row = int(lane); row < n; row += int(k_linalg_threads)) {
+          work[row] -= coefficient * basis[size_t(col) * n + row];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      }
+    }
+    const float residual = bidiagonal_norm(work, n, scratch, lane, simd_width);
+    const float threshold =
+        (attempt == 0 ? 8 : 16) * 1.1920928955078125e-7f * initial;
+    if (residual > threshold) {
+      for (int row = int(lane); row < n; row += int(k_linalg_threads)) {
+        basis[size_t(used) * n + row] = work[row] / residual;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename I>
+[[kernel]] void csr_bidiagonal_basis_kernel(
+    device const float *data [[buffer(0)]],
+    device const I *indices [[buffer(1)]], device const I *indptr [[buffer(2)]],
+    device const float *v0 [[buffer(3)]], device float *left [[buffer(4)]],
+    device float *right [[buffer(5)]], device float *images [[buffer(6)]],
+    device int *actual [[buffer(7)]], device float *left_work [[buffer(8)]],
+    device float *right_work [[buffer(9)]], constant int &m [[buffer(10)]],
+    constant int &n [[buffer(11)]], constant int &p [[buffer(12)]],
+    uint lane [[thread_index_in_threadgroup]],
+    uint simd_width [[threads_per_simdgroup]]) {
+  threadgroup float scratch[256];
+  const int q = min(n, p + 1);
+  for (size_t i = lane; i < size_t(m) * p; i += k_linalg_threads) {
+    left[i] = 0.0f;
+  }
+  for (size_t i = lane; i < size_t(n) * q; i += k_linalg_threads) {
+    right[i] = 0.0f;
+  }
+  if (lane == 0) {
+    actual[0] = 0;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+  if (!initialize_krylov_basis(v0, right, n, 1, scratch, lane)) {
+    return;
+  }
+  for (int j = 0; j < p; ++j) {
+    for (int row = int(lane); row < m; row += int(k_linalg_threads)) {
+      float acc = 0.0f;
+      for (I t = indptr[row]; t < indptr[row + 1]; ++t) {
+        acc += data[t] * right[size_t(j) * n + indices[t]];
+      }
+      left_work[row] = acc;
+      images[size_t(j) * m + row] = acc;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    if (!append_bidiagonal_direction(left, left_work, m, j, scratch, lane,
+                                     simd_width)) {
+      if (lane == 0) {
+        actual[0] = -(j + 1);
+      }
+      return;
+    }
+    if (lane == 0) {
+      actual[0] = j + 1;
+    }
+    if (j + 1 == q) {
+      break;
+    }
+    for (int col = int(lane); col < n; col += int(k_linalg_threads)) {
+      right_work[col] = 0.0f;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    device atomic_float *atomic_work =
+        reinterpret_cast<device atomic_float *>(right_work);
+    for (int row = int(lane); row < m; row += int(k_linalg_threads)) {
+      const float value = left[size_t(j) * m + row];
+      for (I t = indptr[row]; t < indptr[row + 1]; ++t) {
+        atomic_fetch_add_explicit(&atomic_work[indices[t]], data[t] * value,
+                                  memory_order_relaxed);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    if (!append_bidiagonal_direction(right, right_work, n, j + 1, scratch, lane,
+                                     simd_width)) {
+      if (lane == 0) {
+        actual[0] = -(j + 1);
+      }
+      return;
+    }
+  }
+  if (q > p) {
+    for (int row = int(lane); row < m; row += int(k_linalg_threads)) {
+      float acc = 0.0f;
+      for (I t = indptr[row]; t < indptr[row + 1]; ++t) {
+        acc += data[t] * right[size_t(p) * n + indices[t]];
+      }
+      images[size_t(p) * m + row] = acc;
+    }
+  }
+}
+
+template [[host_name(
+    "csr_bidiagonal_basis_float32_"
+    "int32")]] [[kernel]] decltype(csr_bidiagonal_basis_kernel<int32_t>)
+    csr_bidiagonal_basis_kernel<int32_t>;
+template [[host_name(
+    "csr_bidiagonal_basis_float32_"
+    "int64")]] [[kernel]] decltype(csr_bidiagonal_basis_kernel<int64_t>)
+    csr_bidiagonal_basis_kernel<int64_t>;
+
 template <typename I>
 [[kernel]] void csr_normal_lanczos_kernel(
     device const float *data [[buffer(0)]],

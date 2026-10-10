@@ -7,7 +7,7 @@ include setup.py
 
 recursive-include src *.cpp *.h *.metal
 recursive-include mlx_sparse *.py *.metallib
-recursive-include benchmarks *.py *.md
+recursive-include benchmarks *.py *.md *.json
 recursive-include docs *.css *.ipynb *.py *.rst
 recursive-include examples *.py
 recursive-include tests *.py *.mm

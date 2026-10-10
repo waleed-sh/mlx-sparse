@@ -9,7 +9,15 @@
 > This is an early beta. macOS and Linux are supported, but Linux is CPU-only
 > in this release. APIs may change, bugs are expected, and some features are
 > still incomplete, especially GPU kernels for various operations. Feedback and issue reports are very welcome!
-> 
+
+> [!WARNING]
+> The sparse containers and core array operations are more mature, but the
+> `mlx_sparse.linalg` surface is unstable and actively under development.
+> Known numerical issues are documented in the
+> [solver limitations guide](https://mlx-sparse.readthedocs.io/en/latest/user_guide/solver_limitations.html).
+> **This list is not exhaustive.** Other unexpected behavior, including incorrect
+> results, may still occur. Check solver results before relying on them.
+>
 > A lot of the functionality is new and is currently being tested.
 > We welcome any and all feedback! Not all solvers are GPU supported ([see the solver support matrix](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg_solvers.html)).
 

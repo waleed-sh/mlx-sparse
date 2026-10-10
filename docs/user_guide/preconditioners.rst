@@ -19,15 +19,20 @@ Exact-factor preconditioners wrap existing direct solve objects and reuse typed
 native or guarded Accelerate apply paths.
 
 Solver diagnostics are available with ``return_info=True`` on ``cg``,
-``gmres``, and ``minres``. The returned ``SolverInfo`` records the final true
-residual norm, iteration count, status reason, and preconditioner kind. Native
-callbacks are exit callbacks only: they run once after the native loop has
-finished, avoiding per-iteration CPU/GPU synchronization by default. For
+``gmres``, ``bicgstab``, and ``minres``. The returned ``SolverInfo`` records
+the final reported residual norm, iteration count, status reason, and
+preconditioner kind. Native callbacks are exit callbacks only: they run once
+after the native loop has finished, avoiding per-iteration CPU/GPU
+synchronization by default. For
 ``gmres``, ``callback_type="x"`` receives the final solution, and
 ``"pr_norm"`` or ``"legacy"`` receives the final reported residual norm. A
 full per-restart or per-inner-iteration Python callback stream is intentionally
 not enabled for native preconditioned paths because it would change the
 CPU/Metal synchronization model.
+
+CG reports its recursive residual rather than a fresh ``b - A @ x`` check.
+See :doc:`solver_limitations` for residual drift, incomplete-factor breakdown,
+and the assumptions behind automatic Chebyshev bounds.
 
 Notebook examples
 -----------------
