@@ -47,6 +47,10 @@ Deprecations
 Bug fixes
 ~~~~~~~~~
 
+* Verify declared sorted and canonical formats in CSR, CSC, and COO full
+  validation. Reject duplicate or unsorted entries that contradict a flag,
+  including on existing arrays. Compare COO coordinates without flattening
+  them into an integer key.
 * Validate spectral selectors before matrix preparation and at native entry
   points. Preserve case-insensitive support for documented selectors.
 * Accept ``validate="none"`` in CSR, CSC, and COO constructors as an alias for
@@ -67,6 +71,9 @@ Bug fixes
 Tests
 ~~~~~
 
+* Cover format declarations, empty compressed segments, explicit zeros,
+  existing-array validation, native conversion flags, and large logical shapes.
+  Compare compressed format checks with SciPy.
 * Add selector rejection and spectrum selection coverage for public and
   native spectral entry points.
 * Add constructor validation mode coverage, including buffer reuse, disabled
@@ -88,6 +95,8 @@ Benchmarks
 Documentation
 ~~~~~~~~~~~~~
 
+* Document sorted and canonical declarations, existing-array validation, and
+  the cost of full validation. Warn about incorrect results from false flags.
 * Add a solver limitations guide covering numerical assumptions, accuracy
   checks, known failure behavior, execution costs, and references to established
   solver implementations.

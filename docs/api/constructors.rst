@@ -112,13 +112,19 @@ The ``validate`` parameter on :func:`csr_array`, :func:`csc_array`, and
    * - ``"metadata"``
      - Checks ranks, array lengths, and dtypes. No value reads. Default.
    * - ``"full"`` or ``True``
-     - Full metadata checks plus value-level checks (bounds, monotonicity).
+     - Metadata checks, index bounds, pointer endpoints and monotonicity, and
+       any declared sorted or canonical format.
        May call ``mx.eval`` to read index values from device.
    * - ``False`` or ``"none"``
      - Skip buffer validation. Shape normalization and input unpacking still
        apply. Use only when buffers are known valid.
 
 See :doc:`../user_guide/validation` for a detailed discussion.
+
+Format flags describe the supplied buffers and do not sort or combine entries.
+Full validation rejects false declarations. Other modes trust them. Passing
+an existing array runs the selected validation on its buffers and stored flags
+before returning the same instance.
 
 Structured constructors
 -----------------------

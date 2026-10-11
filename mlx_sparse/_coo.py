@@ -50,7 +50,7 @@ class COOArray:
     row-oriented workloads, CSR may still be preferable after construction
     because its compressed row layout avoids coordinate scatter.
 
-    **Format invariants** (checked by ``validate="metadata"`` by default):
+    **Format invariants** (checked by :func:`coo_array` by default):
 
     - All three arrays must be rank-1 with the same length.
     - ``row`` and ``col`` share the same integer dtype (``int32`` or
@@ -62,14 +62,19 @@ class COOArray:
 
     - ``0 <= row[i] < n_rows`` for all entries.
     - ``0 <= col[i] < n_cols`` for all entries.
+    - Declared canonical coordinates are sorted by row then column without
+      duplicates.
+
+    Construct through :func:`coo_array` to validate buffers and declarations.
+    Direct ``COOArray`` construction only normalizes the shape.
 
     Args:
         data: Non-zero values, shape ``(nnz,)``.
         row: Row coordinates, shape ``(nnz,)``.
         col: Column coordinates, shape ``(nnz,)``.
         shape: Matrix dimensions as ``(n_rows, n_cols)``.
-        has_canonical_format: Hint that coordinates are sorted and duplicate-
-            free. Defaults to ``False``.
+        has_canonical_format: Hint that coordinates are sorted by row then
+            column without duplicates. Defaults to ``False``.
 
     Example::
 
@@ -363,19 +368,22 @@ def coo_array(
               dtype as *row*.
 
             Alternatively, an existing :class:`COOArray` (returned unchanged if
-            ``shape`` matches).
+            ``shape`` matches and the selected validation passes). Existing
+            arrays retain their stored format flags.
 
         shape: Matrix dimensions as a length-2 sequence ``(n_rows, n_cols)``.
         validate: Validation level, one of:
 
             - ``"metadata"`` *(default)*: checks ranks, lengths, and dtypes.
-            - ``"full"`` / ``True``: also verifies coordinate bounds. May
-              synchronize to host.
+            - ``"full"`` / ``True``: also verifies coordinate bounds and any
+              declared canonical format. May synchronize to host.
             - ``False`` / ``"none"``: skips buffer validation. Shape
               normalization and input unpacking still apply.
 
-        canonical: Set to ``True`` to assert the coordinates are sorted and
-            duplicate-free. Default ``None`` (not asserted).
+        canonical: Set to ``True`` to assert the coordinates are sorted by row
+            then column without duplicates. Checked under full validation and
+            trusted otherwise. Applies to buffer pairs and does not sort or
+            combine entries. Default ``None`` (not asserted).
 
     Returns:
         A :class:`COOArray` with the given buffers and shape.
@@ -384,7 +392,8 @@ def coo_array(
         TypeError: If ``arg`` cannot be unpacked as ``(data, (row, col))``, or
             if dtype constraints are violated.
         ValueError: If ``validate`` is unsupported or shape or length
-            constraints are violated.
+            constraints are violated, or full validation finds out-of-bounds
+            coordinates or a false canonical declaration.
 
     Example::
 
@@ -408,27 +417,34 @@ def coo_array(
             raise ValueError(
                 f"COOArray shape mismatch: got {array.shape}, expected {shape}."
             )
-        return array
+        data, row, col = array.data, array.row, array.col
+        has_canonical_format = array.has_canonical_format
+    else:
+        try:
+            data, coords = arg
+            row, col = coords
+        except Exception as exc:
+            raise TypeError(
+                "coo_array expects (data, (row, col)) or a COOArray."
+            ) from exc
 
-    try:
-        data, coords = arg
-        row, col = coords
-    except Exception as exc:
-        raise TypeError("coo_array expects (data, (row, col)) or a COOArray.") from exc
-
-    data = ensure_mx_array(data)
-    row = ensure_mx_array(row)
-    col = ensure_mx_array(col)
+        data = ensure_mx_array(data)
+        row = ensure_mx_array(row)
+        col = ensure_mx_array(col)
+        has_canonical_format = bool(canonical)
 
     if mode != "none":
         validate_coo_metadata(data, row, col, shape)
     if mode == "full":
-        validate_coo_values(row, col, shape)
+        validate_coo_values(row, col, shape, canonical=has_canonical_format)
+
+    if isinstance(arg, COOArray):
+        return arg
 
     return COOArray(
         data=data,
         row=row,
         col=col,
         shape=shape,
-        has_canonical_format=bool(canonical),
+        has_canonical_format=has_canonical_format,
     )

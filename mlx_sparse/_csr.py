@@ -44,7 +44,7 @@ class CSRArray:
     column indices ``indices[indptr[i] : indptr[i+1]]``. Duplicate column
     entries are permitted unless the matrix is in canonical form.
 
-    **Format invariants** (checked by ``validate="metadata"`` by default):
+    **Format invariants** (checked by :func:`csr_array` by default):
 
     - All three arrays must be rank-1.
     - ``data.shape[0] == indices.shape[0]`` (the ``nnz`` count).
@@ -59,11 +59,15 @@ class CSRArray:
     - ``indptr[0] == 0``, ``indptr[-1] == nnz``.
     - ``indptr`` is monotonically nondecreasing.
     - ``0 <= indices[j] < n_cols`` for all stored values.
+    - Declared sorted indices are nondecreasing within each row.
+    - Declared canonical indices are strictly increasing within each row.
 
     ``CSRArray`` is immutable (frozen dataclass). Structural operations return
     new instances. The ``sorted_indices`` and ``has_canonical_format`` flags are
     metadata hints. Set them only when the input is already known to satisfy
     those properties. Use ``canonicalize()`` to sort and sum duplicates.
+    Construct through :func:`csr_array` to validate buffers and declarations.
+    Direct ``CSRArray`` construction only normalizes the shape.
 
     Args:
         data: Non-zero values, shape ``(nnz,)``.
@@ -73,8 +77,7 @@ class CSRArray:
         sorted_indices: Hint that column indices within each row are sorted
             ascending. Defaults to ``False``.
         has_canonical_format: Hint that the matrix has sorted column indices
-            and no duplicate column index in any row. Implies
-            ``sorted_indices=True``. Defaults to ``False``.
+            and no duplicate column index in any row. Defaults to ``False``.
 
     Example::
 
@@ -649,7 +652,8 @@ def csr_array(
               dtype as *indices*.
 
             Alternatively, an existing :class:`CSRArray` instance (returned
-            unchanged if ``shape`` matches).
+            unchanged if ``shape`` matches and the selected validation passes).
+            Existing arrays retain their stored format flags.
 
         shape: Matrix dimensions as a length-2 sequence ``(n_rows, n_cols)``.
         validate: Validation level, one of:
@@ -657,15 +661,20 @@ def csr_array(
             - ``"metadata"`` *(default)*: checks ranks, lengths, and dtypes
               without reading array values. Safe to call on device arrays.
             - ``"full"`` / ``True``: also verifies ``indptr`` monotonicity
-              and column index bounds. May synchronize to host.
+              and endpoints, column index bounds, and any declared sorted or
+              canonical format. May synchronize to host.
             - ``False`` / ``"none"``: skips buffer validation. Shape
               normalization and input unpacking still apply.
 
         sorted_indices: Set to ``True`` to assert that column indices within
-            each row are already sorted ascending. Default ``False``.
+            each row are nondecreasing. Duplicates are allowed. Checked under
+            full validation and trusted otherwise. Applies to buffer triples.
+            Default ``False``.
         canonical: Set to ``True`` to assert canonical format (sorted indices,
             no duplicate columns). Implies ``sorted_indices=True``. Default
-            ``None`` (not asserted).
+            ``None`` (not asserted). Checked under full validation and trusted
+            otherwise. Applies to buffer triples and does not sort or combine
+            entries.
 
     Returns:
         A :class:`CSRArray` with the given buffers and shape.
@@ -674,7 +683,8 @@ def csr_array(
         TypeError: If ``arg`` is not a 3-tuple or a ``CSRArray``, or if dtype
             constraints are violated.
         ValueError: If ``validate`` is unsupported or shape or length
-            constraints are violated.
+            constraints are violated, or full validation finds invalid pointers,
+            out-of-bounds indices, or a false format declaration.
 
     Example::
 
@@ -700,27 +710,38 @@ def csr_array(
             raise ValueError(
                 f"CSRArray shape mismatch: got {array.shape}, expected {shape}."
             )
-        return array
+        data, indices, indptr = array.data, array.indices, array.indptr
+        sorted_indices = array.sorted_indices
+        has_canonical_format = array.has_canonical_format
+    else:
+        try:
+            data, indices, indptr = arg
+        except Exception as exc:
+            raise TypeError(
+                "csr_array expects (data, indices, indptr) or a CSRArray instance."
+            ) from exc
 
-    try:
-        data, indices, indptr = arg
-    except Exception as exc:
-        raise TypeError(
-            "csr_array expects (data, indices, indptr) or a CSRArray instance."
-        ) from exc
-
-    data = ensure_mx_array(data)
-    indices = ensure_mx_array(indices)
-    indptr = ensure_mx_array(indptr)
+        data = ensure_mx_array(data)
+        indices = ensure_mx_array(indices)
+        indptr = ensure_mx_array(indptr)
+        has_canonical_format = bool(canonical) if canonical is not None else False
+        if has_canonical_format:
+            sorted_indices = True
 
     if mode != "none":
         validate_csr_metadata(data, indices, indptr, shape)
     if mode == "full":
-        validate_csr_values(indices, indptr, shape, data.shape[0])
+        validate_csr_values(
+            indices,
+            indptr,
+            shape,
+            data.shape[0],
+            sorted_indices=sorted_indices,
+            canonical=has_canonical_format,
+        )
 
-    has_canonical_format = bool(canonical) if canonical is not None else False
-    if has_canonical_format:
-        sorted_indices = True
+    if isinstance(arg, CSRArray):
+        return arg
 
     return CSRArray(
         data=data,
