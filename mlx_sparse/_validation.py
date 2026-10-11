@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from numbers import Number
 
 import mlx.core as mx
+import numpy as np
 
 from mlx_sparse._host import to_numpy
 from mlx_sparse._typing import INDEX_DTYPES, VALUE_DTYPES, Shape2D, ValidationMode
@@ -157,11 +158,46 @@ def validate_csc_metadata(
         )
 
 
+def _validate_compressed_order(
+    indices: np.ndarray,
+    indptr: np.ndarray,
+    *,
+    sorted_indices: bool,
+    canonical: bool,
+    array_name: str,
+    segment_name: str,
+) -> None:
+    """Check adjacent indices after pointer and bounds validation."""
+    if not (sorted_indices or canonical) or indices.size < 2:
+        return
+
+    # Each comparison is stored at its right entry. Clear segment boundaries,
+    # including repeated pointers for empty segments, without expanding row IDs.
+    invalid = np.zeros(indices.size + 1, dtype=np.bool_)
+    compare = np.less_equal if canonical else np.less
+    compare(indices[1:], indices[:-1], out=invalid[1:-1])
+    invalid[indptr] = False
+    if invalid.any():
+        entry = int(invalid.argmax())
+        segment = int(np.searchsorted(indptr, entry, side="right")) - 1
+        assertion = "canonical=True" if canonical else "sorted_indices=True"
+        order = "strictly increasing" if canonical else "nondecreasing"
+        raise ValueError(
+            f"{array_name} {assertion} requires {order} indices within each "
+            f"{segment_name}. Found indices {indices[entry - 1]} and "
+            f"{indices[entry]} in {segment_name} {segment} at entries "
+            f"{entry - 1} and {entry}."
+        )
+
+
 def validate_csr_values(
     indices: mx.array,
     indptr: mx.array,
     shape: Shape2D,
     nnz: int,
+    *,
+    sorted_indices: bool = False,
+    canonical: bool = False,
 ) -> None:
     indices_np = to_numpy(indices)
     indptr_np = to_numpy(indptr)
@@ -181,6 +217,14 @@ def validate_csr_values(
                 "CSRArray indices must be in bounds for n_cols="
                 f"{shape[1]}, got min={min_index}, max={max_index}."
             )
+    _validate_compressed_order(
+        indices_np,
+        indptr_np,
+        sorted_indices=sorted_indices,
+        canonical=canonical,
+        array_name="CSRArray",
+        segment_name="row",
+    )
 
 
 def validate_csc_values(
@@ -188,6 +232,9 @@ def validate_csc_values(
     indptr: mx.array,
     shape: Shape2D,
     nnz: int,
+    *,
+    sorted_indices: bool = False,
+    canonical: bool = False,
 ) -> None:
     indices_np = to_numpy(indices)
     indptr_np = to_numpy(indptr)
@@ -207,6 +254,14 @@ def validate_csc_values(
                 "CSCArray indices must be in bounds for n_rows="
                 f"{shape[0]}, got min={min_index}, max={max_index}."
             )
+    _validate_compressed_order(
+        indices_np,
+        indptr_np,
+        sorted_indices=sorted_indices,
+        canonical=canonical,
+        array_name="CSCArray",
+        segment_name="column",
+    )
 
 
 def validate_coo_metadata(
@@ -233,7 +288,9 @@ def validate_coo_metadata(
         )
 
 
-def validate_coo_values(row: mx.array, col: mx.array, shape: Shape2D) -> None:
+def validate_coo_values(
+    row: mx.array, col: mx.array, shape: Shape2D, *, canonical: bool = False
+) -> None:
     row_np = to_numpy(row)
     col_np = to_numpy(col)
     if row_np.size:
@@ -251,6 +308,20 @@ def validate_coo_values(row: mx.array, col: mx.array, shape: Shape2D) -> None:
             raise ValueError(
                 "COOArray col coordinates must be in bounds for n_cols="
                 f"{shape[1]}, got min={min_col}, max={max_col}."
+            )
+    if canonical and row_np.size > 1:
+        # Compare coordinates directly so large logical shapes cannot overflow
+        # an integer row-major key.
+        invalid = row_np[1:] < row_np[:-1]
+        invalid |= (row_np[1:] == row_np[:-1]) & (col_np[1:] <= col_np[:-1])
+        if invalid.any():
+            entry = int(invalid.argmax()) + 1
+            raise ValueError(
+                "COOArray canonical=True requires coordinates sorted by row "
+                "then column without duplicates. "
+                f"Entries {entry - 1} and {entry} are "
+                f"({row_np[entry - 1]}, {col_np[entry - 1]}) and "
+                f"({row_np[entry]}, {col_np[entry]})."
             )
 
 

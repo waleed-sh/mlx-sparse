@@ -56,6 +56,11 @@ duplicate entries. A container marked canonical is trusted by conversion
 helpers. Incorrect index buffers or false canonical metadata are not repaired
 by choosing a solver. See :doc:`validation`.
 
+Use the corresponding ``csr_array``, ``csc_array``, or ``coo_array`` constructor
+with ``validate="full"`` to check index buffers and declared format flags
+before solving. The default metadata validation does not verify index values
+or canonical declarations.
+
 Structural validation does not prove symmetry, positive definiteness,
 nonsingularity, or numerical rank. Checks for NaN and infinity also vary between
 entry points. Use finite matrix values, right-hand sides, and initial guesses.

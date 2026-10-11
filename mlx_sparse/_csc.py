@@ -50,6 +50,11 @@ class CSCArray:
     matvec, column-oriented canonicalization, and future direct factorization
     kernels.
 
+    Construct through :func:`csc_array` to validate buffers and declarations.
+    Full validation checks pointer endpoints, monotonicity, index bounds,
+    and any declared sorted or canonical format. Direct ``CSCArray``
+    construction only normalizes the shape.
+
     Args:
         data: Non-zero values, shape ``(nnz,)``.
         indices: Row indices, shape ``(nnz,)``.
@@ -58,8 +63,7 @@ class CSCArray:
         sorted_indices: Hint that row indices within each column are sorted
             ascending. Defaults to ``False``.
         has_canonical_format: Hint that the matrix has sorted row indices and
-            no duplicate row index in any column. Implies
-            ``sorted_indices=True``. Defaults to ``False``.
+            no duplicate row index in any column. Defaults to ``False``.
     """
 
     data: mx.array
@@ -434,22 +438,27 @@ def csc_array(
               the same integer dtype as *indices*.
 
             An existing :class:`CSCArray` is returned unchanged when its
-            shape matches ``shape``.
+            shape matches ``shape`` and the selected validation passes.
+            Existing arrays retain their stored format flags.
         shape: Matrix dimensions as a length-2 sequence ``(n_rows, n_cols)``.
         validate: Validation level, one of:
 
             - ``"metadata"`` *(default)*: checks ranks, lengths, and dtypes
               without reading buffer values.
             - ``"full"`` / ``True``: also checks column pointer endpoints,
-              monotonicity, and row index bounds. May synchronize to host.
+              monotonicity, row index bounds, and any declared sorted or
+              canonical format. May synchronize to host.
             - ``False`` / ``"none"``: skips buffer validation. Shape
               normalization and input unpacking still apply.
 
         sorted_indices: Set to ``True`` to assert that row indices within
-            each column are sorted in ascending order. Default ``False``.
+            each column are nondecreasing. Duplicates are allowed. Checked
+            under full validation and trusted otherwise. Applies to buffer
+            triples. Default ``False``.
         canonical: Set to ``True`` to assert sorted indices with no duplicate
             rows within a column. Implies ``sorted_indices=True``. Default
-            ``None``.
+            ``None``. Checked under full validation and trusted otherwise.
+            Applies to buffer triples and does not sort or combine entries.
 
     Returns:
         A :class:`CSCArray` with the supplied buffers and shape.
@@ -458,7 +467,8 @@ def csc_array(
         TypeError: If ``arg`` cannot be unpacked as a buffer triple or buffer
             dtypes are unsupported under the selected validation mode.
         ValueError: If ``validate`` is unsupported or shape or buffer
-            constraints are violated.
+            constraints are violated, or full validation finds invalid pointers,
+            out-of-bounds indices, or a false format declaration.
 
     Example::
 
@@ -479,27 +489,38 @@ def csc_array(
             raise ValueError(
                 f"CSCArray shape mismatch: got {array.shape}, expected {shape}."
             )
-        return array
+        data, indices, indptr = array.data, array.indices, array.indptr
+        sorted_indices = array.sorted_indices
+        has_canonical_format = array.has_canonical_format
+    else:
+        try:
+            data, indices, indptr = arg
+        except Exception as exc:
+            raise TypeError(
+                "csc_array expects (data, indices, indptr) or a CSCArray instance."
+            ) from exc
 
-    try:
-        data, indices, indptr = arg
-    except Exception as exc:
-        raise TypeError(
-            "csc_array expects (data, indices, indptr) or a CSCArray instance."
-        ) from exc
-
-    data = ensure_mx_array(data)
-    indices = ensure_mx_array(indices)
-    indptr = ensure_mx_array(indptr)
+        data = ensure_mx_array(data)
+        indices = ensure_mx_array(indices)
+        indptr = ensure_mx_array(indptr)
+        has_canonical_format = bool(canonical) if canonical is not None else False
+        if has_canonical_format:
+            sorted_indices = True
 
     if mode != "none":
         validate_csc_metadata(data, indices, indptr, shape)
     if mode == "full":
-        validate_csc_values(indices, indptr, shape, data.shape[0])
+        validate_csc_values(
+            indices,
+            indptr,
+            shape,
+            data.shape[0],
+            sorted_indices=sorted_indices,
+            canonical=has_canonical_format,
+        )
 
-    has_canonical_format = bool(canonical) if canonical is not None else False
-    if has_canonical_format:
-        sorted_indices = True
+    if isinstance(arg, CSCArray):
+        return arg
 
     return CSCArray(
         data=data,
