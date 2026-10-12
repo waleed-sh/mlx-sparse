@@ -19,11 +19,13 @@ from __future__ import annotations
 import mlx.core as mx
 
 import mlx_sparse._native as _native
+from mlx_sparse.experimental import experimental
 from mlx_sparse.linalg.utils.arrays import ensure_rank1_or_rank2_rhs
 from mlx_sparse.linalg.utils.factorization import as_csr as _as_csr
 from mlx_sparse.linalg.utils.factorization import float32_csr as _float32_csr
 
 
+@experimental
 def spsolve_triangular(
     A,
     b,

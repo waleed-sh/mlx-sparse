@@ -20,6 +20,7 @@ import mlx.core as mx
 
 import mlx_sparse._native as _native
 from mlx_sparse._csr import CSRArray
+from mlx_sparse.experimental import experimental
 from mlx_sparse.linalg.utils.arrays import ensure_array
 from mlx_sparse.linalg.utils.factorization import (
     ACCELERATE_ONLY_METHODS as _ACCELERATE_ONLY_METHODS,
@@ -82,6 +83,7 @@ class SparseCholesky:
             object.__setattr__(self, "_upper_factor", upper)
         return upper
 
+    @experimental
     def solve(self, b) -> mx.array:
         """Solve ``A @ x = b`` using the stored Cholesky factor.
 
@@ -137,6 +139,7 @@ class SparseLU:
 
         return self.L.shape
 
+    @experimental
     def solve(self, b) -> mx.array:
         """Solve ``A @ x = b`` using the stored LU factors.
 
@@ -187,6 +190,7 @@ class FactorizedSolve:
     rhs_size: int
     solution_size: int
 
+    @experimental
     def solve(self, b) -> mx.array:
         """Solve for one or more right-hand sides using the stored factorization.
 
@@ -206,6 +210,7 @@ class FactorizedSolve:
         return self.solve(b)
 
 
+@experimental
 def sparse_cholesky(A, *, upper: bool = False) -> SparseCholesky:
     """Compute the sparse Cholesky factorization ``A = L @ L.T``.
 
@@ -276,6 +281,7 @@ def sparse_cholesky(A, *, upper: bool = False) -> SparseCholesky:
     )
 
 
+@experimental
 def cholesky(A, *, upper: bool = False) -> SparseCholesky:
     """Alias for :func:`sparse_cholesky`.
 
@@ -298,6 +304,7 @@ def cholesky(A, *, upper: bool = False) -> SparseCholesky:
     return sparse_cholesky(A, upper=upper)
 
 
+@experimental
 def sparse_lu(A) -> SparseLU:
     """Compute the sparse LU factorization ``P @ A = L @ U``.
 
@@ -375,6 +382,7 @@ def sparse_lu(A) -> SparseLU:
     )
 
 
+@experimental
 def splu(A) -> SparseLU:
     """Alias for :func:`sparse_lu`.
 
@@ -397,6 +405,7 @@ def splu(A) -> SparseLU:
     return sparse_lu(A)
 
 
+@experimental
 def factorized(A, *, method: str = "auto") -> FactorizedSolve:
     """Factorize a sparse matrix once and return a reusable solve object.
 
@@ -485,6 +494,7 @@ def factorized(A, *, method: str = "auto") -> FactorizedSolve:
     )
 
 
+@experimental
 def spsolve(A, b) -> mx.array:
     """Solve the sparse linear system ``A @ x = b`` directly.
 

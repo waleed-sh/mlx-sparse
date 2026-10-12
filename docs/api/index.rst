@@ -9,6 +9,7 @@ API reference
    random
    operations
    configuration
+   experimental
    runtime
    linalg
    device
