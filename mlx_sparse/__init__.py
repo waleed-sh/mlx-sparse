@@ -43,7 +43,7 @@ Typical usage::
     Ah = A.H  # Hermitian (conjugate) transpose
 """
 
-from mlx_sparse import linalg, random, runtime
+from mlx_sparse import experimental, linalg, random, runtime
 from mlx_sparse._capabilities import (
     capabilities,
     has_capability,
@@ -122,6 +122,7 @@ from mlx_sparse._ops import (
     todense,
 )
 from mlx_sparse._typing import is_available
+from mlx_sparse.experimental import ExperimentalWarning
 
 try:
     from mlx_sparse._version import __version__
@@ -155,6 +156,8 @@ def issparse(x) -> bool:
 
 
 __all__ = [
+    "ExperimentalWarning",
+    "experimental",
     "COOArray",
     "CSCArray",
     "CSRArray",

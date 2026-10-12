@@ -17,6 +17,10 @@
 > [solver limitations guide](https://mlx-sparse.readthedocs.io/en/latest/user_guide/solver_limitations.html).
 > **This list is not exhaustive.** Other unexpected behavior, including incorrect
 > results, may still occur. Check solver results before relying on them.
+> APIs with audited risks of silently incorrect results emit experimental
+> warnings with a documentation link. After reviewing the limitations, set
+> `mlx_sparse.config.EXPERIMENTAL = True` to silence them. This does not change
+> solver behavior. See the [experimental API guide](docs/api/experimental.rst).
 >
 > A lot of the functionality is new and is currently being tested.
 > We welcome any and all feedback! Not all solvers are GPU supported ([see the solver support matrix](https://mlx-sparse.readthedocs.io/en/latest/user_guide/linalg_solvers.html)).

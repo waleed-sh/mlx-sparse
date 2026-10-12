@@ -17,6 +17,7 @@ from __future__ import annotations
 import mlx.core as mx
 
 import mlx_sparse._native as _native
+from mlx_sparse.experimental import experimental
 from mlx_sparse.linalg.utils.arrays import finite_scalar as _finite_scalar
 from mlx_sparse.linalg.utils.arrays import host_bool as _host_bool
 from mlx_sparse.linalg.utils.bicgstab import (
@@ -66,6 +67,7 @@ def _normalize_bicgstab_tolerances(rtol, tol, atol) -> tuple[float, float]:
     return float(rtol_value), float(atol_value)
 
 
+@experimental
 def cg(
     A,
     b,

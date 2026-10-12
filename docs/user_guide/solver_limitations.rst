@@ -8,6 +8,13 @@ that are not checked at entry and cases where a returned result needs an
 independent check. See :doc:`linalg_solvers` for available methods and device
 coverage, and :doc:`preconditioners` for preconditioner construction.
 
+Entry points with audited risks of silently incorrect results now emit an
+experimental warning with a link to this guide. See
+:doc:`../api/experimental` for the marked APIs and warning policy.
+After reviewing the limitations, ``mlx_sparse.config.EXPERIMENTAL = True``
+silences these warnings. It does not change the solver or verify its result.
+An unmarked solver can still have undocumented defects.
+
 The comparisons below use established implementations such as PETSc,
 SLEPc, SuperLU, CHOLMOD, PROPACK, and PRIMME. They identify specific capabilities
 and accuracy controls. They do not imply that one method is fastest for every

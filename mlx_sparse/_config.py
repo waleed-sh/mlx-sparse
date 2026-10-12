@@ -649,6 +649,19 @@ class ConfigManager:
         return dict(arg1)
 
     def _register_default_options(self) -> None:
+        self.define_bool(
+            "EXPERIMENTAL",
+            default=False,
+            doc=(
+                "Acknowledge documented experimental API limitations and silence "
+                "experimental warnings. This setting does not change algorithms "
+                "or their accuracy guarantees."
+            ),
+            env_default="MLX_SPARSE_EXPERIMENTAL",
+            role="warnings",
+            mutability=ConfigMutability.RUNTIME,
+            include_in_fingerprint=False,
+        )
         self.define_option(
             "CPU_THREADS",
             default="auto",

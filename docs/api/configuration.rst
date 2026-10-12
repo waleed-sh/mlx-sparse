@@ -87,6 +87,13 @@ overhead when more than one worker is configured.
 Experimental controls
 ---------------------
 
+``EXPERIMENTAL=True`` acknowledges documented experimental API limitations and
+silences their warnings. It does not change solver behavior or accuracy.
+See :doc:`experimental` for marked APIs, warning filters, and the registry.
+This option is excluded from configuration fingerprints because it only
+controls notification. The setting is process-wide, including inside
+``config_context``.
+
 .. list-table::
    :header-rows: 1
 
@@ -94,6 +101,11 @@ Experimental controls
      - Environment variable
      - Default
      - Meaning
+   * - ``EXPERIMENTAL``
+     - ``MLX_SPARSE_EXPERIMENTAL``
+     - ``False``
+     - Acknowledges experimental API limitations and silences experimental
+       warnings. Independent of the Metal SpGEMM implementation control.
    * - ``EXPERIMENTAL_METAL_SPGEMM``
      - ``MLX_SPARSE_EXPERIMENTAL_METAL_SPGEMM``
      - ``False``

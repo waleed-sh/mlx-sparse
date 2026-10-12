@@ -7,7 +7,9 @@ mlx-sparse v0.0.6b1 (Unreleased)
 New Features
 ~~~~~~~~~~~~
 
-* None.
+* Add an experimental API decorator and central warning registry. Notices
+  identify documented solver risks and link to the limitations guide.
+  ``config.EXPERIMENTAL=True`` acknowledges the risks and silences the notices.
 
 Improvements
 ~~~~~~~~~~~~
@@ -71,6 +73,9 @@ Bug fixes
 Tests
 ~~~~~
 
+* Check experimental warning locations, runtime and environment controls,
+  nested calls, numerical result preservation, and signature-aware registry
+  matching. Validate overload and method dispatch with Plum when installed.
 * Cover format declarations, empty compressed segments, explicit zeros,
   existing-array validation, native conversion flags, and large logical shapes.
   Compare compressed format checks with SciPy.
@@ -95,6 +100,8 @@ Benchmarks
 Documentation
 ~~~~~~~~~~~~~
 
+* Document experimental API policy, configuration, registry entries, and
+  multiple dispatch. Include registered notices in solver docstrings.
 * Document sorted and canonical declarations, existing-array validation, and
   the cost of full validation. Warn about incorrect results from false flags.
 * Add a solver limitations guide covering numerical assumptions, accuracy
